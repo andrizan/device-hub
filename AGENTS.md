@@ -1,102 +1,114 @@
 # GPUI Device HUB
 
-ブラウザ (www.mouse.fit / hub.xsyd.top) を開きっぱなしにせずにマウス・キーボードを設定する、
-Windows 用の個人 GPUI アプリ。デザインは Liquid Glass。
+A personal GPUI app for Windows that configures mice and keyboards
+without leaving a browser (www.mouse.fit / hub.xsyd.top) open. The design is Liquid Glass.
 
-## 構成
+## Layout
 
 ```
-crates/devhub-core   契約 v2 (model / backend トレイト) + keys + registry + デモバックエンド   ← UI と HID の境界
-crates/devhub-hid    実機ドライバ (HID)                                                       ← バックエンド担当
-crates/device-hub    GPUI フロントエンド (Liquid Glass)                                         ← フロント担当
-vendor/              GPU backdrop を足した gpui-pre / gpui-pre-windows (GPU backdrop パッチ)
-docs/NEXT_TASKS.md      次にやること (v4)
-docs/LAMZU_MAYA_X_V2_AUDIT2.md  LAMZU MAYA X V2 再監査 (要修正 P1/P2・名前の対応表・作業順)
-docs/POLLING_RATE.md    ポーリング実測の検証と改善案 (2700Hz 問題)
-docs/OBS_OVERLAY.md     OBS オーバーレイ (デザイン・アプリ側エディタ・設定ファイル連携)
-docs/LIVE_LIGHTING.md   ライブライティング (DirectDrive) とキーボード UI 改善 + バックエンド依頼
-docs/AUDIO_FRONTEND.md  USB DAC (TP55 / WalkPlay) の EQ 画面と契約の使い方
-docs/BACKEND_BRIEF.md   Web HUB 完全移植の機能表 (v3)
-docs/ADD_DEVICE.md      新デバイス追加の手順 (別セッション/別エージェント向け)
-docs/PROTOCOL_NOTES.md  Web configurator の解析結果 (コマンド表・アドレス・機能一覧)
-docs/FRONTEND.md        フロントエンドの構造
+crates/devhub-core   contract v2 (model / backend traits) + keys + registry + demo backend   ← boundary between UI and HID
+crates/devhub-hid    real-device drivers (HID)                                                ← backend side
+crates/device-hub    GPUI frontend (Liquid Glass)                                             ← frontend side
+vendor/              gpui-pre / gpui-pre-windows with a GPU backdrop added (GPU backdrop patch)
+docs/NEXT_TASKS.md      what to do next (v4)
+docs/LAMZU_MAYA_X_V2_AUDIT2.md  LAMZU MAYA X V2 re-audit (fixes needed P1/P2, name mapping table, work order)
+docs/POLLING_RATE.md    verification of the measured polling rate and improvement proposals (the 2700Hz issue)
+docs/OBS_OVERLAY.md     OBS overlay (design, in-app editor, settings-file integration)
+docs/LIVE_LIGHTING.md   live lighting (DirectDrive), keyboard UI improvements + backend requests
+docs/AUDIO_FRONTEND.md  EQ page for USB DACs (TP55 / WalkPlay) and how the contract is used
+docs/BACKEND_BRIEF.md   feature table for the complete Web HUB port (v3)
+docs/ADD_DEVICE.md      steps for adding a new device (for another session / another agent)
+docs/PROTOCOL_NOTES.md  results of analyzing the web configurators (command tables, addresses, feature lists)
+docs/FRONTEND.md        frontend structure
 ```
 
-## 現状 (2026-11-15)
+## Current status (2026-11-15)
 
-- フロントエンド: 全画面 (ホーム / DPI / ボタン / 性能 / キー割り当て / トリガー / 高度キー / ライティング /
-  マクロ / テスト / 一般 / アプリ設定) + 元に戻す・プリセット・コマンドパレット・キャリブレーション・ウィザード +
-  サイドバー電池/スリープ表示・磁気ボタン押下深さ・フォント選択 (同梱フォント+永続化)・
-  ファームウェア更新通知 (crates/devhub-update)・操作完了トースト。docs/FRONTEND.md。
-- NEXT_TASKS v4 の §1–§6 は完了。HTX Ultra 3950 有線 (33e4:5618) も実機検証済み
-  (全設定読み・SPDT/ポーリング UI 書き込み・LOD/DPI/ボタン/マクロ — docs/PROTOCOL_NOTES §1.4)。
-- 実機検証済 (HTX Ultra 3950 有線、2026-11): SPDT @8 bit0/1 (両接点でクリック判定→遅延低減)、
-  LOD 非 index {0.7→3, 1→1, 2→2}、ポーリング 125–8K、競技モード、デバウンス押下/解放/ホイール、
-  モーション同期・直線補正・リップル・センサー角度・スリープ・長距離モード。
-- 契約: v2 (`Capabilities` + `DeviceState` + 細粒度 `Change` + `HubEvent::Info` で本体側状態変化を通知)。
-- devhub-hid: 実装済 — `transport.rs` (feature/output/input report) + `mousefit.rs`
-  (feature-report 用に温存、現行機種は使わない) + `mousefit8.rs` (report-8/EEPROM、有線・ドングル共通)
-  + `xsyd.rs` (SU66 Max) + `atk.rs` (ATK HUB 系、report-8/EEPROM、CID/MID 機種確定)。
-  v1 時代のコードは `legacy/`、解析用に取得した配布原本は Git 管理外（`.private-analysis/`）。
-  検証用 example: `enum` (列挙) / `kbdiff` (SU66 差分読み出し) / `lite2e` (ライティング往復) / `tp55e2e` (TP55 EQ 往復)
-  / `atkprobe` (ATK 生 EEPROM) / `atkread` (ATK ドライバ経路の読み書き往復)。
-- **mouse.fit 経路**: 有線 5219 もドングル 3854 も feature report を持たず
-  report-8/EEPROM のみ → 全機種 `mousefit8.rs`。
-- 実機検証済 (2026-11-15): HTS Plus Pro 有線+無線 (全設定・DPI・ボタン・マクロ・ポーリング 125–8K・
-  磁気ボタン校正・押下深さ・**休眠検知**: コマンドタイムアウト+受信沈黙で asleep、覚醒で自動再読・
-  **ShortcutKey は `[count][press][release逆順][crc]` のコンパクト列・RT は en<<7|val RMW、
-  トリガーは公式通り 1-20 表示=EEPROM-1** — いずれも実機往復確認 `htse2e`)、
-  SU66 Max (キーマップ・ライティング・**キーごと性能・ポーリング・OS/防チャタ/スリープ・
-  構成4・高度キー・マクロ・live_travel・キャリブレーション** — いずれも実機で読み書き確認)、
-  ATK F1 V3 ULTIMATE+ **有線+ドングル両経路** (CID/MID 検出・FW 1.33・電池・DPI+ステージ色・
-  ポーリング 8K・LOD **0.7–1.7mm 0.1刻み実機確認**・モーション同期/直線補正/リップル・
-  ホイール/クリックデバウンス・スリープ・移動中LED消灯・bhop・ShortcutKey ボタン Key 読み書き・
-  プロファイル4・工場リセット — いずれも往復確認。**ドングル 373b:1278** は同一 16B プロトコル
-  中継 + cmd29 ドングル FW + 休眠検知 (asleep/HubEvent・覚醒で CID/MID 再確定)。
-  未対応: マクロ @768・dynamicSensitivity・sensorAngle・BT・FW 更新 — §4)。
+- Frontend: all pages (Home / DPI / Buttons / Performance / Key mapping / Triggers / Advanced keys / Lighting /
+  Macros / Test / General / App settings) + undo, presets, command palette, calibration, wizard +
+  sidebar battery/sleep display, magnetic-button press depth, font selection (bundled fonts + persistence),
+  firmware update notifications (crates/devhub-update), operation-complete toasts. docs/FRONTEND.md.
+- NEXT_TASKS v4 §1–§6 are done. HTX Ultra 3950 wired (33e4:5618) is also verified on hardware
+  (all settings read, SPDT/polling UI writes, LOD/DPI/buttons/macros — docs/PROTOCOL_NOTES §1.4).
+- Verified on hardware (HTX Ultra 3950 wired, 2026-11): SPDT @8 bit0/1 (click detected on both contacts → lower latency),
+  LOD non-index {0.7→3, 1→1, 2→2}, polling 125–8K, competitive mode, debounce press/release/wheel,
+  motion sync, straight-line correction, ripple, sensor angle, sleep, long-distance mode.
+- Contract: v2 (`Capabilities` + `DeviceState` + fine-grained `Change` + `HubEvent::Info` to report state changes made on the device itself).
+- devhub-hid: implemented — `transport.rs` (feature/output/input report) + `mousefit.rs`
+  (kept for feature reports, not used by current models) + `mousefit8.rs` (report-8/EEPROM, shared by wired and dongle)
+  + `xsyd.rs` (SU66 Max) + `atk.rs` (ATK HUB family, report-8/EEPROM, model resolved from CID/MID).
+  Code from the v1 era is in `legacy/`; the original vendor distributions fetched for analysis are kept out of Git (`.private-analysis/`).
+  Verification examples: `enum` (enumeration) / `kbdiff` (SU66 diff read) / `lite2e` (lighting round trip) / `tp55e2e` (TP55 EQ round trip)
+  / `atkprobe` (ATK raw EEPROM) / `atkread` (ATK read/write round trip through the driver path).
+- **mouse.fit path**: neither wired 5219 nor dongle 3854 has a feature report, only
+  report-8/EEPROM → every model uses `mousefit8.rs`.
+- Verified on hardware (2026-11-15): HTS Plus Pro wired+wireless (all settings, DPI, buttons, macros, polling 125–8K,
+  magnetic-button calibration, press depth, **sleep detection**: asleep on command timeout + receive silence, automatic re-read on wake,
+  **ShortcutKey is a compact `[count][press][release reversed][crc]` sequence, RT is an en<<7|val RMW,
+  triggers follow the official one: displayed 1-20 = EEPROM-1** — all confirmed by round trip on hardware with `htse2e`),
+  SU66 Max (keymap, lighting, **per-key performance, polling, OS/debounce/sleep,
+  config 4, advanced keys, macros, live_travel, calibration** — all confirmed by read and write on hardware),
+  ATK F1 V3 ULTIMATE+ **both wired and dongle paths** (CID/MID detection, FW 1.33, battery, DPI + stage colors,
+  polling 8K, LOD **0.7–1.7mm in 0.1 steps confirmed on hardware**, motion sync / straight-line correction / ripple,
+  wheel/click debounce, sleep, LED off while moving, bhop, ShortcutKey button Key read/write,
+  profile 4, factory reset — all confirmed by round trip. **Dongle 373b:1278** relays the same 16B protocol
+  + cmd29 dongle FW + sleep detection (asleep/HubEvent, CID/MID re-resolved on wake).
+  Unsupported: macro @768, dynamicSensitivity, sensorAngle, BT, FW update — §4).
 
-## ビルド / 実行
+- Added 2026-11-18 (details and evidence in docs/PROTOCOL_NOTES §6–§7):
+  - `ry.rs` — RongYuan (VID 3151). Fantech MAXFIT81 on the cable (id 694): key remapping on both layers,
+    debounce and auto-OS, verified on hardware. Fantech Tanto PRO WG13P (id 3109) through its 2.4G receiver
+    (3151:402d) and on its cable (3151:4026): DPI, buttons, report rate, lift-off, angle snap, debounce,
+    verified on hardware on both; battery through the receiver only.
+    **Do not add lighting / options writes for the MAXFIT81 without reading §6.3**: they locked up its
+    control endpoint twice (re-plug needed).
+  - `bt.rs` + `earfun.rs` — Bluetooth RFCOMM transport and the EarFun GAIA driver (Air Pro 4+, untested).
+    EarFun Wave Pro and HUAWEI FreeBuds SE 3 are listed as detected only.
+  - Examples: `ryprobe` (raw read-only), `ryread` (through the driver, `--roundtrip` writes and restores),
+    `btprobe` (Bluetooth firmware query).
+
+## Build / run
 
 ```bash
-cargo run -p device-hub                  # 実機 (HID が開けなければ自動でデモ)
-cargo run --release -p device-hub        # 普段使いは release (起動・描画・メモリが軽い)
-DEVHUB_DEMO=1 cargo run -p device-hub    # 常にデモ
-DEVHUB_FAST=1 cargo run -p device-hub    # GPU ガラス無効
-cargo run -p devhub-hid --example enum   # HID 列挙
-cargo run -p devhub-obs --example preview # OBS 無しでオーバーレイ描画を PNG 確認
+cargo run -p device-hub                  # real device (falls back to the demo automatically if HID cannot be opened)
+cargo run --release -p device-hub        # use release for everyday use (lighter startup, rendering, memory)
+DEVHUB_DEMO=1 cargo run -p device-hub    # always demo
+DEVHUB_FAST=1 cargo run -p device-hub    # GPU glass off
+cargo run -p devhub-hid --example enum   # HID enumeration
+cargo run -p devhub-obs --example preview # check the overlay rendering as a PNG without OBS
 cargo clippy --workspace
 ```
 
-## OBS プラグイン (devhub-obs)
+## OBS plugin (devhub-obs)
 
-`crates/devhub-obs` は cdylib の OBS ソースプラグイン (「Device HUB Live」)。
-磁気キー (SU66 `live_axis`) と磁気ボタン (HTS `live_buttons`) の押下深さを
-ライブ描画する。obs.dll は実行時に GetProcAddress で解決するので
-obs.lib / C++ ツールチェーン無しでビルドできる。
+`crates/devhub-obs` is a cdylib OBS source plugin ("Device HUB Live").
+It draws the press depth of magnetic keys (SU66 `live_axis`) and magnetic buttons (HTS `live_buttons`)
+live. obs.dll is resolved at run time with GetProcAddress, so it
+builds without obs.lib / a C++ toolchain.
 
 ```bash
 cargo build --release -p devhub-obs
-# インストール (OBS 30.2+ は %APPDATA%\plugins を読まない → ProgramData):
+# Install (OBS 30.2+ does not read %APPDATA%\plugins → use ProgramData):
 mkdir -p "/c/ProgramData/obs-studio/plugins/devhub_obs/bin/64bit"
 cp target/release/devhub_obs.dll "/c/ProgramData/obs-studio/plugins/devhub_obs/bin/64bit/"
-# OBS を起動 → ソース追加 → 「Device HUB Live」
-# 診断ログ: %TEMP%\devhub_obs.log (create / tex / 初回描画のみ)
-# 見た目・表示キーは Device HUB の「OBS オーバーレイ」画面 → %APPDATA%\DeviceHub\obs_overlay.json (docs/OBS_OVERLAY.md)
-# デザイン確認: cargo run -p devhub-obs --example gallery
+# Start OBS → add a source → "Device HUB Live"
+# Diagnostic log: %TEMP%\devhub_obs.log (only create / tex / first draw)
+# Look and displayed keys are set on the "OBS overlay" page of Device HUB → %APPDATA%\DeviceHub\obs_overlay.json (docs/OBS_OVERLAY.md)
+# Check the design: cargo run -p devhub-obs --example gallery
 ```
 ```
 
-Rust toolchain は `rust-toolchain.toml` で 1.95.0 固定 (gpui-kit 0.9.1 の要求)。
-Linux でも `cargo check` は通る (gpui-pre-wgpu は vendor の backdrop を知らないので、Linux で
-ビルドするときだけ `.cargo/config.toml` で wgpu 側に 2 行のパッチが要る — Windows では不要)。
+The Rust toolchain is pinned to 1.95.0 in `rust-toolchain.toml` (required by gpui-kit 0.9.1).
+`cargo check` also passes on Linux (gpui-pre-wgpu does not know the vendor backdrop, so only when
+building on Linux does the wgpu side need a 2-line patch in `.cargo/config.toml` — not needed on Windows).
 
-## 守ること
+## Rules
 
-- **UI は caps だけを見て出し分ける**。デバイス名・VID/PID で UI を分岐させない。
-  新しいデバイスは registry + ドライバだけで増える。
-- スカラーな設定は `SettingSpec`、ボタン 1 つの操作は `ActionSpec` で宣言する (契約を変えずに UI に出る)。
-- 契約 (`devhub-core/src/model.rs`) を変えるときは**追加のみ**。demo.rs も更新する。
-- `Window::paint_backdrop` は `device-hub/src/glass.rs` 経由でだけ呼ぶ。
-- `vendor/` のパッチは上流 (crates.io `gpui-pre`/`gpui-pre-windows` 0.3.11) への最小差分に留める。
-  改変箇所には `DEVHUB` のコメントを付ける (`vendor/README.md` 参照)。
-- Web 版のタブを開いたまま実機を操作しない (HID を取り合う)。
+- **The UI decides what to show from caps only.** Do not branch the UI on device name or VID/PID.
+  A new device is added with just a registry entry + a driver.
+- Declare scalar settings with `SettingSpec` and single-button operations with `ActionSpec` (they appear in the UI without changing the contract).
+- When changing the contract (`devhub-core/src/model.rs`), **only add**. Update demo.rs too.
+- Call `Window::paint_backdrop` only through `device-hub/src/glass.rs`.
+- Keep the patches in `vendor/` to a minimal diff against upstream (crates.io `gpui-pre`/`gpui-pre-windows` 0.3.11).
+  Mark each changed place with a `DEVHUB` comment (see `vendor/README.md`).
+- Do not operate the real device while a Web version tab is open (they compete for HID).

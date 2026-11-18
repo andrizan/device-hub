@@ -1,91 +1,111 @@
-# デバイス追加手順 (新しいマウス / キーボードを対応させる)
+# Adding a device (supporting a new mouse / keyboard)
 
-この手順は **別のセッション・別のエージェント・別の環境** でもそのまま使えるように、
-前提知識なしで読めるように書いてある。
+This procedure is written so that it can be used as is in **another session, another agent, or another environment**,
+and can be read without any prior knowledge.
 
-- UI (`crates/device-hub`) は**変更不要**。ドライバが `Capabilities` を返せば画面は自動で出る。
-- 作業場所は `crates/devhub-core/src/registry.rs` (1 行) と `crates/devhub-hid/src/<driver>/` (プロトコル)。
+- The UI (`crates/device-hub`) needs **no changes**. Once the driver returns `Capabilities`, the screens appear automatically.
+- The work happens in `crates/devhub-core/src/registry.rs` (1 line) and `crates/devhub-hid/src/<driver>/` (protocol).
 
-## 現在の対応表
+## Current support table
 
-| デバイス | VID:PID | usage page | ドライバ | Web 版 | 状態 |
+| Device | VID:PID | usage page | Driver | Web version | Status |
 |---|---|---|---|---|---|
-| SU66 Max | 1CA6:3009 | FFB0 / 01 | Xsyd (`xsyd.rs`) | hub.xsyd.top/keyboard | **v2 実機検証済** (キーマップ・ライティング・per-key 性能・ポーリング・設定・構成・高度キー・マクロ・live_travel・キャリブレーション) |
-| HTS Plus Pro (無線) | ドングル 33E4:3854 | FF02 / 02 | Mousefit → `mousefit8.rs` (report-8/EEPROM) | www.mouse.fit | **v2 実機検証済** (全設定・DPI・ボタン・マクロ・ポーリング 125–8K・磁気ボタン校正/押下深さ・休眠検知/覚醒自動再読) |
-| HTS Plus Pro (有線) | 33E4:5219 | FF02 / 02 | Mousefit → `mousefit8.rs` (report-8/EEPROM) | www.mouse.fit | **v2 実機検証済** (有線でも feature report は使えず report-8) |
-| HTX Ultra | 33E4:5608, 5617, 5618, 5619 | FF02 / 02 (推定) | Mousefit | www.mouse.fit | 機種表から登録 / 未検証 |
-| ATK F1 Ultimate | 未確定 | 未確定 | 未確定 | (mouse.fit の機種表に無い) | §7 を参照 |
+| SU66 Max | 1CA6:3009 | FFB0 / 01 | Xsyd (`xsyd.rs`) | hub.xsyd.top/keyboard | **v2 verified on hardware** (keymap, lighting, per-key performance, polling, settings, configuration, advanced keys, macros, live_travel, calibration) |
+| HTS Plus Pro (wireless) | dongle 33E4:3854 | FF02 / 02 | Mousefit → `mousefit8.rs` (report-8/EEPROM) | www.mouse.fit | **v2 verified on hardware** (all settings, DPI, buttons, macros, polling 125–8K, magnetic-button calibration/press depth, sleep detection / automatic re-read on wake) |
+| HTS Plus Pro (wired) | 33E4:5219 | FF02 / 02 | Mousefit → `mousefit8.rs` (report-8/EEPROM) | www.mouse.fit | **v2 verified on hardware** (feature reports do not work even on the cable; report-8 is used) |
+| HTX Ultra | 33E4:5608, 5617, 5618, 5619 | FF02 / 02 (presumed) | Mousefit | www.mouse.fit | registered from the model table / unverified |
+| ATK F1 Ultimate | TBD | TBD | TBD | (not in mouse.fit's model table) | See §7 |
+| Fantech MAXFIT81 (cable) | 3151:4010 | FFFF / 02 | Ry (`ry.rs`) | — | **Verified on hardware**: reads; writes for keys (both layers), debounce, auto-OS. Lighting / options / sleep / profiles are read-only on purpose (PROTOCOL_NOTES §6.3) |
+| RongYuan 2.4G keyboard receiver (the MAXFIT81's) | 3151:4011 | FFFF / 02 | Ry (`ry.rs`) | — | Generic entry: receiver status read; relay to the keyboard unverified |
+| Fantech Tanto PRO WG13P (2.4G receiver) | 3151:402D | FFFF / 02 | Ry (`ry.rs`) | — | **Verified on hardware**: DPI stages, buttons, report rate, lift-off, angle snap, debounce, battery, sleep detection |
+| Fantech Tanto PRO WG13P (cable) | 3151:4026 | FFFF / 02 | Ry (`ry.rs`) | — | **Verified on hardware**: the same settings, written and restored directly. No battery reading on the cable |
+| EarFun Air Pro 4+ | Bluetooth name | SPP `1101` | Earfun (`earfun.rs`) | — | Written from protocol notes; not tested on a unit (PROTOCOL_NOTES §7) |
+| EarFun Wave Pro, HUAWEI FreeBuds SE 3 | Bluetooth name | — | none | — | Detected only; no settings protocol |
 
-**接続方式でプロトコルが変わる点に注意**: mouse.fit の新プロトコル (64B feature report) は
-有線機種専用 — 8K ドングルは Windows の feature report を一切持たず、ドングル経由は
-16B report-8/EEPROM 経路 (`mousefit8.rs`) でしか設定できない。ドングル経由の内側機種は
-report-8 では問い合わせられないので、registry の model で機種差を引く (3854 は
-ペア機種を仮定する)。
+Bluetooth devices are not in `KNOWN`: they are matched by their paired name in `registry::KNOWN_BT` and opened
+over RFCOMM (`crates/devhub-hid/src/bt.rs`).
+
+RongYuan products share USB ids with other vendors' boards, so a registry entry must not claim the whole id:
+
+- `registry::SHARED_IDS` lists such ids with a piece of the HID product string; `match_device` only matches
+  when the product string contains it. Another mouse on 3151:4026 is simply not listed.
+- A keyboard receiver (3151:4011) names no product, so it is listed as "2.4G keyboard receiver" and named by
+  the driver once the keyboard behind it answers.
+- `ry.rs` asks the device for its id before every first read or write (`RyDriver::board`) and refuses ids
+  outside `BOARDS`. A receiver whose device is asleep opens with empty capabilities; nothing is assumed.
+
+When adding a board on a shared id, add both the `SHARED_IDS` line and the `BOARDS` entry.
+
+**Note that the protocol changes with the connection type**: mouse.fit's new protocol (64B feature report) is
+for wired models only — the 8K dongle has no Windows feature report at all, and through the dongle you can
+configure the mouse only via the 16B report-8/EEPROM path (`mousefit8.rs`). The model behind a dongle cannot be
+queried with report-8, so model differences are looked up from the registry's model (3854 assumes
+the paired model).
 
 ---
 
-## 0. 全体の流れ
+## 0. Overall flow
 
-1. デバイスを識別する (VID / PID / usage page)
-2. Web configurator を解析する (JS を読む + 通信を記録する)
-3. registry に登録する → この時点で UI に「検出済み・未対応」と出る
-4. ドライバを書く (caps → read → apply → actions)
-5. フレームを fixtures に保存してテストを書く
-6. 実機で検証し、docs を更新する
+1. Identify the device (VID / PID / usage page)
+2. Analyze the web configurator (read the JS + record the traffic)
+3. Register it in the registry → at this point the UI shows it as "detected, unsupported"
+4. Write the driver (caps → read → apply → actions)
+5. Save frames to fixtures and write tests
+6. Verify on hardware and update the docs
 
-## 1. 識別
+## 1. Identification
 
 ```bash
-cargo run -p devhub-hid --example enum      # 全 HID インターフェースを列挙
+cargo run -p devhub-hid --example enum      # enumerate all HID interfaces
 ```
 
-記録するもの: **VID, PID, product string, usage_page, usage, interface 番号, 接続方式**
-(有線 / 2.4G ドングル / 8K ドングルで PID が変わることが多い — すべて記録)。
+What to record: **VID, PID, product string, usage_page, usage, interface number, connection type**
+(the PID often changes between wired / 2.4G dongle / 8K dongle — record them all).
 
-設定用のインターフェースは vendor-defined (`usage_page >= 0xFF00`) のことがほとんど。
-PowerShell なら `Get-PnpDevice -Class HIDClass | ft FriendlyName, InstanceId` でも PID が分かる。
+The configuration interface is almost always vendor-defined (`usage_page >= 0xFF00`).
+In PowerShell, `Get-PnpDevice -Class HIDClass | ft FriendlyName, InstanceId` also shows the PID.
 
-## 2. Web configurator の解析
+## 2. Analyzing the web configurator
 
-### 2.1 JS バンドルを手に入れる
+### 2.1 Getting the JS bundles
 
-Chrome / Edge で configurator を開き、DevTools の Console で:
+Open the configurator in Chrome / Edge and, in the DevTools Console:
 
 ```js
-// 読み込まれた JS と JSON の一覧
+// list of loaded JS and JSON
 performance.getEntriesByType('resource').map(r => r.name).filter(u => /\.(js|json|wasm)/.test(u))
 ```
 
-Vite 系 (mouse.fit, hub.xsyd.top) は画面ごとにチャンクが分かれている。本体の JS を `fetch` して
-`/[\w\-]+\-[\w]{8}\.js/g` で参照されているチャンク名を集め、全部 `fetch` すると全コードが手に入る。
-保存したいときは Sources タブで右クリック → Save as、もしくは:
+Vite-based sites (mouse.fit, hub.xsyd.top) split the code into chunks per screen. `fetch` the main JS, collect the
+chunk names it references with `/[\w\-]+\-[\w]{8}\.js/g`, and `fetch` them all to get the whole code.
+To save it, right-click in the Sources tab → Save as, or:
 
 ```js
 const t = await fetch(URL).then(r => r.text());
 const a = Object.assign(document.createElement('a'), {href: URL.createObjectURL(new Blob([t])), download: 'bundle.js'}); a.click();
 ```
 
-### 2.2 どこを読むか
+### 2.2 Where to read
 
-| 探す文字列 | 分かること |
+| String to look for | What it tells you |
 |---|---|
-| `requestDevice` / `filters` / `vendorId` / `usagePage` | 対応 VID/PID・設定用インターフェース |
-| `sendFeatureReport` / `receiveFeatureReport` | feature report 型 (mouse.fit 系) |
-| `sendReport` / `inputreport` | output/input report 型 (xsyd 系) |
-| `reportId` / `new Uint8Array(65)` / `new Uint8Array(64)` | フレーム長 |
-| `Crc` / `checksum` / `^=` | チェックサム・難読化 |
-| 日本語/英語の UI 文言 (i18n 辞書) | **機能の全一覧** (caps に何を宣言すべきか) |
-| `env-models.json` のような設定 JSON | **機種ごとの値の範囲** (caps の値そのもの) |
-| `J(this,"getXxx"` / `async getXxx(` | プロトコルクラスのメソッド = 操作の全一覧 |
-| `{ReportRate:0, ...}` のような定数オブジェクト | アドレス表・コマンド番号 |
+| `requestDevice` / `filters` / `vendorId` / `usagePage` | supported VID/PID, configuration interface |
+| `sendFeatureReport` / `receiveFeatureReport` | feature report type (mouse.fit family) |
+| `sendReport` / `inputreport` | output/input report type (xsyd family) |
+| `reportId` / `new Uint8Array(65)` / `new Uint8Array(64)` | frame length |
+| `Crc` / `checksum` / `^=` | checksum / obfuscation |
+| Japanese/English UI text (i18n dictionary) | **the full list of features** (what to declare in caps) |
+| a settings JSON such as `env-models.json` | **per-model value ranges** (the caps values themselves) |
+| `J(this,"getXxx"` / `async getXxx(` | methods of the protocol class = the full list of operations |
+| constant objects such as `{ReportRate:0, ...}` | address tables, command numbers |
 
-結果は自分の言葉で整理し、出典と実機での確認範囲を添えて `docs/PROTOCOL_NOTES.md` に追記する。
-取得した配布ファイルやコードの抜粋は Git 管理外に置く。通信記録をテストに使う場合は、
-必要な HID レポートだけを取り出し、シリアル番号や個人設定が含まれていないか確認する。
+Organize the results in your own words and append them to `docs/PROTOCOL_NOTES.md` with the source and the range
+confirmed on hardware. Keep the distribution files and code excerpts you obtained outside Git. If you use traffic
+captures in tests, extract only the HID reports you need and check that they contain no serial numbers or personal settings.
 
-### 2.3 通信を記録する (フィールド位置の確定)
+### 2.3 Recording the traffic (to pin down field positions)
 
-configurator の JS より先に、次のスニペットを Console に貼ってから「接続」すると、全送受信がログに出る:
+Before reading the configurator's JS, paste the following snippet into the Console and then "connect"; all traffic is logged:
 
 ```js
 (() => {
@@ -106,100 +126,100 @@ configurator の JS より先に、次のスニペットを Console に貼って
 })();
 ```
 
-**1 項目だけ変えて送信の差分を見る** のが最速 (例: DPI を 800 → 1600 に変えて、どのバイトが変わるか)。
-USBPcap + Wireshark でも取れるが、WebHID のフックの方が速い。
+**Changing just one item and looking at the difference in what is sent** is the fastest way (e.g. change DPI from 800 to 1600 and see which bytes change).
+USBPcap + Wireshark can capture it too, but hooking WebHID is faster.
 
-### 2.4 フィクスチャとして保存
+### 2.4 Saving as fixtures
 
 ```
 crates/devhub-hid/fixtures/<model>/
-  read_dpi.req.bin   read_dpi.resp.bin   read_dpi.md   ← 何のフレームか・何が読めるか
+  read_dpi.req.bin   read_dpi.resp.bin   read_dpi.md   ← what the frame is and what can be read from it
   set_dpi_1600.req.bin ...
 ```
 
-実機が無い環境・別のエージェントでもテストを書けるようにする。
+This lets another agent, or an environment without the device, write tests.
 
-## 3. registry に登録
+## 3. Register in the registry
 
-`crates/devhub-core/src/registry.rs` の `KNOWN` に 1 行 (接続方式ごとに 1 行ずつ):
+One line in `KNOWN` in `crates/devhub-core/src/registry.rs` (one line per connection type):
 
 ```rust
 KnownDevice {
     vid: 0x1234, pid: 0x5678,
     usage_page: Some(0xFF00), usage: Some(0x01),
     kind: DeviceKind::Mouse,
-    vendor: "Vendor", model: "model-id", name: "表示名",
+    vendor: "Vendor", model: "model-id", name: "Display name",
     transport: Transport::Wired,
-    driver: DriverKind::Mousefit,   // 既存プロトコルで話せるならそれ、無ければ §4.3
+    driver: DriverKind::Mousefit,   // use this if an existing protocol can talk to it, otherwise §4.3
     verified: false,
 },
 ```
 
-これだけで `cargo run -p device-hub` のサイドバーに「未対応」として出る (`supported=false`)。
+With just this, the device appears in the sidebar of `cargo run -p device-hub` as "unsupported" (`supported=false`).
 
-## 4. ドライバ
+## 4. Driver
 
-### 4.1 既存プロトコル系列に機種を足す場合
+### 4.1 Adding a model to an existing protocol family
 
-例: mouse.fit の別の G-Wolves マウス → `src/mousefit/models.rs` の機種表に env-models.json の行を足すだけ。
-caps は機種表から自動で組み立てる作りにしておく (BACKEND_BRIEF §4)。
+Example: another G-Wolves mouse on mouse.fit → just add the env-models.json row to the model table in `src/mousefit/models.rs`.
+Build caps automatically from the model table (BACKEND_BRIEF §4).
 
-### 4.2 caps の書き方
+### 4.2 How to write caps
 
-`crates/devhub-core/src/demo.rs` が完全な見本。
+`crates/devhub-core/src/demo.rs` is a complete example.
 
-- スカラーな設定 → `SettingSpec::toggle / slider / choice` (section を選ぶ)。id は BACKEND_BRIEF §2 の表に合わせる。
-- 操作 → `ActionSpec` (危険なら `.danger("確認文")`、ファイルを選ばせるなら `.file(&["bin"])`)。
-- マウス → `MouseCaps` (DPI 範囲・ステージ数・ボタン名・割り当て可能な種類・マクロ)。
-- キーボード → `KeyboardCaps` (layout は registry に関数を足す・catalog はデバイスのキーコード空間・PerfCaps・高度キー)。
-- 照明 → `LightArea` (エフェクト一覧と色/速度/方向の有無)。
-- **デバイスに無い機能は宣言しない。** UI はそれで勝手に隠す。
+- Scalar settings → `SettingSpec::toggle / slider / choice` (pick the section). Match the id to the table in BACKEND_BRIEF §2.
+- Operations → `ActionSpec` (`.danger("confirmation text")` if dangerous, `.file(&["bin"])` if it should ask for a file).
+- Mouse → `MouseCaps` (DPI range, number of stages, button names, assignable kinds, macros).
+- Keyboard → `KeyboardCaps` (for the layout, add a function to the registry; the catalog is the device's key-code space; PerfCaps; advanced keys).
+- Lighting → `LightArea` (effect list, and whether color/speed/direction exist).
+- **Do not declare features the device does not have.** The UI hides them automatically.
 
-### 4.3 新しいプロトコル系列
+### 4.3 A new protocol family
 
-1. `crates/devhub-core/src/model.rs` の `DriverKind` に variant を足す。
-2. `crates/devhub-hid/src/<name>/mod.rs` に `DeviceDriver` を実装。
-3. `crates/devhub-hid/src/lib.rs` の `driver()` と `driver_ready()` に分岐を足す。
+1. Add a variant to `DriverKind` in `crates/devhub-core/src/model.rs`.
+2. Implement `DeviceDriver` in `crates/devhub-hid/src/<name>/mod.rs`.
+3. Add branches to `driver()` and `driver_ready()` in `crates/devhub-hid/src/lib.rs`.
 
-### 4.4 実装のチェックリスト
+### 4.4 Implementation checklist
 
-- [ ] `info()` に firmware / dongle firmware / battery
-- [ ] `caps()` が Web 版の機能一覧 (i18n 辞書) と一致している
-- [ ] `read()` で全項目。読めない項目は map に入れない
-- [ ] `apply()` が全 `Change` variant を処理 (未対応は `Err(Unsupported)` ではなく、caps で宣言しない)
-- [ ] 必要なら保存コマンド (電源断で戻らないこと)
-- [ ] 抜去で `Err(Disconnected)`、無線スリープで `asleep`
-- [ ] fixtures を使った単体テスト
+- [ ] `info()` has firmware / dongle firmware / battery
+- [ ] `caps()` matches the web version's feature list (i18n dictionary)
+- [ ] `read()` covers every item. Items that cannot be read do not go into the map
+- [ ] `apply()` handles every `Change` variant (for unsupported ones, do not return `Err(Unsupported)`; do not declare them in caps)
+- [ ] a save command if needed (so values do not revert after a power loss)
+- [ ] `Err(Disconnected)` on unplug, `asleep` on wireless sleep
+- [ ] unit tests using fixtures
 
-## 5. 検証
+## 5. Verification
 
-1. `DEVHUB_DEMO` なしで起動 → デバイスを開く → 全タブを一通り操作。
-2. 各値を Web 版で確認 (ブラウザを開くのは検証のときだけ。開いたままアプリを使わない)。
-3. 抜き差し・電源再投入で保持されることを確認。
-4. registry の `verified: true`、この文書の対応表、PROTOCOL_NOTES を更新。
+1. Start without `DEVHUB_DEMO` → open the device → try every tab.
+2. Check each value in the web version (open the browser only for verification; do not use the app while it is open).
+3. Confirm that the values persist across unplug/replug and power cycles.
+4. Update `verified: true` in the registry, the table in this document, and PROTOCOL_NOTES.
 
-## 6. よくある落とし穴
+## 6. Common pitfalls
 
-- usage page を照合しないと、同じ VID の別インターフェース (キーボード入力そのもの等) を開いてしまう。
-- hidapi の write は先頭 1 バイトが report ID (0 でも必要) → 64B フレームは 65B で送る。
-- hidapi の read は **unnumbered report では report ID が付かない** (xsyd は buf[0] がデータ先頭、
-  report-8 のような numbered では buf[0] が ID)。`transport::Channel::recv` は生バッファを返すので
-  プロトコル側で判定する。
-- **WebHID の `sendFeatureReport` が通ることと Windows の `HidD_SetFeature` が通ることは別**。
-  ドングルのように feature report を持たない IF では Web 版もその経路は使えない
-  (JS は try/catch で握り潰しているのでサイト上は「何も起きない」だけ)。実機で
-  `send_feature_report`/`get_feature_report` を試してからトランスポートを決めること。
-- 応答のデータ開始位置が 1 バイトずれる (mouse.fit は `r[6]` から)。
-- 無線ドングル経由では応答が遅い (commonDelay 20ms 程度を入れる)。マウス休眠中は
-  ドングルのみが「データ部全 0」で ACK を返す → `DeviceInfo.asleep`。
-- 書き込み後の読み戻しで値が丸められていることがある (DPI 刻み・mm×1000 の量子化)。
-- 同じ設定でも **接続経路で格納形式が違う**ことがある (mouse.fit の ReportRate@0 は
-  インデックスではなく新プロトコルと同じコード表)。Web 版の encode を最後まで追ってから決める。
+- If you do not match the usage page, you will open another interface with the same VID (such as the keyboard input itself).
+- hidapi's write needs the report ID in the first byte (even if it is 0) → send a 64B frame as 65B.
+- hidapi's read **does not prepend the report ID for unnumbered reports** (xsyd: buf[0] is the start of the data;
+  for numbered ones like report-8, buf[0] is the ID). `transport::Channel::recv` returns the raw buffer, so the
+  protocol side decides.
+- **WebHID's `sendFeatureReport` succeeding is not the same as Windows' `HidD_SetFeature` succeeding.**
+  On an IF that has no feature report, like the dongle, the web version cannot use that path either
+  (the JS swallows it with try/catch, so on the site "nothing happens"). Try
+  `send_feature_report`/`get_feature_report` on the real device before choosing the transport.
+- The start of the response data may be shifted by 1 byte (mouse.fit reads from `r[6]`).
+- Responses via a wireless dongle are slow (add a commonDelay of about 20ms). While the mouse is asleep,
+  only the dongle ACKs with an "all-zero data part" → `DeviceInfo.asleep`.
+- A value read back after a write may have been rounded (DPI step, mm×1000 quantization).
+- The same setting may have a **different storage format depending on the connection path** (mouse.fit's ReportRate@0 is
+  not an index but the same code table as the new protocol). Follow the web version's encode all the way before deciding.
 
-## 7. 未確定機種 (ATK F1 Ultimate など)
+## 7. Undetermined models (ATK F1 Ultimate etc.)
 
-1. 実機を挿して §1 で VID/PID/usage を取る。
-2. VID が `33E4` で mouse.fit の機種表に PID があれば Mousefit。無ければ:
-   - ATK / VXE 系の configurator (メーカーのサイトから辿る) を開き、§2 で解析する。
-   - mouse.fit の「デバイスに接続できませんか？」(LinkJump) の先も確認する。
-3. 既存プロトコルと同じなら registry に足すだけ。違えば §4.3。
+1. Plug in the real device and get VID/PID/usage with §1.
+2. If the VID is `33E4` and the PID is in mouse.fit's model table, it is Mousefit. Otherwise:
+   - Open the ATK / VXE-family configurator (follow the link from the manufacturer's site) and analyze it with §2.
+   - Also check where mouse.fit's "Can't connect to the device?" (LinkJump) leads.
+3. If it is the same as an existing protocol, just add it to the registry. If it differs, see §4.3.

@@ -1,4 +1,4 @@
-//! 「一般」タブ: デバイス情報・プロファイル・バックアップ・その他の設定とメンテナンス。
+//! "General" tab: device info, profiles, backup, other settings and maintenance.
 
 use crate::app::{Modal, Shell, Tab};
 use crate::theme;
@@ -19,7 +19,7 @@ impl Shell {
         let state = s.state.clone();
         let did = s.id.clone();
 
-        // ---- 情報
+        // ---- Info
         let kv = |k: &str, v: String| {
             div()
                 .flex()
@@ -35,28 +35,30 @@ impl Shell {
                 )
                 .child(div().flex_1().text_size(px(12.5)).text_color(p.fg).child(v))
         };
-        let info_card = ui::card_titled("デバイス情報", "info", None).child(
+        let info_card = ui::card_titled("Device info", "info", None).child(
             ui::body()
                 .pb(px(14.))
-                .child(kv("製品", format!("{} {}", info.vendor, info.name)))
+                .child(kv("Product", format!("{} {}", info.vendor, info.name)))
                 .child(kv("VID:PID", format!("{:04X}:{:04X}", info.vid, info.pid)))
                 .child(kv(
-                    "ファームウェア",
+                    "Firmware",
                     info.firmware.clone().unwrap_or_else(|| "-".into()),
                 ))
                 .when_some(info.dongle_firmware.clone(), |d, f| {
-                    d.child(kv("レシーバー", f))
+                    d.child(kv("Receiver", f))
                 })
-                .when_some(info.serial.clone(), |d, f| d.child(kv("シリアル", f)))
+                .when_some(info.serial.clone(), |d, f| d.child(kv("Serial", f)))
                 .child(kv(
-                    "ドライバ",
+                    "Driver",
                     match info.driver {
-                        DriverKind::Xsyd => "XSYD (hub.xsyd.top 互換)".into(),
-                        DriverKind::Mousefit => "mouse.fit 互換".into(),
-                        DriverKind::Walkplay => "WalkPlay (peq.szwalkplay.com 互換)".into(),
-                        DriverKind::Atk => "ATK HUB 互換".into(),
-                        DriverKind::Lamzu => "LAMZU Aurora 互換".into(),
-                        DriverKind::Unsupported => "未対応".into(),
+                        DriverKind::Xsyd => "XSYD (hub.xsyd.top compatible)".into(),
+                        DriverKind::Mousefit => "mouse.fit compatible".into(),
+                        DriverKind::Walkplay => "WalkPlay (peq.szwalkplay.com compatible)".into(),
+                        DriverKind::Atk => "ATK HUB compatible".into(),
+                        DriverKind::Lamzu => "LAMZU Aurora compatible".into(),
+                        DriverKind::Ry => "RongYuan (VID 3151) compatible".into(),
+                        DriverKind::Earfun => "EarFun (GAIA / Bluetooth)".into(),
+                        DriverKind::Unsupported => "Unsupported".into(),
                     },
                 ))
                 .child(kv("ID", info.id.0.clone())),
@@ -66,7 +68,7 @@ impl Shell {
         let presets = self.presets_card(&model, cx);
         let mut cards: Vec<AnyElement> = vec![info_card.into_any_element(), presets];
 
-        // ---- ファームウェア更新 (あれば最上段へ)
+        // ---- Firmware update (at the top if there is one)
         if let Some(up) = self
             .hub
             .fw_status
@@ -74,7 +76,7 @@ impl Shell {
             .filter(|u| u.new_available)
             .cloned()
         {
-            let mut line = "新しいファームウェアが公開されています".to_string();
+            let mut line = "A new firmware has been released".to_string();
             if let Some(v) = &up.version {
                 line = format!("{line} ({v})");
             }
@@ -88,12 +90,12 @@ impl Shell {
                         .pb(px(6.))
                         .child(line),
                 )
-                .child(ui::faint(format!("最終確認: {ago}")));
+                .child(ui::faint(format!("Last checked: {ago}")));
             let mut row = div().flex().items_center().gap(px(8.)).pt(px(10.));
             if let Some(url) = up.url.clone() {
                 row = row.child(ui::button(
                     "fw-open",
-                    "公式ページを開く",
+                    "Open the official page",
                     Some("download"),
                     Btn::Primary,
                     cx,
@@ -102,7 +104,7 @@ impl Shell {
             }
             row = row.child(ui::button(
                 "fw-dismiss",
-                "閉じる",
+                "Close",
                 Some("x"),
                 Btn::Glass,
                 cx,
@@ -114,13 +116,13 @@ impl Shell {
             body = body.child(row);
             cards.insert(
                 0,
-                ui::card_titled("ファームウェア更新", "info", None)
+                ui::card_titled("Firmware update", "info", None)
                     .child(body)
                     .into_any_element(),
             );
         }
 
-        // ---- プロファイル
+        // ---- Profiles
         if let (Some(pc), Some(st)) = (caps.profiles.clone(), state.as_ref()) {
             if pc.count > 1 {
                 let mut body = ui::body().pb(px(14.));
@@ -132,9 +134,7 @@ impl Shell {
                         .get(i as usize)
                         .filter(|n| !n.is_empty())
                         .cloned();
-                    let shown = name
-                        .clone()
-                        .unwrap_or_else(|| format!("プロファイル {}", i + 1));
+                    let shown = name.clone().unwrap_or_else(|| format!("Profile {}", i + 1));
                     let mut row = div()
                         .flex()
                         .items_center()
@@ -155,11 +155,11 @@ impl Shell {
                                 .child(format!("P{}", i + 1)),
                         )
                         .child(div().flex_1().text_size(px(13.)).child(shown.clone()))
-                        .when(active, |d| d.child(ui::chip("使用中", p.ok)));
+                        .when(active, |d| d.child(ui::chip("In use", p.ok)));
                     if !active {
                         row = row.child(ui::button(
                             format!("prof-use-{i}"),
-                            "切り替え",
+                            "Switch",
                             None,
                             Btn::Glass,
                             cx,
@@ -178,7 +178,7 @@ impl Shell {
                             cx,
                             move |this, w, cx| {
                                 this.modal = Some(Modal::Text {
-                                    title: format!("P{} の名前", i + 1),
+                                    title: format!("P{} name", i + 1),
                                     on_ok: Rc::new(move |this, v, _, cx| {
                                         this.apply(
                                             Change::ProfileName {
@@ -199,24 +199,24 @@ impl Shell {
                     body = body.child(row);
                 }
                 cards.push(
-                    ui::card_titled("オンボードプロファイル", "layers", None)
+                    ui::card_titled("Onboard profiles", "layers", None)
                         .child(body)
                         .into_any_element(),
                 );
             }
         }
 
-        // ---- バックアップ
+        // ---- Backup
         let name = info.name.clone();
-        let backup = ui::card_titled("バックアップ", "hard-drive-download", None).child(
+        let backup = ui::card_titled("Backup", "hard-drive-download", None).child(
             ui::body()
                 .pb(px(12.))
                 .child(ui::row_first(
-                    "設定を書き出す",
-                    Some("現在の全設定を JSON ファイルに保存"),
+                    "Export settings",
+                    Some("Save all current settings to a JSON file"),
                     ui::button(
                         "export",
-                        "書き出し",
+                        "Export",
                         Some("download"),
                         Btn::Glass,
                         cx,
@@ -233,23 +233,23 @@ impl Shell {
                                     .map(|s| std::fs::write(&f, s))
                                 {
                                     Ok(Ok(())) => this.toast(
-                                        format!("保存しました: {}", f.display()),
+                                        format!("Saved: {}", f.display()),
                                         false,
                                         cx,
                                     ),
-                                    Ok(Err(e)) => this.toast(format!("保存に失敗: {e}"), true, cx),
-                                    Err(e) => this.toast(format!("保存に失敗: {e}"), true, cx),
+                                    Ok(Err(e)) => this.toast(format!("Save failed: {e}"), true, cx),
+                                    Err(e) => this.toast(format!("Save failed: {e}"), true, cx),
                                 }
                             }
                         },
                     ),
                 ))
                 .child(ui::row(
-                    "設定を読み込む",
-                    Some("書き出した JSON をこのデバイスへ書き込む"),
+                    "Import settings",
+                    Some("Write an exported JSON to this device"),
                     ui::button(
                         "import",
-                        "読み込み",
+                        "Import",
                         Some("upload"),
                         Btn::Glass,
                         cx,
@@ -268,7 +268,7 @@ impl Shell {
                                 });
                             match parsed {
                                 Ok(mut st) => {
-                                    // 別機種・非対応のファイルはここで弾く。
+                                    // Files for a different model or unsupported ones are rejected here.
                                     let compat = this
                                         .device_id()
                                         .and_then(|id| this.hub.session(&id))
@@ -277,7 +277,7 @@ impl Shell {
                                         });
                                     let Some((caps, cur)) = compat else {
                                         this.toast(
-                                            "デバイスの設定を読み込めていません",
+                                            "The device's settings have not been read yet",
                                             true,
                                             cx,
                                         );
@@ -286,45 +286,45 @@ impl Shell {
                                     match crate::store::state_compatible(&caps, &st) {
                                         Err(e) => {
                                             this.toast(
-                                                format!("読み込めません: {e}"),
+                                                format!("Cannot import: {e}"),
                                                 true,
                                                 cx,
                                             );
                                         }
                                         Ok(warn) => {
-                                            // ファイルは現在選択中の構成へだけ反映する。
+                                            // The file is applied only to the currently selected configuration.
                                             st.profile.active = cur.profile.active;
                                             let body = match &warn {
                                                 Some(w) => format!(
-                                                    "現在の構成をファイルの内容で上書きします ({w})。"
+                                                    "This overwrites the current configuration with the file's contents ({w})."
                                                 ),
-                                                None => "現在の構成をファイルの内容で上書きします。"
+                                                None => "This overwrites the current configuration with the file's contents."
                                                     .to_string(),
                                             };
                                             this.confirm(
-                                                "設定を読み込む",
+                                                "Import settings",
                                                 &body,
-                                                "書き込む",
+                                                "Write",
                                                 true,
                                                 Rc::new(move |this, _, cx| {
                                                     match this.apply_state(&st, true, cx) {
                                                         crate::app::RestoreOutcome::Applied(
                                                             n,
                                                         ) => this.toast(
-                                                            format!("{n} 項目を書き込みました"),
+                                                            format!("{n} items written"),
                                                             false,
                                                             cx,
                                                         ),
                                                         crate::app::RestoreOutcome::Switching => {
                                                             this.toast(
-                                                                "構成を切り替えて適用します…",
+                                                                "Switching configuration and applying…",
                                                                 false,
                                                                 cx,
                                                             )
                                                         }
                                                         crate::app::RestoreOutcome::Nothing => this
                                                             .toast(
-                                                                "適用できませんでした",
+                                                                "Could not apply",
                                                                 true,
                                                                 cx,
                                                             ),
@@ -335,7 +335,7 @@ impl Shell {
                                         }
                                     }
                                 }
-                                Err(e) => this.toast(format!("読み込めません: {e}"), true, cx),
+                                Err(e) => this.toast(format!("Cannot import: {e}"), true, cx),
                             }
                         },
                     ),
@@ -347,16 +347,18 @@ impl Shell {
         ui::grid2(cards).into_any_element()
     }
 
-    /// PC に保存するプリセットのカード。
+    /// Card for presets saved on the PC.
     fn presets_card(&mut self, model: &str, cx: &mut Context<Self>) -> AnyElement {
         let p = theme::pal();
         let list = crate::presets::list(model);
         let mut body = ui::body().pb(px(12.));
         if list.is_empty() {
-            body = body.child(ui::faint("まだありません。ゲームごとの設定などを保存しておくと、ワンクリックで切り替えられます。").py(px(8.)));
+            body = body.child(ui::faint("None yet. Save per-game settings and the like, and you can switch between them with one click.").py(px(8.)));
         } else {
-            body = body
-                .child(ui::faint("プリセットは現在選択中の構成にだけ反映されます。").py(px(6.)));
+            body = body.child(
+                ui::faint("A preset is applied only to the currently selected configuration.")
+                    .py(px(6.)),
+            );
         }
         for (i, pr) in list.iter().enumerate() {
             let (a, b, c) = (pr.clone(), pr.clone(), pr.clone());
@@ -371,13 +373,13 @@ impl Shell {
                     .child(div().flex_1().text_size(px(13.)).child(pr.name.clone()))
                     .child(ui::button(
                         format!("pre-apply-{i}"),
-                        "適用",
+                        "Apply",
                         Some("check"),
                         Btn::Glass,
                         cx,
                         move |this, _, cx| match crate::presets::load(&a) {
                             Ok(st) => this.apply_preset(&a.name, st, cx),
-                            Err(e) => this.toast(format!("読み込めません: {e}"), true, cx),
+                            Err(e) => this.toast(format!("Cannot load: {e}"), true, cx),
                         },
                     ))
                     .child(ui::icon_button(
@@ -387,7 +389,7 @@ impl Shell {
                         move |this, w, cx| {
                             let b = b.clone();
                             this.modal = Some(Modal::Text {
-                                title: "プリセット名を変更".into(),
+                                title: "Rename preset".into(),
                                 on_ok: Rc::new(move |this, v, _, cx| {
                                     if let Err(e) = crate::presets::rename(&b, v.trim()) {
                                         this.toast(e, true, cx);
@@ -405,12 +407,12 @@ impl Shell {
                         move |this, _, cx| {
                             let d = d.clone();
                             this.confirm(
-                                "プリセットを削除",
+                                "Delete preset",
                                 &format!(
-                                    "「{}」を削除します (デバイスの設定は変わりません)。",
+                                    "Delete \"{}\" (the device's settings will not change).",
                                     d.name
                                 ),
-                                "削除",
+                                "Delete",
                                 true,
                                 Rc::new(move |_this, _, cx| {
                                     let _ = crate::presets::delete(&d);
@@ -425,14 +427,14 @@ impl Shell {
         let model2 = model.to_string();
         let save = ui::button(
             "pre-save",
-            "現在の設定を保存",
+            "Save current settings",
             Some("plus"),
             Btn::Primary,
             cx,
             move |this, w, cx| {
                 let model = model2.clone();
                 this.modal = Some(Modal::Text {
-                    title: "プリセットとして保存".into(),
+                    title: "Save as preset".into(),
                     on_ok: Rc::new(move |this, v, _, cx| {
                         let name = v.trim().to_string();
                         if name.is_empty() {
@@ -442,8 +444,8 @@ impl Shell {
                             return;
                         };
                         match crate::presets::save(&model, &name, &st) {
-                            Ok(()) => this.toast(format!("「{name}」を保存しました"), false, cx),
-                            Err(e) => this.toast(format!("保存できません: {e}"), true, cx),
+                            Ok(()) => this.toast(format!("Saved \"{name}\""), false, cx),
+                            Err(e) => this.toast(format!("Cannot save: {e}"), true, cx),
                         }
                     }),
                 });
@@ -453,7 +455,7 @@ impl Shell {
             },
         );
         ui::card_titled(
-            "プリセット (この PC に保存)",
+            "Presets (saved on this PC)",
             "bookmark",
             Some(save.into_any_element()),
         )
@@ -462,7 +464,7 @@ impl Shell {
     }
 }
 
-/// 「最終確認」用の相対時刻。
+/// Relative time for "Last checked".
 fn fmt_ago(ts: u64) -> String {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -470,12 +472,12 @@ fn fmt_ago(ts: u64) -> String {
         .as_secs();
     let d = now.saturating_sub(ts);
     if d < 60 {
-        "たった今".into()
+        "just now".into()
     } else if d < 3600 {
-        format!("{} 分前", d / 60)
+        format!("{} min ago", d / 60)
     } else if d < 86400 {
-        format!("{} 時間前", d / 3600)
+        format!("{} h ago", d / 3600)
     } else {
-        format!("{} 日前", d / 86400)
+        format!("{} d ago", d / 86400)
     }
 }

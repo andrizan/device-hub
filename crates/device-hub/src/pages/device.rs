@@ -1,4 +1,4 @@
-//! デバイス画面の枠: ヘッダ (名前・接続・プロファイル・同期) + 浮いたタブ + 本文。
+//! Device screen frame: header (name, connection, profile, sync) + floating tabs + body.
 
 use crate::app::{tabs_for, Modal, PopItem, Shell, Tab};
 use crate::store::Status;
@@ -17,7 +17,7 @@ impl Shell {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(s) = self.hub.session(id) else {
-            // 一覧には居るがまだ開いていない (自動復帰直後など)。
+            // It is in the list but has not been opened yet (e.g. right after automatic restore).
             self.hub.open(id, true);
             return div().into_any_element();
         };
@@ -118,14 +118,15 @@ impl Shell {
             DeviceKind::Keyboard => "keyboard",
             DeviceKind::Other if info.driver == DriverKind::Walkplay => "headphones",
             DeviceKind::Other => "usb",
+            DeviceKind::Audio => "headphones",
         };
         let mut meta = vec![info.vendor.clone()];
         meta.push(
             match info.transport {
-                Transport::Wired => "有線",
+                Transport::Wired => "Wired",
                 Transport::Wireless24G => "2.4GHz",
                 Transport::Bluetooth => "Bluetooth",
-                Transport::Unknown => "接続方式不明",
+                Transport::Unknown => "Unknown connection",
             }
             .to_string(),
         );
@@ -133,17 +134,17 @@ impl Shell {
             meta.push(format!("FW {fw}"));
         }
         if let Some(fw) = &info.dongle_firmware {
-            meta.push(format!("レシーバー {fw}"));
+            meta.push(format!("Receiver {fw}"));
         }
 
-        // プロファイル切替。
+        // Profile switch.
         let profile_ctl = match (caps.as_ref().and_then(|c| c.profiles.clone()), profile) {
             (Some(pc), Some(ps)) if pc.count > 1 => {
                 let items: Vec<PopItem> = (0..pc.count)
                     .map(|i| {
                         let n = ps.names.get(i as usize).filter(|n| !n.is_empty()).cloned();
                         let mut it = PopItem::new(
-                            n.unwrap_or_else(|| format!("プロファイル {}", i + 1)),
+                            n.unwrap_or_else(|| format!("Profile {}", i + 1)),
                             i == ps.active,
                         );
                         it.sub = Some(format!("P{}", i + 1));
@@ -155,14 +156,14 @@ impl Shell {
                     .get(ps.active as usize)
                     .filter(|n| !n.is_empty())
                     .cloned()
-                    .unwrap_or_else(|| format!("プロファイル {}", ps.active + 1));
+                    .unwrap_or_else(|| format!("Profile {}", ps.active + 1));
                 let id2 = id.clone();
                 Some(
                     div()
                         .flex()
                         .items_center()
                         .gap(px(8.))
-                        .child(ui::faint("プロファイル"))
+                        .child(ui::faint("Profile"))
                         .child(ui::select(
                             "profile",
                             items,
@@ -218,9 +219,9 @@ impl Shell {
                 .gap(px(6.))
                 .child(ui::sync_dot(pending > 0))
                 .child(ui::faint(if pending > 0 {
-                    "書き込み中"
+                    "Writing"
                 } else {
-                    "同期済み"
+                    "Synced"
                 }))
                 .into_any_element()
         };
@@ -269,7 +270,7 @@ impl Shell {
                                     let idr = id_rename.clone();
                                     let orig = orig_name.clone();
                                     this.modal = Some(Modal::Text {
-                                        title: "表示名を変更".into(),
+                                        title: "Change display name".into(),
                                         on_ok: Rc::new(move |this, v, _, cx| {
                                             let v = v.trim().to_string();
                                             if v.is_empty() || v == orig {
@@ -316,7 +317,7 @@ impl Shell {
                 cx,
                 move |this, _, cx| {
                     this.hub.reload(&id_reload);
-                    this.toast("デバイスから読み直しています", false, cx);
+                    this.toast("Re-reading from the device", false, cx);
                 },
             ))
     }
@@ -348,7 +349,7 @@ impl Shell {
                 .justify_center()
                 .gap(px(14.))
                 .child(dots)
-                .child(ui::sub("デバイスから設定を読み込んでいます…")),
+                .child(ui::sub("Reading settings from the device…")),
         )
     }
 
@@ -367,18 +368,18 @@ impl Shell {
             let i = info.expect("info");
             c = c.child(ui::empty_state(
                 "puzzle",
-                "このデバイスはまだ設定できません",
+                "This device cannot be configured yet",
                 &format!(
-                    "{} ({:04X}:{:04X}) は検出できていますが、プロトコルドライバが未実装です。docs/ADD_DEVICE.md の手順で追加できます。",
+                    "{} ({:04X}:{:04X}) was detected, but its protocol driver is not implemented yet. You can add it by following docs/ADD_DEVICE.md.",
                     i.name, i.vid, i.pid
                 ),
             ));
         } else {
             c = c
-                .child(ui::empty_state("plug-zap", "デバイスと通信できません", err))
+                .child(ui::empty_state("plug-zap", "Cannot communicate with the device", err))
                 .child(ui::button(
                     "retry",
-                    "再試行",
+                    "Retry",
                     Some("refresh-cw"),
                     Btn::Primary,
                     cx,
@@ -397,15 +398,15 @@ impl Shell {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let mut cards = vec![];
-        // 実測ポーリングレート (Raw Input で数えた input report 到達レート)。
-        // 背面では Windows 11 が raw input を制限するため、値は信用できない。
-        // 大きな数字は「ピーク」(動いている区間の最大 — 詳細はテストタブ)。
+        // Measured polling rate (arrival rate of input reports counted with Raw Input).
+        // In the background Windows 11 throttles raw input, so the value cannot be trusted.
+        // The big number is the "peak" (maximum over the moving interval — see the Test tab for details).
         if let Some(st) = self.cur().and_then(|s| s.poll.clone()) {
             let bg = !self.last_window_active;
             let p = theme::pal();
             let big = st.peak_hz.or(st.seg_hz).unwrap_or(st.hz);
             cards.push(
-                ui::card_titled("ポーリング実測", "gauge", None)
+                ui::card_titled("Measured polling rate", "gauge", None)
                     .child(
                         ui::body()
                             .pt(px(8.))
@@ -418,13 +419,13 @@ impl Shell {
                                     .when(bg, |d| d.text_color(p.faint)),
                             )
                             .child(ui::faint(if bg {
-                                "背面のため OS が入力を制限中 — 計測はこの窓を前面にして".into()
+                                "The OS limits input while this window is in the background — bring it to the front to measure".into()
                             } else if big < 1. {
-                                "— デバイスを操作すると計測されます".into()
+                                "— Use the device to start measuring".into()
                             } else {
-                                let mut s = format!("ピーク · 平均 {:.0}", st.hz);
+                                let mut s = format!("Peak · avg {:.0}", st.hz);
                                 if let Some((med, _)) = st.gap_stats {
-                                    s = format!("{s} · 推定周期 {med:.3}ms", );
+                                    s = format!("{s} · est. interval {med:.3}ms", );
                                 }
                                 s
                             })),
@@ -438,7 +439,7 @@ impl Shell {
 }
 
 impl Shell {
-    /// 元に戻す / やり直し。
+    /// Undo / redo.
     fn undo_redo(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let p = theme::pal();
         let (u, r) = (self.can_undo(), self.can_redo());
@@ -468,7 +469,7 @@ impl Shell {
             .child(b("redo", "redo-2", r).on_click(cx.listener(|this, _, _, cx| this.redo(cx))))
     }
 
-    /// プリセットのクイック切り替え (保存済みがあるときだけ)。
+    /// Quick preset switching (only when saved presets exist).
     fn preset_quick(&mut self, model: &str, cx: &mut Context<Self>) -> Option<AnyElement> {
         let list = crate::presets::list(model);
         if list.is_empty() {
@@ -486,14 +487,14 @@ impl Shell {
             ui::select(
                 "preset-quick",
                 items,
-                "プリセット",
+                "Presets",
                 150.,
                 cx,
                 move |this, i, _, cx| {
                     if let Some(pr) = list.get(i) {
                         match crate::presets::load(pr) {
                             Ok(st) => this.apply_preset(&pr.name, st, cx),
-                            Err(e) => this.toast(format!("読み込めません: {e}"), true, cx),
+                            Err(e) => this.toast(format!("Cannot load: {e}"), true, cx),
                         }
                     }
                 },

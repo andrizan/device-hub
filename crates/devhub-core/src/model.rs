@@ -1,36 +1,36 @@
-//! デバイス設定のデータモデル (契約 v2)。
+//! Data model of device settings (contract v2).
 //!
-//! フロントエンド (device-hub) とバックエンド (devhub-hid) の**共通言語**。
-//! プロトコル上の表現 (バイト列・EEPROM アドレス・コマンド番号) は一切書かない。
-//! 変換は各ドライバ (devhub-hid 側) の仕事。
+//! The **common language** of the frontend (device-hub) and the backend (devhub-hid).
+//! It never describes protocol-level representations (byte sequences, EEPROM addresses, command numbers).
+//! Converting them is the job of each driver (on the devhub-hid side).
 //!
-//! # 3 層の考え方
+//! # The three layers
 //!
-//! 1. **`Capabilities`** — デバイスが「何を持っているか」の静的な説明。UI の出し分けは
-//!    すべてこれで決まる。UI はデバイス名・VID/PID で分岐しない。
-//! 2. **`DeviceState`** — 今の設定値のスナップショット (`DeviceDriver::read`)。
-//! 3. **`Change`** — UI が送る**細粒度の変更 1 件** (`DeviceDriver::apply`)。
-//!    Web 版と同じ即時適用。ドライバは受け取った項目だけを書けばよい
-//!    (キーマップ全体を毎回書き直す必要はない)。
+//! 1. **`Capabilities`** — a static description of "what the device has". It decides everything
+//!    the UI shows or hides. The UI never branches on device name or VID/PID.
+//! 2. **`DeviceState`** — a snapshot of the current setting values (`DeviceDriver::read`).
+//! 3. **`Change`** — **one fine-grained change** sent by the UI (`DeviceDriver::apply`).
+//!    Applied immediately, like the web version. The driver only needs to write the items it received
+//!    (there is no need to rewrite the whole keymap every time).
 //!
-//! # 汎用設定 (`SettingSpec`)
+//! # Generic settings (`SettingSpec`)
 //!
-//! トグル・スライダー・選択肢で表せる「スカラーな設定」(ポーリングレート、LOD、
-//! デバウンス、MotionSync、スリープ時間、USB モード…) は **型を増やさず**
-//! `SettingSpec` で宣言する。UI は section ごとにカードへ自動で並べる。
-//! 新しいデバイスの独自機能は、ドライバが spec を 1 個足すだけで UI に出る。
+//! "Scalar settings" that can be expressed as a toggle, slider or choice (polling rate, LOD,
+//! debounce, MotionSync, sleep time, USB mode...) are declared with `SettingSpec` **without adding types**.
+//! The UI lines them up automatically in a card per section.
+//! A device's own feature appears in the UI as soon as the driver adds a single spec.
 //!
-//! 構造を持つ設定 (DPI ステージ、ボタン割り当て、マクロ、キーマップ、キーごとの
-//! トラベル、高度キー、ライティング) だけが専用の型を持つ。
+//! Only structured settings (DPI stages, button assignments, macros, keymaps, per-key
+//! travel, advanced keys, lighting) have dedicated types.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
 
-// ====================================================================== 識別
+// ====================================================================== identity
 
-/// 安定したデバイス識別子。HID なら `hid:<vid>:<pid>:<serial or path hash>` を推奨。
-/// 再起動しても同じデバイスに同じ ID が付くこと (UI はこれで表示名などを覚える)。
+/// A stable device identifier. For HID, `hid:<vid>:<pid>:<serial or path hash>` is recommended.
+/// The same device must get the same ID across restarts (the UI uses it to remember display names, etc.).
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct DeviceId(pub String);
 
@@ -44,77 +44,84 @@ impl fmt::Display for DeviceId {
 pub enum DeviceKind {
     Mouse,
     Keyboard,
-    /// レシーバー単体など。
+    /// A receiver on its own, etc.
     Other,
+    /// Earbuds / headphones (settings over Bluetooth, not HID).
+    Audio,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Transport {
-    /// ケーブル直結。
+    /// Connected directly by cable.
     Wired,
-    /// 2.4GHz ドングル経由。
+    /// Via a 2.4GHz dongle.
     Wireless24G,
     Bluetooth,
     Unknown,
 }
 
-/// プロトコルドライバの種別 (devhub-hid 内の実装モジュールと 1:1)。
-/// 新しいプロトコル系列を足すときはここに 1 行足す。
+/// Kind of protocol driver (1:1 with the implementation modules in devhub-hid).
+/// When adding a new protocol family, add one line here.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DriverKind {
-    /// hub.xsyd.top 系 (星闪 / Sparklink WebHID SDK)。
+    /// hub.xsyd.top family (Sparklink WebHID SDK).
     Xsyd,
-    /// www.mouse.fit 系 (G-Wolves 等の EEPROM 型プロトコル)。
+    /// www.mouse.fit family (EEPROM-style protocol of G-Wolves, etc.).
     Mousefit,
-    /// peq.szwalkplay.com 系 (WalkPlay CB 系 USB DAC。report 0x4B S1 プロトコル)。
+    /// peq.szwalkplay.com family (WalkPlay CB-series USB DAC. report 0x4B S1 protocol).
     Walkplay,
-    /// hub.atk.pro / ATK HUB 系 (ATK F1 等。report-8/EEPROM、CID/MID で機種確定)。
+    /// hub.atk.pro / ATK HUB family (ATK F1, etc. report-8/EEPROM, model determined by CID/MID).
     Atk,
-    /// www.lamzu.net / Aurora 系 (64B feature report、if2 FFFF:00)。
+    /// www.lamzu.net / Aurora family (64B feature report, if2 FFFF:00).
     Lamzu,
-    /// 未割り当て (検出だけできる)。
+    /// RongYuan (VID 3151) keyboards, mice and their 2.4G receivers:
+    /// 64-byte feature reports on FFFF:02, device resolved by the `0x8F` id.
+    Ry,
+    /// EarFun earbuds on Qualcomm chips: GAIA frames over Bluetooth RFCOMM (SPP).
+    Earfun,
+    /// Unassigned (can only be detected).
     Unsupported,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Battery {
-    /// 0..=100。不明なら None。
+    /// 0..=100. None if unknown.
     pub percent: Option<u8>,
     pub charging: bool,
 }
 
-/// 検出されたデバイス 1 台分の名札。
+/// The name tag of one detected device.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DeviceInfo {
     pub id: DeviceId,
     pub kind: DeviceKind,
-    /// 表示名 ("HTS Plus Pro" など)。
+    /// Display name (e.g. "HTS Plus Pro").
     pub name: String,
     pub vendor: String,
-    /// 機種識別子 (registry の model。UI はアイコン選択程度にしか使わない)。
+    /// Model identifier (the registry's model. The UI only uses it for things like icon selection).
     pub model: String,
     pub vid: u16,
     pub pid: u16,
     pub transport: Transport,
-    /// 本体ファームウェア。
+    /// Main-unit firmware.
     pub firmware: Option<String>,
-    /// レシーバー (ドングル) ファームウェア。
+    /// Receiver (dongle) firmware.
     pub dongle_firmware: Option<String>,
     pub serial: Option<String>,
     pub driver: DriverKind,
-    /// 検出時に分かっているバッテリー。最新値は `DeviceDriver::battery`。
+    /// The battery as known at detection time. The latest value is `DeviceDriver::battery`.
     pub battery: Option<Battery>,
-    /// プロトコル実装が無い/未完成なら false。UI は「検出済み・未対応」と表示する。
+    /// false if there is no protocol implementation or it is incomplete. The UI shows "detected, unsupported".
     pub supported: bool,
-    /// 無線デバイスがスリープ中などで応答しない (ドングルだけ見えている) とき true。
-    /// UI は「マウスを動かして起こしてください」と表示する。
+    /// true when a wireless device does not respond, e.g. because it is asleep (only the dongle is visible).
+    /// The UI shows "Move the mouse to wake it up".
     pub asleep: bool,
-    /// ボード識別子 (Sparklink 系はファーム配布 API の問い合わせに使う)。
-    /// 取れないドライバでは None。
+    /// Board identifier (Sparklink family uses it to query the firmware distribution API).
+    /// None for drivers that cannot obtain it.
     pub board_id: Option<u32>,
 }
 
-// ====================================================================== 色
+// ====================================================================== color
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Rgb {
@@ -139,15 +146,15 @@ impl Rgb {
     }
 }
 
-// ====================================================================== 汎用設定
+// ====================================================================== generic settings
 
-/// 汎用設定の値。
+/// The value of a generic setting.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum SettingValue {
     Bool(bool),
-    /// スライダー/数値。単位は spec 側。
+    /// Slider/number. The unit is on the spec side.
     Num(f32),
-    /// 選択肢の `ChoiceOpt::value`。
+    /// A `ChoiceOpt::value` of the options.
     Choice(i64),
 }
 
@@ -193,60 +200,62 @@ impl ChoiceOpt {
 #[derive(Clone, Debug, PartialEq)]
 pub enum SettingKind {
     Toggle,
-    /// 連続値。`unit` は表示用 ("ms", "mm", "°", "分" など)。
+    /// Continuous value. `unit` is for display ("ms", "mm", "°", "min", etc.).
     Slider {
         min: f32,
         max: f32,
         step: f32,
         unit: String,
     },
-    /// 選択肢。数が少なければセグメント、多ければドロップダウンで表示される。
+    /// Options. Shown as a segmented control if there are few, a dropdown if many.
     Choice {
         options: Vec<ChoiceOpt>,
     },
 }
 
-/// 設定を並べるカード (UI の section)。未知の文字列でも UI は「その他」に並べるだけで落ちない。
+/// The card a setting is placed on (a UI section). Even an unknown string does not crash the UI; it just goes under "Other".
 pub mod section {
-    /// ポーリングレート・USB モード・高速モード等。
+    /// Polling rate, USB mode, high-speed mode, etc.
     pub const PERFORMANCE: &str = "performance";
-    /// LOD・MotionSync・直線補正・リップル・センサー角度等。
+    /// LOD, MotionSync, angle snapping, ripple, sensor angle, etc.
     pub const SENSOR: &str = "sensor";
-    /// クリック/ホイールのデバウンス、SPDT、誤操作防止。
+    /// Click/wheel debounce, SPDT, misoperation prevention.
     pub const CLICK: &str = "click";
-    /// 磁気スイッチボタン (トリガー位置・ラピッドトリガー・振動)。
+    /// Magnetic switch buttons (trigger position, Rapid Trigger, vibration).
     pub const MAGNETIC: &str = "magnetic";
-    /// スリープ・省電力・バッテリー。
+    /// Sleep, power saving, battery.
     pub const POWER: &str = "power";
-    /// 照明の全体スイッチ等 (エフェクトは LightArea)。
+    /// Overall lighting switches, etc. (effects belong to LightArea).
     pub const LIGHTING: &str = "lighting";
-    /// キーボード全体: OS 種別・Win キーロック・チャタリング防止等。
+    /// Whole keyboard: OS type, Win key lock, anti-chatter, etc.
     pub const KEYBOARD: &str = "keyboard";
-    /// 接続・レシーバー。
+    /// Connection, receiver.
     pub const CONNECTION: &str = "connection";
-    /// USB DAC 系のオーディオ設定 (EQ・フィルター・バランス等)。
+    /// Audio settings for USB DACs (EQ, filters, balance, etc.).
     pub const AUDIO: &str = "audio";
-    /// それ以外 (リセット・ファームウェア等)。
+    /// Touch gestures and buttons of earbuds / headphones.
+    pub const CONTROLS: &str = "controls";
+    /// Everything else (reset, firmware, etc.).
     pub const SYSTEM: &str = "system";
 }
 
-/// 汎用設定 1 件の宣言。
+/// The declaration of one generic setting.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SettingSpec {
-    /// ドライバ内で一意 ("polling_wired", "lod", "motion_sync" …)。`Change::Setting` で戻ってくる。
+    /// Unique within the driver ("polling_wired", "lod", "motion_sync" ...). Comes back in `Change::Setting`.
     pub id: String,
-    /// `section::*` のどれか。
+    /// One of `section::*`.
     pub section: String,
     pub label: String,
-    /// 1 行の説明。
+    /// A one-line description.
     pub help: Option<String>,
     pub kind: SettingKind,
-    /// 他の設定がこの値のときだけ表示する。
+    /// Shown only when another setting has this value.
     pub visible_when: Option<(String, SettingValue)>,
-    /// 変更前に確認ダイアログを出す文言 (危険な設定)。
+    /// Text of the confirmation dialog shown before a change (for dangerous settings).
     pub confirm: Option<String>,
-    /// 他の設定がこの値のときだけ操作できる (それ以外は無効表示)。
-    /// `(設定 id, 値, 無効時の説明)`。例: 20K FPS は競技モード ON のときだけ。
+    /// Operable only when another setting has this value (otherwise shown disabled).
+    /// `(setting id, value, explanation when disabled)`. Example: 20K FPS only while competitive mode is ON.
     pub enabled_when: Option<(String, SettingValue, String)>,
 }
 
@@ -300,34 +309,34 @@ impl SettingSpec {
         self.confirm = Some(msg.into());
         self
     }
-    /// `id` の設定が `v` のときだけ操作可能 (それ以外は `note` を添えて無効表示)。
+    /// Operable only when the setting `id` is `v` (otherwise shown disabled with `note` attached).
     pub fn enabled_when(mut self, id: &str, v: SettingValue, note: &str) -> Self {
         self.enabled_when = Some((id.into(), v, note.into()));
         self
     }
 }
 
-/// ボタン 1 個で実行する操作 (リセット、ペアリング、キャリブレーション、ファーム更新…)。
+/// An operation run by a single button (reset, pairing, calibration, firmware update...).
 ///
-/// UI の約束 (id の命名規則):
-/// - `calibrate` … キーボードで `PerfCaps::live_travel` があると、UI は確認ダイアログの代わりに
-///   **キャリブレーション・ウィザード** を開く (開始で `calibrate` → 全キーの底打ちを `live_travel`
-///   で見守る → 完了で `calibrate_finish` があれば実行)。
-/// - `*_finish` で終わる id … 一覧には出さない (ウィザードの終了処理用)。
-/// - 長い操作は実行中に `HubEvent::Progress` を送ると UI が進捗バーを出す。
+/// UI conventions (naming rules for id):
+/// - `calibrate` … for a keyboard with `PerfCaps::live_travel`, the UI opens the
+///   **calibration wizard** instead of a confirmation dialog (on start it runs `calibrate` → watches every key bottom out via `live_travel`
+///   → on completion it runs `calibrate_finish` if there is one).
+/// - ids ending in `*_finish` … not shown in the list (they are for the wizard's finishing step).
+/// - For a long operation, sending `HubEvent::Progress` while it runs makes the UI show a progress bar.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ActionSpec {
     pub id: String,
     pub section: String,
     pub label: String,
     pub help: Option<String>,
-    /// Some なら実行前に確認ダイアログ。
+    /// If Some, a confirmation dialog is shown before running.
     pub confirm: Option<String>,
-    /// Some なら UI がファイル選択ダイアログを開き、選んだパスを渡す (拡張子フィルタ)。
+    /// If Some, the UI opens a file-chooser dialog and passes the chosen path (extension filter).
     pub file: Option<Vec<String>>,
-    /// true なら `file` は保存ダイアログ (設定書き出し用)。false = 開く。
+    /// If true, `file` is a save dialog (for exporting settings). false = open.
     pub save: bool,
-    /// 破壊的操作として赤く表示する。
+    /// Shown in red as a destructive operation.
     pub danger: bool,
 }
 
@@ -361,7 +370,7 @@ impl ActionSpec {
         self.file = Some(exts.iter().map(|s| s.to_string()).collect());
         self
     }
-    /// `file` と同じだが「名前を付けて保存」ダイアログを開く (設定書き出し)。
+    /// Same as `file`, but opens a "Save as" dialog (exporting settings).
     pub fn save_file(mut self, exts: &[&str]) -> Self {
         self.file = Some(exts.iter().map(|s| s.to_string()).collect());
         self.save = true;
@@ -369,18 +378,18 @@ impl ActionSpec {
     }
 }
 
-/// `run_action` の結果。
+/// The result of `run_action`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ActionOutcome {
-    /// トーストに出す文 (None なら既定の「完了しました」)。
+    /// Text shown in the toast (if None, the default "Done").
     pub message: Option<String>,
-    /// true なら UI は `read()` で全設定を読み直す (リセット後など)。
+    /// If true, the UI rereads all settings with `read()` (after a reset, etc.).
     pub reload: bool,
 }
 
-// ====================================================================== 共通: キー・マクロ
+// ====================================================================== Shared: keys and macros
 
-/// 修飾キーのビット (HID の modifier byte と同じ並び)。
+/// Modifier key bits (same order as the HID modifier byte).
 pub mod mods {
     pub const LCTRL: u8 = 0x01;
     pub const LSHIFT: u8 = 0x02;
@@ -392,15 +401,15 @@ pub mod mods {
     pub const RGUI: u8 = 0x80;
 }
 
-/// キーボードのキー 1 打 (+修飾)。`usage` は HID Keyboard/Keypad page (0x07) の usage。
-/// 0 は「修飾のみ」。名前は `crate::keys::hid_name`。
+/// One keystroke of a keyboard key (+ modifiers). `usage` is a usage of the HID Keyboard/Keypad page (0x07).
+/// 0 means "modifiers only". The name comes from `crate::keys::hid_name`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct KeyStroke {
     pub mods: u8,
     pub usage: u16,
 }
 
-/// マウスの基本動作。
+/// Basic mouse actions.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum MouseFn {
     Left,
@@ -415,7 +424,7 @@ pub enum MouseFn {
     DoubleClick,
 }
 
-/// メディア/システム (HID Consumer page 0x0C の代表的なもの)。
+/// Media/system (representative ones of the HID Consumer page 0x0C).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum MediaFn {
     PlayPause,
@@ -434,10 +443,10 @@ pub enum MediaFn {
     Refresh,
 }
 
-/// マクロ 1 イベントの入力。
+/// The input of one macro event.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MacroInput {
-    /// HID usage (keyboard page)。修飾キーも usage (0xE0..0xE7) で表す。
+    /// HID usage (keyboard page). Modifier keys are also expressed as usages (0xE0..0xE7).
     Key(u16),
     Mouse(MouseFn),
 }
@@ -452,128 +461,128 @@ pub enum MacroEdge {
 pub struct MacroEvent {
     pub input: MacroInput,
     pub edge: MacroEdge,
-    /// このイベントの**後**の待ち時間 (ms)。
+    /// Wait time (ms) **after** this event.
     pub delay_ms: u32,
 }
 
-/// マクロ 1 本。
+/// One macro.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct MacroDef {
     pub name: String,
     pub events: Vec<MacroEvent>,
-    /// 実行モード (`MacroCaps::modes` の値)。
+    /// Run mode (a value of `MacroCaps::modes`).
     pub mode: u8,
-    /// 「指定回数」系モードの回数 (`MacroCaps::repeat_modes` のときだけ使う)。
+    /// The count for "specified count" modes (used only for `MacroCaps::repeat_modes`).
     pub repeat: u16,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct MacroCaps {
-    /// スロット数。
+    /// Number of slots.
     pub slots: u8,
-    /// 1 本あたりの最大イベント数。
+    /// Maximum number of events per macro.
     pub max_events: u16,
-    /// 最大遅延 (ms)。
+    /// Maximum delay (ms).
     pub max_delay_ms: u32,
-    /// 実行モードの一覧 (値, 表示名)。
+    /// List of run modes (value, display name).
     pub modes: Vec<ChoiceOpt>,
-    /// 回数指定を持つモードの値 (このモードのときだけ repeat を編集させる)。
+    /// Values of the modes that take a count (repeat is editable only in these modes).
     pub repeat_modes: Vec<u8>,
-    /// マクロ名を保存できるか。
+    /// Whether macro names can be saved.
     pub names: bool,
-    /// マウスボタンをマクロに入れられるか。
+    /// Whether mouse buttons can be put into a macro.
     pub mouse_events: bool,
 }
 
-// ====================================================================== プロファイル
+// ====================================================================== Profiles
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProfileCaps {
-    /// オンボードプロファイル数 (1 なら UI はプロファイル切替を出さない)。
+    /// Number of onboard profiles (if 1, the UI does not show profile switching).
     pub count: u8,
-    /// 名前を付けられるか (デバイス側に保存されるか)。
+    /// Whether they can be named (whether the name is stored on the device).
     pub renamable: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ProfileState {
     pub active: u8,
-    /// 長さは `ProfileCaps::count`。名前が無ければ空文字。
+    /// Length is `ProfileCaps::count`. Empty string if there is no name.
     pub names: Vec<String>,
 }
 
-// ====================================================================== マウス
+// ====================================================================== Mouse
 
-/// DPI ステージ 1 個。
+/// One DPI stage.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DpiStage {
     pub x: u32,
-    /// XY 分割時の Y。`None` = X と同じ。
+    /// Y when XY is split. `None` = same as X.
     pub y: Option<u32>,
-    /// DPI インジケーター LED の色。
+    /// Color of the DPI indicator LED.
     pub color: Rgb,
-    /// ステージを無効化 (スキップ) できるデバイス用。
+    /// For devices where a stage can be disabled (skipped).
     pub enabled: bool,
 }
 
-/// DPI 関連の機能。
+/// DPI-related features.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DpiFn {
-    /// DPI 順送り (ループ)。
+    /// Cycle through DPI in order (loop).
     Cycle,
     Up,
     Down,
-    /// 押している間だけ指定 DPI (スナイパー / DPI ロック)。
+    /// A specified DPI only while held (sniper / DPI lock).
     Shift(u32),
 }
 
-/// マクロをボタンで再生するときの動作 (mouse.fit の 3 種)。
+/// Behavior when a macro is played from a button (the 3 kinds of mouse.fit).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MacroRun {
-    /// 指定回数。
+    /// A specified number of times.
     Times(u16),
-    /// 押している間繰り返す。
+    /// Repeat while held.
     WhileHeld,
-    /// もう一度押すまで繰り返す。
+    /// Repeat until pressed again.
     Toggle,
 }
 
-/// マウスボタン 1 個の割り当て。
+/// The assignment of one mouse button.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum ButtonAction {
     Disabled,
     Mouse(MouseFn),
     Dpi(DpiFn),
-    /// 連射: `button` を `count` 回、`interval_ms` 間隔で。
+    /// Rapid fire: `button` `count` times, at `interval_ms` intervals.
     Fire {
         button: MouseFn,
         count: u8,
         interval_ms: u16,
     },
-    /// キーボードのキー / ショートカット。
+    /// Keyboard key / shortcut.
     Key(KeyStroke),
     Media(MediaFn),
     Macro {
         slot: u8,
         run: MacroRun,
     },
-    /// ポーリングレート順送り。
+    /// Cycle the polling rate in order.
     PollingCycle,
-    /// プロファイル順送り。
+    /// Cycle the profile in order.
     ProfileCycle,
-    /// 上下ロール (ホイール方向) の切替。
+    /// Toggle the vertical roll (wheel direction).
     ScrollModeToggle,
-    /// デバイスに記録されているがアプリが解釈できない割当。
-    /// 表示と往復保存はできるが、新規割当の候補には出さない。
+    /// An assignment recorded on the device that the app cannot interpret.
+    /// It can be displayed and round-tripped, but is not offered as a candidate for new assignments.
     Unsupported {
-        /// デバイス側の type コード。
+        /// The device-side type code.
         ty: u8,
-        /// 生パラメータバイト列。
+        /// Raw parameter bytes.
         params: Vec<u8>,
     },
 }
 
-/// ボタン割り当てで選べる種類 (デバイスごとに出し分ける)。
+/// The kinds that can be chosen in button assignment (shown per device).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ButtonActionKind {
     Disabled,
@@ -601,16 +610,16 @@ impl ButtonAction {
             ButtonAction::PollingCycle => ButtonActionKind::PollingCycle,
             ButtonAction::ProfileCycle => ButtonActionKind::ProfileCycle,
             ButtonAction::ScrollModeToggle => ButtonActionKind::ScrollModeToggle,
-            // 候補に出さない: 表示用に Disabled として扱う。
+            // Not offered as a candidate: treated as Disabled for display.
             ButtonAction::Unsupported { .. } => ButtonActionKind::Disabled,
         }
     }
 }
 
-/// 物理ボタン 1 個。
+/// One physical button.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ButtonSlot {
-    /// 表示名 ("左ボタン" / "サイド前" …)。
+    /// Display name ("Left button" / "Side front" ...).
     pub name: String,
 }
 
@@ -618,38 +627,38 @@ pub struct ButtonSlot {
 pub struct MouseCaps {
     pub dpi_min: u32,
     pub dpi_max: u32,
-    /// DPI の刻み (10/50/100)。
+    /// DPI step (10/50/100).
     pub dpi_step: u32,
     pub min_stages: usize,
     pub max_stages: usize,
-    /// X/Y 個別 DPI。
+    /// Separate X/Y DPI.
     pub xy_split: bool,
-    /// ステージごとの LED 色。
+    /// LED color per stage.
     pub stage_colors: bool,
-    /// ステージ個別の有効/無効。
+    /// Enable/disable per stage.
     pub stage_toggle: bool,
-    /// 物理ボタン (並び = `MouseState::buttons` の並び)。
+    /// Physical buttons (order = the order of `MouseState::buttons`).
     pub buttons: Vec<ButtonSlot>,
-    /// 割り当て可能な種類。
+    /// The assignable kinds.
     pub button_kinds: Vec<ButtonActionKind>,
-    /// 「左クリックが最低 1 個必要」を UI でも検査する。
+    /// The UI also checks "at least one left click is required".
     pub require_left_click: bool,
     pub macros: Option<MacroCaps>,
-    /// 押下深さを返せるボタンの slot 番号 (`buttons` の index)。空なら UI は出さない。
-    /// `DeviceDriver::live_buttons` の返り値はこの並び。
+    /// Slot numbers (index into `buttons`) of the buttons that can return a press depth. If empty, the UI does not show it.
+    /// The return value of `DeviceDriver::live_buttons` follows this order.
     pub live_buttons: Vec<usize>,
-    /// 速度連動 DPI (AdaDPI / Adaptive DPI) のカーブ。`MouseState::adaptive` と `Change::Adaptive` が対。
+    /// Curve of speed-linked DPI (AdaDPI / Adaptive DPI). `MouseState::adaptive` and `Change::Adaptive` are a pair.
     pub adaptive_dpi: Option<AdaptiveCaps>,
 }
 
-/// 押下深さを返せるボタン 1 個分 (磁気スイッチなど)。`DeviceDriver::live_buttons`。
+/// One button that can return a press depth (magnetic switch, etc.). `DeviceDriver::live_buttons`.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ButtonDepth {
-    /// 0.0 (離している) 〜 1.0 (底まで)。
+    /// 0.0 (released) to 1.0 (fully pressed).
     pub depth: f32,
-    /// 作動点 0..1 (分かれば)。UI はこの位置に線を引く。
+    /// Actuation point 0..1 (if known). The UI draws a line at this position.
     pub trigger: Option<f32>,
-    /// デバイスが「押下」と判定しているか (分かれば)。
+    /// Whether the device judges it as "pressed" (if known).
     pub pressed: Option<bool>,
 }
 
@@ -657,123 +666,123 @@ pub struct ButtonDepth {
 pub struct MouseState {
     pub stages: Vec<DpiStage>,
     pub active_stage: usize,
-    /// `MouseCaps::buttons` と同じ並び。
+    /// Same order as `MouseCaps::buttons`.
     pub buttons: Vec<ButtonAction>,
-    /// スロット順。空スロットは None。
+    /// Slot order. Empty slots are None.
     pub macros: Vec<Option<MacroDef>>,
-    /// 速度連動 DPI のカーブ (`MouseCaps::adaptive_dpi` があるときだけ Some)。
+    /// Speed-linked DPI curve (Some only when `MouseCaps::adaptive_dpi` is present).
     #[serde(default)]
     pub adaptive: Option<AdaptiveCurve>,
 }
 
-/// 速度連動 DPI カーブの 1 点: マウス速度 → DPI 倍率。
+/// One point of the speed-linked DPI curve: mouse speed → DPI multiplier.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AdaptivePoint {
-    /// 速度 (デバイス単位。LAMZU は 0–105 の目盛り)。
+    /// Speed (device units. For LAMZU a 0–105 scale).
     pub speed: u16,
-    /// DPI 倍率 (1.0 = 等倍)。
+    /// DPI multiplier (1.0 = unchanged).
     pub ratio: f32,
 }
 
-/// 速度連動 DPI の状態。
+/// State of speed-linked DPI.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AdaptiveCurve {
     pub enabled: bool,
-    /// 速度の昇順。
+    /// In ascending order of speed.
     pub points: Vec<AdaptivePoint>,
 }
 
-/// 速度連動 DPI の機能宣言。
+/// Feature declaration of speed-linked DPI.
 #[derive(Clone, Debug, PartialEq)]
 pub struct AdaptiveCaps {
     pub min_points: usize,
     pub max_points: usize,
     pub speed_max: u16,
     pub ratio_max: f32,
-    /// 公式プリセット (名前, 点列)。
+    /// Official presets (name, list of points).
     pub presets: Vec<(String, Vec<AdaptivePoint>)>,
 }
 
-// ====================================================================== キーボード
+// ====================================================================== Keyboard
 
-/// キー 1 個の物理配置。
+/// The physical placement of one key.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LayoutKey {
-    /// プロトコル上のキー識別 (xsyd はマトリクス `(row<<4)|col`)。
-    /// `KeyboardState` の配列はすべて **layout の並び順** で、この値はドライバの参照用。
+    /// Key identification on the protocol (for xsyd, the matrix `(row<<4)|col`).
+    /// All arrays of `KeyboardState` are **in layout order**; this value is for the driver's reference.
     pub id: u16,
-    /// 左上座標と大きさ (1u 単位)。
+    /// Top-left coordinates and size (in 1u units).
     pub x: f32,
     pub y: f32,
     pub w: f32,
     pub h: f32,
-    /// 既定の刻印。
+    /// The default legend.
     pub label: String,
 }
 
-/// 割り当て候補 1 件 (キーボード)。
+/// One assignment candidate (keyboard).
 #[derive(Clone, Debug, PartialEq)]
 pub struct KeyChoice {
-    /// デバイス固有のキーコード (そのまま `KeyAction::Code` に入る)。
+    /// Device-specific key code (goes into `KeyAction::Code` as is).
     pub code: u32,
-    /// 一覧に出す名前。
+    /// The name shown in the list.
     pub label: String,
-    /// キーキャップに出す短い名前 (無ければ label)。
+    /// Short name shown on the keycap (label if absent).
     pub short: Option<String>,
 }
 
-/// 割り当て候補のグループ ("基本" / "マウス" / "メディア" / "ライティング" / "レイヤー" / "システム" / "ゲームパッド")。
+/// A group of assignment candidates ("Basic" / "Mouse" / "Media" / "Lighting" / "Layer" / "System" / "Gamepad").
 #[derive(Clone, Debug, PartialEq)]
 pub struct KeyGroup {
     pub name: String,
     pub keys: Vec<KeyChoice>,
 }
 
-/// キーに割り当てる動作。
+/// The action assigned to a key.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum KeyAction {
-    /// 無効 (何も出さない)。
+    /// Disabled (outputs nothing).
     None,
-    /// 透過 (下のレイヤーを使う)。
+    /// Transparent (uses the layer below).
     Transparent,
-    /// `KeyboardCaps::catalog` のコード。
+    /// A code of `KeyboardCaps::catalog`.
     Code(u32),
-    /// 修飾 + コード (組み合わせキー)。
+    /// Modifiers + code (a key combination).
     Combo { mods: u8, code: u32 },
-    /// マクロスロット。
+    /// Macro slot.
     Macro(u8),
 }
 
-/// トリガー方式。
+/// Trigger mode.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TriggerMode {
-    /// 固定アクチュエーション。
+    /// Fixed actuation.
     Normal,
-    /// ラピッドトリガー。
+    /// Rapid Trigger.
     Rapid,
 }
 
-/// キー 1 個の磁気スイッチ設定 (長さはすべて mm)。
+/// Magnetic switch settings of one key (all lengths in mm).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct KeyPerf {
     pub mode: TriggerMode,
-    /// 押下で ON になる深さ。
+    /// The depth at which it turns ON when pressed.
     pub actuation: f32,
-    /// 戻りで OFF になる深さ (None = actuation と同じ)。
+    /// The depth at which it turns OFF on release (None = same as actuation).
     pub release: Option<f32>,
-    /// RT 有効時: 最初の ON になる深さ (First touch)。
+    /// When RT is enabled: the depth of the first ON (First touch).
     pub rt_first: f32,
-    /// RT: さらに押し込んで再 ON になる量。
+    /// RT: the amount of further pressing that turns it ON again.
     pub rt_press: f32,
-    /// RT: 戻して OFF になる量。
+    /// RT: the amount of release that turns it OFF.
     pub rt_release: f32,
-    /// 上端デッドゾーン。
+    /// Top dead zone.
     pub top_deadzone: f32,
-    /// 下端デッドゾーン。
+    /// Bottom dead zone.
     pub bottom_deadzone: f32,
-    /// 連続 RT (完全に戻るまで RT を継続)。
+    /// Continuous RT (RT continues until fully released).
     pub continuous: bool,
-    /// スイッチ種別 (`PerfCaps::switch_types` の index)。
+    /// Switch type (index into `PerfCaps::switch_types`).
     pub switch_type: u8,
 }
 
@@ -796,96 +805,96 @@ impl Default for KeyPerf {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PerfCaps {
-    /// 全ストローク (mm)。
+    /// Total stroke (mm).
     pub travel: f32,
-    /// 設定できる最小値 (mm)。
+    /// Minimum settable value (mm).
     pub min: f32,
-    /// 刻み (RT 精度、0.01 / 0.001 mm)。
+    /// Step (RT precision, 0.01 / 0.001 mm).
     pub step: f32,
     pub rapid_trigger: bool,
-    /// アクチュエーションと別にリリース点を持てるか。
+    /// Whether a release point separate from actuation is available.
     pub separate_release: bool,
-    /// RT の First touch を持つか。
+    /// Whether RT has First touch.
     pub rt_first: bool,
     pub deadzones: bool,
     pub continuous_rt: bool,
-    /// スイッチ種別 (軸) の名前一覧。空なら UI は出さない。
+    /// List of switch type (axis) names. If empty, the UI does not show it.
     pub switch_types: Vec<String>,
-    /// `switch_types` と同じ並びのベンダー軸 ID (軸名をオンラインで引く鍵)。任意。
+    /// Vendor axis IDs in the same order as `switch_types` (the key for looking up axis names online). Optional.
     pub switch_ids: Vec<u16>,
-    /// キーごとに設定できるか (false なら全キー一括)。
+    /// Whether it can be set per key (if false, all keys at once).
     pub per_key: bool,
-    /// 押下深さのリアルタイム表示 (`DeviceDriver::live_travel`) ができるか。
+    /// Whether real-time press depth display (`DeviceDriver::live_travel`) is possible.
     pub live_travel: bool,
 }
 
-/// ストローク計測の生データ 1 キー分 (`DeviceDriver::live_axis`)。
-/// ドライバが提供できる項目だけ埋める (未対応フィールドは 0/false のまま)。
+/// Raw stroke measurement data for one key (`DeviceDriver::live_axis`).
+/// Fill in only the items the driver can provide (unsupported fields stay 0/false).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct AxisSample {
-    /// 押下深さ mm (`live_travel` と同じ値)。
+    /// Press depth in mm (same value as `live_travel`).
     pub route: f32,
-    /// 生 ADC 値 (ホールセンサー等)。未対応なら 0。
+    /// Raw ADC value (Hall sensor, etc.). 0 if unsupported.
     pub adc: u16,
-    /// キー状態フラグ (0=離し / 非 0=押し中等、機種依存)。
+    /// Key state flags (0 = released / non-0 = pressed, etc.; model-dependent).
     pub status: u8,
-    /// キャリブレーション状態 (0=未 / 非 0=済 等、機種依存)。
+    /// Calibration state (0 = not done / non-0 = done, etc.; model-dependent).
     pub calibrated: u8,
 }
 
-/// DKS の 1 フェーズでの動作。
+/// The action in one phase of a DKS.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DksPhase {
     #[default]
     Off,
-    /// そのフェーズで押して離す。
+    /// Press and release in that phase.
     Tap,
-    /// そのフェーズから次の区切りまで押しっぱなし。
+    /// Held down from that phase until the next boundary.
     Hold,
 }
 
-/// DKS の 1 行 (割り当てキー 1 個 × 4 フェーズ)。
+/// One row of a DKS (1 assigned key × 4 phases).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DksRow {
     pub code: u32,
-    /// [押し始め, 底打ち, 戻り始め, 完全リリース]
+    /// [start of press, bottom-out, start of release, full release]
     pub phases: [DksPhase; 4],
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SocdMode {
-    /// 後入力優先 (上書き)。
+    /// Last input wins (overwrite).
     Last,
-    /// 先入力優先。
+    /// First input wins.
     First,
-    /// A 優先。
+    /// A wins.
     PriorityA,
-    /// B 優先。
+    /// B wins.
     PriorityB,
-    /// 両方キャンセル。
+    /// Cancel both.
     Neutral,
 }
 
-/// 高度キー (Sparklink の DKS/MPT/MT/TGL/END/SOCD/RS)。
+/// Advanced keys (Sparklink's DKS/MPT/MT/TGL/END/SOCD/RS).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Advanced {
-    /// Dynamic Keystroke: 最大 4 キー × 4 フェーズ。`bottom` は底打ち判定の深さ (mm)。
+    /// Dynamic Keystroke: up to 4 keys × 4 phases. `bottom` is the depth (mm) for bottom-out detection.
     Dks { rows: Vec<DksRow>, bottom: f32 },
-    /// 多段トリガー: 3 つの深さで別々のキー (深さは単調増加)。
+    /// Multi-stage trigger: separate keys at 3 depths (depths increase monotonically).
     Mpt { depths: [f32; 3], codes: [u32; 3] },
-    /// タップ/長押し。
+    /// Tap/hold.
     Mt { tap: u32, hold: u32, hold_ms: u16 },
-    /// トグル。`delay_ms` は公式 wire の `time` (トグル出力の押下時間)。
+    /// Toggle. `delay_ms` is the official wire's `time` (the press duration of the toggle output).
     Tgl { code: u32, delay_ms: u16 },
-    /// エンドトリガー: 押すと `code`、離すと `code_release` を `delay_ms` だけ出す。
-    /// 公式 wire `kcs:[press,release]` に対応 (`point` は wire に存在しない)。
+    /// End trigger: outputs `code` on press and `code_release` on release, for `delay_ms`.
+    /// Corresponds to the official wire `kcs:[press,release]` (`point` does not exist on the wire).
     End {
         code: u32,
         code_release: u32,
         delay_ms: u16,
     },
-    /// SOCD: 自分 (A) と `other` (B, layout index) のペア。
-    /// `delay_ms` は公式 wire の `delay` (反転判定の遅延)。
+    /// SOCD: a pair of itself (A) and `other` (B, layout index).
+    /// `delay_ms` is the official wire's `delay` (the delay of the reversal decision).
     Socd {
         other: usize,
         code_a: u32,
@@ -893,7 +902,7 @@ pub enum Advanced {
         mode: SocdMode,
         delay_ms: u16,
     },
-    /// ラピッドスナップ: 2 キーのうち深く押された方。
+    /// Rapid Snap: of two keys, the one pressed deeper.
     Rs {
         other: usize,
         code_a: u32,
@@ -927,7 +936,7 @@ impl Advanced {
     }
 }
 
-/// レイアウト index (`KeyboardCaps::layout` の並び) に付いた高度キー。
+/// An advanced key attached to a layout index (the order of `KeyboardCaps::layout`).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct AdvancedKey {
     pub key: usize,
@@ -935,16 +944,16 @@ pub struct AdvancedKey {
     pub binding: Advanced,
 }
 
-/// 照明エフェクト 1 種の宣言。
+/// Declaration of one lighting effect.
 #[derive(Clone, Debug, PartialEq)]
 pub struct LightEffect {
     pub id: u8,
     pub name: String,
-    /// このエフェクトで色を選べるか。
+    /// Whether this effect lets you choose colors.
     pub color: bool,
     pub speed: bool,
     pub direction: bool,
-    /// キーごとの色 (カスタム) モードか。
+    /// Whether it is a per-key color (custom) mode.
     pub per_key: bool,
 }
 
@@ -978,7 +987,7 @@ impl LightEffect {
     }
 }
 
-/// 照明の領域 (本体キー / デコレーション / マウスの LED / レシーバー)。
+/// A lighting area (main keys / decoration / mouse LED / receiver).
 #[derive(Clone, Debug, PartialEq)]
 pub struct LightArea {
     pub id: u8,
@@ -986,50 +995,50 @@ pub struct LightArea {
     pub effects: Vec<LightEffect>,
     pub brightness_max: u8,
     pub speed_max: u8,
-    /// 方向の選択肢 (空なら無し)。
+    /// Direction options (none if empty).
     pub directions: Vec<String>,
-    /// 全体 ON/OFF を持つか。
+    /// Whether it has an overall ON/OFF.
     pub switchable: bool,
-    /// 上下分割ライトのゾーン名 (例: ["上部ライト", "下部ライト"])。
-    /// 空なら単一ゾーン。非空なら `LightingState.zone_on` が各ゾーンの開閉。
+    /// Zone names for upper/lower split lights (e.g. ["Upper light", "Lower light"]).
+    /// A single zone if empty. If non-empty, `LightingState.zone_on` holds the open/closed state of each zone.
     pub zones: Vec<String>,
-    /// キーごとのカスタム色を持てるか (キーボードエリアのみ)。
+    /// Whether it can have per-key custom colors (keyboard areas only).
     pub per_key: bool,
-    /// DirectDrive (per-LED ライブ書き込み `[5,5]`) に対応するか。
-    /// true のとき UI は「実機でプレビュー」トグルを出し、点灯イメージを
-    /// そのまま実機 LED に流せる (永続しない・停止でファーム駆動に戻る)。
+    /// Whether it supports DirectDrive (per-LED live write `[5,5]`).
+    /// When true, the UI shows a "Preview on device" toggle and can stream the lit image
+    /// straight to the real LEDs (not persisted; stopping returns to firmware drive).
     pub direct_drive: bool,
-    /// ライブ点灯色の読み戻し (`DeviceDriver::live_lighting`) に対応するか。
-    /// true のとき UI は表示中に実機の現在色をポーリングしてプレビューに使う。
-    /// false でもドライバが `Unsupported` を返すだけで無害だが、caps だけ見る
-    /// 原則に揃えるため明示する。
+    /// Whether it supports reading back the live lit colors (`DeviceDriver::live_lighting`).
+    /// When true, the UI polls the device's current colors while shown and uses them for the preview.
+    /// If false, the driver just returns `Unsupported`, which is harmless, but it is stated explicitly
+    /// to keep to the principle of looking at caps only.
     pub live_readback: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LightingState {
-    /// 点灯しているか (どれかのゾーンが開いていれば true)。
+    /// Whether it is lit (true if any zone is open).
     pub on: bool,
     pub effect: u8,
-    /// 選択中パレットスロットの色 (`palette[palette_sel]`)。
+    /// The color of the selected palette slot (`palette[palette_sel]`).
     pub color: Rgb,
     pub brightness: u8,
     pub speed: u8,
     pub direction: u8,
-    /// カスタム色オーバーレイのキーごとの色 (レイアウト index → 色)。
-    /// ベースエフェクトとは独立 — isCustom セルはどのモードでも上に重なる。
+    /// Per-key colors of the custom color overlay (layout index → color).
+    /// Independent of the base effect — isCustom cells overlay on top in every mode.
     pub per_key: BTreeMap<usize, Rgb>,
-    /// 上下ゾーンごとの開閉 (`LightArea.zones` と同じ並び。空なら `on` だけ見る)。
+    /// Open/closed state of each upper/lower zone (same order as `LightArea.zones`. If empty, only `on` is looked at).
     #[serde(default)]
     pub zone_on: Vec<bool>,
-    /// パレットの全スロット色 (空ならパレット非対応)。
+    /// Colors of all palette slots (if empty, the palette is unsupported).
     #[serde(default)]
     pub palette: Vec<Rgb>,
-    /// 選択中のパレットスロット index。
+    /// Index of the selected palette slot.
     #[serde(default)]
     pub palette_sel: u8,
-    /// 彩度 (ColorCorrection, 公式の saturation)。`[5,1,area,2]` で読める
-    /// 機種のみ Some — R,G,B 各 0-100。None なら UI は出さない。
+    /// Saturation (ColorCorrection, the official saturation). Some only on models
+    /// readable with `[5,1,area,2]` — R,G,B each 0-100. If None, the UI does not show it.
     #[serde(default)]
     pub color_correction: Option<Rgb>,
 }
@@ -1037,20 +1046,20 @@ pub struct LightingState {
 #[derive(Clone, Debug, PartialEq)]
 pub struct KeyboardCaps {
     pub layout: Vec<LayoutKey>,
-    /// レイヤー名 ("メイン", "Fn1" …)。
+    /// Layer names ("Main", "Fn1" ...).
     pub layers: Vec<String>,
-    /// 割り当て候補 (グループ順に UI に並ぶ)。
+    /// Assignment candidates (lined up in the UI in group order).
     pub catalog: Vec<KeyGroup>,
-    /// 組み合わせキー (修飾 + キー) を割り当てられるか。
+    /// Whether key combinations (modifier + key) can be assigned.
     pub combos: bool,
     pub perf: Option<PerfCaps>,
-    /// 使える高度キー。
+    /// Usable advanced keys.
     pub advanced: Vec<AdvancedKind>,
     pub macros: Option<MacroCaps>,
 }
 
 impl KeyboardCaps {
-    /// コードの表示名 (catalog から引く)。
+    /// Display name of a code (looked up from the catalog).
     pub fn code_label(&self, code: u32) -> Option<(&str, Option<&str>)> {
         self.catalog
             .iter()
@@ -1062,17 +1071,17 @@ impl KeyboardCaps {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct KeyboardState {
-    /// `[layer][layout index]`。
+    /// `[layer][layout index]`.
     pub keymap: Vec<Vec<KeyAction>>,
-    /// layout index 順。
+    /// In layout index order.
     pub perf: Vec<KeyPerf>,
     pub advanced: Vec<AdvancedKey>,
     pub macros: Vec<Option<MacroDef>>,
 }
 
-// ====================================================================== オーディオ (USB DAC)
+// ====================================================================== Audio (USB DAC)
 
-/// EQ バンドのフィルター種別 (UI 上の意味。wire index への変換はドライバ)。
+/// Filter type of an EQ band (the meaning on the UI; conversion to the wire index is the driver's job).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum PeqFilter {
     LowShelf,
@@ -1094,40 +1103,40 @@ impl PeqFilter {
     }
 }
 
-/// パラメトリック EQ のバンド 1 個。
+/// One band of the parametric EQ.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PeqBand {
-    /// 中心周波数 Hz。
+    /// Center frequency in Hz.
     pub freq: u16,
-    /// Q 値 (フィルターが Q を使わない種別でも保持する)。
+    /// Q value (kept even for filter types that do not use Q).
     pub q: f32,
-    /// ゲイン dB。
+    /// Gain in dB.
     pub gain: f32,
-    /// フィルター種別 (`PeqCaps::filters` に含まれる値)。
+    /// Filter type (a value contained in `PeqCaps::filters`).
     pub filter: PeqFilter,
 }
 
-/// パラメトリック EQ の機能宣言。UI は `peq` が Some のとき EQ エディタを出す。
+/// Feature declaration of the parametric EQ. The UI shows the EQ editor when `peq` is Some.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PeqCaps {
-    /// バンド数。
+    /// Number of bands.
     pub bands: u8,
-    /// 周波数の範囲 (Hz)。
+    /// Frequency range (Hz).
     pub freq_min: u16,
     pub freq_max: u16,
-    /// Q の範囲。
+    /// Q range.
     pub q_min: f32,
     pub q_max: f32,
-    /// ゲインの範囲 (dB)。
+    /// Gain range (dB).
     pub gain_min: f32,
     pub gain_max: f32,
-    /// 使えるフィルター種別。
+    /// Usable filter types.
     pub filters: Vec<PeqFilter>,
 }
 
-// ====================================================================== 全体
+// ====================================================================== Overall
 
-/// デバイスが持つ機能の全体像。
+/// The whole picture of the features a device has.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Capabilities {
     pub settings: Vec<SettingSpec>,
@@ -1135,23 +1144,23 @@ pub struct Capabilities {
     pub profiles: Option<ProfileCaps>,
     pub mouse: Option<MouseCaps>,
     pub keyboard: Option<KeyboardCaps>,
-    /// 照明の領域 (マウス・キーボード共通)。
+    /// Lighting areas (shared by mice and keyboards).
     pub lighting: Vec<LightArea>,
-    /// バッテリーを持つ (サイドバーに残量を出すかの判定に使う)。
+    /// Has a battery (used to decide whether to show the remaining charge in the sidebar).
     pub battery: bool,
-    /// パラメトリック EQ (USB DAC 等)。`DeviceState::peq` と `Change::Peq*` が対になる。
+    /// Parametric EQ (USB DAC, etc.). `DeviceState::peq` and `Change::Peq*` are a pair.
     pub peq: Option<PeqCaps>,
-    /// 公式ファームウェアの配布元 (更新通知用)。無い機種は None。
+    /// Source of the official firmware (for update notifications). None for models without one.
     pub firmware_feed: Option<FirmwareFeed>,
 }
 
-/// 公式ファームウェアの配布元 (更新の「通知」だけ。書き込みは行わない)。
+/// Source of the official firmware (only for update "notifications"; no writing is done).
 #[derive(Clone, Debug, PartialEq)]
 pub enum FirmwareFeed {
-    /// mouse.fit: `Config/<ui_folder>/FWLINK.txt` に zip の URL 1 行。
+    /// mouse.fit: `Config/<ui_folder>/FWLINK.txt` holds one line with the zip URL.
     MouseFit { ui_folder: String },
-    /// Sparklink: `api.sparklinkplayjoy.com/api/v1/getKeyboardFirmware`。
-    /// board_id はデバイスの DEVICE_INFO 応答から取る (`DeviceInfo::board_id`)。
+    /// Sparklink: `api.sparklinkplayjoy.com/api/v1/getKeyboardFirmware`.
+    /// board_id is taken from the device's DEVICE_INFO response (`DeviceInfo::board_id`).
     Sparklink {
         vid: u16,
         pid: u16,
@@ -1178,51 +1187,51 @@ impl Capabilities {
     }
 }
 
-/// 全設定のスナップショット。serde でそのままファイルへ書き出せる (UI の「書き出し/読み込み」)。
+/// A snapshot of all settings. It can be written to a file via serde as is (the UI's "Export/Import").
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DeviceState {
     pub profile: ProfileState,
-    /// `SettingSpec::id` → 値。読めなかった設定は入れない (UI はその行を無効表示)。
+    /// `SettingSpec::id` → value. Settings that could not be read are left out (the UI shows that row disabled).
     pub settings: BTreeMap<String, SettingValue>,
     pub mouse: Option<MouseState>,
     pub keyboard: Option<KeyboardState>,
-    /// `LightArea::id` → 状態。
+    /// `LightArea::id` → state.
     pub lighting: BTreeMap<u8, LightingState>,
-    /// `PeqCaps::bands` と同じ並びのバンド。`Capabilities::peq` があるときだけ Some。
+    /// Bands in the same order as `PeqCaps::bands`. Some only when `Capabilities::peq` is present.
     #[serde(default)]
     pub peq: Option<Vec<PeqBand>>,
 }
 
-/// UI → ドライバの細粒度な変更。ドライバは**これ 1 件分だけ**を書けばよい。
+/// A fine-grained change from the UI to the driver. The driver only needs to write **this one**.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Change {
-    /// 汎用設定。
+    /// Generic setting.
     Setting {
         id: String,
         value: SettingValue,
     },
-    /// オンボードプロファイル切替。成功後 UI は `read()` で読み直す。
+    /// Onboard profile switch. After success the UI rereads with `read()`.
     Profile(u8),
     ProfileName {
         index: u8,
         name: String,
     },
 
-    // ---- マウス
-    /// DPI ステージ全体 (数・値・色) と現在ステージ。
+    // ---- Mouse
+    /// The whole set of DPI stages (count, values, colors) and the current stage.
     DpiStages {
         stages: Vec<DpiStage>,
         active: usize,
     },
-    /// 現在ステージだけ切替。
+    /// Switch only the current stage.
     ActiveStage(usize),
     Button {
         slot: usize,
         action: ButtonAction,
     },
 
-    // ---- 共通
-    /// マクロ 1 本 (None で削除)。マウスなら `MouseState::macros`、キーボードなら `KeyboardState::macros`。
+    // ---- Shared
+    /// One macro (None deletes it). `MouseState::macros` for a mouse, `KeyboardState::macros` for a keyboard.
     Macro {
         slot: usize,
         def: Option<MacroDef>,
@@ -1232,46 +1241,46 @@ pub enum Change {
         state: LightingState,
     },
 
-    // ---- キーボード
+    // ---- Keyboard
     KeyMap {
         layer: u8,
         key: usize,
         action: KeyAction,
     },
-    /// そのレイヤーを既定のキーマップに戻す。
+    /// Return that layer to the default keymap.
     KeyMapReset {
         layer: u8,
     },
-    /// 複数キーに同じトラベル設定。
+    /// The same travel settings for multiple keys.
     KeyPerf {
         keys: Vec<usize>,
         perf: KeyPerf,
     },
-    /// 高度キーの設定/解除 (binding None で解除)。
+    /// Set/clear an advanced key (binding None clears it).
     Advanced {
         key: usize,
         layer: u8,
         binding: Option<Advanced>,
     },
 
-    // ---- オーディオ (USB DAC)
-    /// EQ のバンド 1 個。
+    // ---- Audio (USB DAC)
+    /// One EQ band.
     Peq {
         band: usize,
         value: PeqBand,
     },
-    /// EQ 全バンドを一括 (プリセット適用・インポート/undo 用)。
+    /// All EQ bands at once (for preset application, import and undo).
     PeqAll {
         bands: Vec<PeqBand>,
     },
 
-    // ---- マウス (速度連動 DPI)
-    /// 速度連動 DPI の有効/無効とカーブ。
+    // ---- Mouse (speed-linked DPI)
+    /// Enable/disable speed-linked DPI, and its curve.
     Adaptive(AdaptiveCurve),
 }
 
 impl Change {
-    /// 同じ対象への変更か (UI のキューで古い方を捨てる = ドラッグ中の連続送信を間引く)。
+    /// Whether the change targets the same thing (the UI queue drops the older one = thins out continuous sends during a drag).
     pub fn same_target(&self, other: &Change) -> bool {
         use Change::*;
         match (self, other) {

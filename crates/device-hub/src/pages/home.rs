@@ -1,4 +1,4 @@
-//! ホーム: 接続中のデバイスの一覧。
+//! Home: list of connected devices.
 
 use crate::app::Shell;
 use crate::ui::{self, Btn};
@@ -24,15 +24,15 @@ impl Shell {
             .flex()
             .flex_col()
             .gap(px(6.))
-            .child(ui::title("デバイス"))
+            .child(ui::title("Devices"))
             .child(ui::sub(if n == 0 {
                 if self.hub.scanned {
-                    "対応デバイスが見つかりません。USB / レシーバーを接続してください。".to_string()
+                    "No supported devices found. Connect a USB device or receiver.".to_string()
                 } else {
-                    "デバイスを探しています…".to_string()
+                    "Looking for devices…".to_string()
                 }
             } else {
-                format!("{n} 台を検出しました。ブラウザを閉じたまま設定できます。")
+                format!("{n} device(s) detected. You can configure them with the browser closed.")
             }));
 
         let mut col = div()
@@ -51,19 +51,19 @@ impl Shell {
                         .p(px(20.))
                         .child(ui::empty_state(
                             "usb",
-                            "デバイスが接続されていません",
-                            "Web 版 (mouse.fit / hub.xsyd.top) をブラウザで開いていると HID を掴まれて設定できないことがあります。ブラウザのタブを閉じてから再接続してください。",
+                            "No devices connected",
+                            "If the web version (mouse.fit / hub.xsyd.top) is open in a browser, it may hold the HID device and prevent configuration. Close the browser tab, then reconnect.",
                         ))
                         .child(
                             div()
                                 .flex()
                                 .justify_center()
                                 .gap(px(8.))
-                                .child(ui::button("rescan", "再検索", Some("refresh-cw"), Btn::Glass, cx, |this, _, cx| {
+                                .child(ui::button("rescan", "Rescan", Some("refresh-cw"), Btn::Glass, cx, |this, _, cx| {
                                     this.hub.scan();
                                     cx.notify();
                                 }))
-                                .child(ui::button("demo", "デモで試す", Some("sparkles"), Btn::Primary, cx, |this, _, cx| {
+                                .child(ui::button("demo", "Try demo", Some("sparkles"), Btn::Primary, cx, |this, _, cx| {
                                     this.hub.switch_backend(Arc::new(devhub_core::demo::DemoHub::new()));
                                     cx.notify();
                                 })),
@@ -98,18 +98,19 @@ impl Shell {
             DeviceKind::Keyboard => "keyboard",
             DeviceKind::Other if d.driver == DriverKind::Walkplay => "headphones",
             DeviceKind::Other => "usb",
+            DeviceKind::Audio => "headphones",
         };
         let status: (String, Hsla) = if !d.supported {
-            ("検出済み · ドライバ未実装".into(), p.warn)
+            ("Detected · driver not implemented".into(), p.warn)
         } else if d.asleep {
-            ("スリープ中 — 動かすと起動します".into(), p.warn)
+            ("Asleep — use it to wake it up".into(), p.warn)
         } else {
             (
                 match d.transport {
-                    Transport::Wired => "有線で接続中",
-                    Transport::Wireless24G => "2.4GHz で接続中",
-                    Transport::Bluetooth => "Bluetooth で接続中",
-                    Transport::Unknown => "接続中",
+                    Transport::Wired => "Connected (wired)",
+                    Transport::Wireless24G => "Connected (2.4GHz)",
+                    Transport::Bluetooth => "Connected (Bluetooth)",
+                    Transport::Unknown => "Connected",
                 }
                 .into(),
                 p.ok,
@@ -173,7 +174,7 @@ impl Shell {
                                             .text_size(px(11.))
                                             .text_color(p.faint)
                                             .child(ui::icon("battery", 14., p.faint))
-                                            .child(format!("{x}% · スリープ中"))
+                                            .child(format!("{x}% · Asleep"))
                                     } else {
                                         ui::battery_pill(x, c)
                                     })
@@ -237,21 +238,21 @@ impl Shell {
                         .child(ui::faint(b.to_string())),
                 )
         };
-        ui::card_titled("ヒント", "info", None).child(
+        ui::card_titled("Tips", "info", None).child(
             ui::body().gap(px(14.)).pt(px(8.)).pb(px(18.)).child(tip(
                 "zap",
-                "変更はすぐにデバイスへ書き込まれます",
-                "Web 版と同じ即時反映です。右上の点が黄色の間は書き込み中、緑になれば完了です。",
+                "Changes are written to the device immediately",
+                "Changes apply instantly, same as the web version. While the dot at the top right is yellow, a write is in progress; green means it is done.",
             ))
             .child(tip(
                 "feather",
-                "ゲーム中も軽い",
-                "アニメーションが止まると描画も止まります。背面にあるときは CPU / GPU をほぼ使いません。",
+                "Light even while gaming",
+                "Rendering stops when animations stop. While the window is in the background it uses almost no CPU / GPU.",
             ))
             .child(tip(
                 "globe",
-                "Web 版と同時に使わない",
-                "ブラウザの configurator が開いていると HID を取り合います。どちらか一方を使ってください。",
+                "Do not use it together with the web version",
+                "If the browser configurator is open, the two compete for the HID device. Use only one of them.",
             )),
         )
     }

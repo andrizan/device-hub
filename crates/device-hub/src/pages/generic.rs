@@ -1,4 +1,4 @@
-//! `SettingSpec` / `ActionSpec` を自動でカードに並べる (どのデバイスでも同じ描き方)。
+//! Lays out `SettingSpec` / `ActionSpec` into cards automatically (every device is drawn the same way).
 
 use crate::app::{tab_of_section, PopItem, Shell, Tab};
 use crate::ui::{self, Btn};
@@ -7,18 +7,19 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 use std::rc::Rc;
 
-/// section の表示順と見出し。
+/// Display order and headings of sections.
 pub const SECTIONS: &[(&str, &str, &str)] = &[
-    (section::PERFORMANCE, "パフォーマンス", "gauge"),
-    (section::SENSOR, "センサー", "radar"),
-    (section::CLICK, "クリック / ホイール", "mouse-pointer-click"),
-    (section::MAGNETIC, "磁気スイッチ", "magnet"),
-    (section::POWER, "電源 / インジケーター", "battery-charging"),
-    (section::KEYBOARD, "キーボード", "keyboard"),
-    (section::LIGHTING, "ライティング全般", "lightbulb"),
-    (section::CONNECTION, "接続", "radio"),
-    (section::AUDIO, "オーディオ", "volume-2"),
-    (section::SYSTEM, "メンテナンス", "wrench"),
+    (section::PERFORMANCE, "Performance", "gauge"),
+    (section::SENSOR, "Sensor", "radar"),
+    (section::CLICK, "Click / Wheel", "mouse-pointer-click"),
+    (section::MAGNETIC, "Magnetic switches", "magnet"),
+    (section::POWER, "Power / Indicators", "battery-charging"),
+    (section::KEYBOARD, "Keyboard", "keyboard"),
+    (section::LIGHTING, "General lighting", "lightbulb"),
+    (section::CONNECTION, "Connection", "radio"),
+    (section::AUDIO, "Audio", "volume-2"),
+    (section::CONTROLS, "Touch controls", "mouse-pointer-click"),
+    (section::SYSTEM, "Maintenance", "wrench"),
 ];
 
 pub fn section_meta(id: &str) -> (&'static str, &'static str) {
@@ -26,11 +27,11 @@ pub fn section_meta(id: &str) -> (&'static str, &'static str) {
         .iter()
         .find(|s| s.0 == id)
         .map(|s| (s.1, s.2))
-        .unwrap_or(("その他", "sliders-horizontal"))
+        .unwrap_or(("Other", "sliders-horizontal"))
 }
 
 impl Shell {
-    /// そのタブに属する section のカード (設定 + 操作) を並べて返す。
+    /// Returns the cards (settings + actions) of the sections that belong to that tab.
     pub fn section_cards(
         &mut self,
         tab: Tab,
@@ -42,7 +43,7 @@ impl Shell {
             return vec![];
         };
         let kb = caps.keyboard.is_some();
-        // 既知の順 → 未知の section の順。
+        // Known order → order of unknown sections.
         let mut order: Vec<String> = SECTIONS.iter().map(|s| s.0.to_string()).collect();
         for sp in &caps.settings {
             if !order.contains(&sp.section) {
@@ -63,7 +64,7 @@ impl Shell {
                 .settings
                 .iter()
                 .filter(|sp| sp.section == sec && visible(sp, &state))
-                // EQ ボリュームは EQ カード (プリアンプ) に出す。
+                // The EQ volume goes on the EQ card (preamp).
                 .filter(|sp| !(caps.peq.is_some() && sp.id == "eq_volume"))
                 .cloned()
                 .collect();
@@ -71,7 +72,7 @@ impl Shell {
                 .actions
                 .iter()
                 .filter(|a| a.section == sec && !a.id.ends_with("_finish"))
-                // DEF は EQ カードのプリセットに含める。
+                // DEF is included in the EQ card's presets.
                 .filter(|a| !(caps.peq.is_some() && a.id == "eq_def"))
                 .cloned()
                 .collect();
@@ -82,7 +83,7 @@ impl Shell {
             let mut body = ui::body();
             for (i, sp) in specs.iter().enumerate() {
                 let mut r = self.setting_row(sp, state.settings.get(&sp.id), i == 0, window, cx);
-                // enabled_when を満たさない設定は薄く (理由はツールチップ代わりに下へ)。
+                // Settings that do not satisfy enabled_when are dimmed (the reason goes below, in place of a tooltip).
                 if let Err(why) = crate::pages::perf::enabled(sp, &state) {
                     r = div()
                         .flex()
@@ -95,7 +96,7 @@ impl Shell {
             for (i, a) in actions.iter().enumerate() {
                 body = body.child(self.action_row(a, specs.is_empty() && i == 0, cx));
             }
-            // 磁気スイッチのカードにライブの押下深さバー (作動点を決めながら見られる)。
+            // Live press depth bar on the magnetic switch card (so you can see it while setting the actuation point).
             if sec == section::MAGNETIC
                 && caps
                     .mouse
@@ -136,11 +137,11 @@ impl Shell {
             }
         };
         let Some(v) = value.cloned() else {
-            return row(ui::faint("読み取れません").into_any_element()).opacity(0.6);
+            return row(ui::faint("Unable to read").into_any_element()).opacity(0.6);
         };
         let id = sp.id.clone();
         let confirm = sp.confirm.clone();
-        // 確認が要る設定は、確認後に送る。
+        // Settings that need confirmation are sent after it is confirmed.
         let send = Rc::new(
             move |this: &mut Shell, nv: SettingValue, cx: &mut Context<Shell>| {
                 let change = Change::Setting {
@@ -150,9 +151,9 @@ impl Shell {
                 if let Some(msg) = &confirm {
                     let c2 = change.clone();
                     this.confirm(
-                        "確認",
+                        "Confirm",
                         msg,
-                        "変更する",
+                        "Change",
                         true,
                         Rc::new(move |this, _, cx| this.apply(c2.clone(), cx)),
                         cx,
@@ -185,7 +186,7 @@ impl Shell {
                 let has_confirm = sp.confirm.is_some();
                 let s2 = send.clone();
                 let fid = format!("set-{}", sp.id);
-                // 直接入力した値はそのまま (必要なら確認を挟んで) 送る。
+                // A directly typed value is sent as is (with a confirmation in between if needed).
                 let s3 = send.clone();
                 let inp = self.num_field(
                     &fid,
@@ -211,7 +212,7 @@ impl Shell {
                             return;
                         }
                         if has_confirm && nv <= min + step * 0.5 {
-                            // 最小値 (0ms 等) だけ確認する。ドラッグ中は確認せずに止める。
+                            // Only the minimum value (0ms etc.) is confirmed. During a drag, stop without confirming.
                             if !crate::motion::is_down() {
                                 s2(this, SettingValue::Num(nv), cx);
                             }
@@ -231,9 +232,9 @@ impl Shell {
             SettingKind::Choice { options } => {
                 let cur = v.as_choice();
                 let sel = options.iter().position(|o| o.value == cur);
-                // セグメント化は収まるものだけ: ≤4 個なら中程度のラベルまで、
-                // ≤8 個なら短いラベルのみ。それ以上はドロップダウンに逃がす
-                // (DAC フィルター 5 択のようにカードからはみ出すのを防ぐ)。
+                // Segment only what fits: up to 4 options with medium-length labels,
+                // up to 8 options with short labels only. Anything more goes to a dropdown
+                // (prevents overflowing the card, as with the DAC filter's 5 choices).
                 let short = (options.len() <= 4
                     && options.iter().all(|o| o.label.chars().count() <= 8))
                     || (options.len() <= 8 && options.iter().all(|o| o.label.chars().count() <= 4));
@@ -288,7 +289,7 @@ impl Shell {
         let a2 = a.clone();
         let btn = ui::button(
             format!("act-{}", a.id),
-            if busy { "実行中…" } else { "実行" },
+            if busy { "Running…" } else { "Run" },
             Some(if a.file.is_some() {
                 "file-up"
             } else if a.danger {
@@ -312,10 +313,10 @@ impl Shell {
     pub fn start_action(&mut self, a: &ActionSpec, window: &mut Window, cx: &mut Context<Self>) {
         let Some(id) = self.device_id() else { return };
         if self.cur().and_then(|s| s.running.as_ref()).is_some() {
-            self.toast("別の操作を実行中です", true, cx);
+            self.toast("Another operation is running", true, cx);
             return;
         }
-        // キャリブレーションはウィザードで行う (押下深さを見ながら全キーを確認する)。
+        // Calibration is done in the wizard (check every key while watching the press depth).
         if a.id == "calibrate" {
             let live = self
                 .cur()
@@ -357,14 +358,14 @@ impl Shell {
             },
         );
         if let Some(c) = &confirm {
-            self.confirm(&title, c, "実行", danger, run, cx);
+            self.confirm(&title, c, "Run", danger, run, cx);
         } else {
             run(self, window, cx);
         }
     }
 }
 
-/// visible_when の判定。
+/// Evaluation of visible_when.
 pub fn visible(sp: &SettingSpec, st: &DeviceState) -> bool {
     match &sp.visible_when {
         None => true,

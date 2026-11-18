@@ -1,16 +1,16 @@
-//! アプリの殻 (Shell)。
+//! App shell (Shell).
 //!
 //! ```text
 //!  ┌──────────────┬─────────────────────────────────────────┐
-//!  │ ┌──────────┐ │  デバイス名        [プロファイル ▾] ●同期 │
-//!  │ │ sidebar  │ │  ( DPI | ボタン | 性能 | マクロ | 一般 )   │  ← 浮いた Clear ガラス
-//!  │ │  (glass) │ │  ┌ card ─────────┐ ┌ card ────────┐       │  ← Panel ガラス
+//!  │ ┌──────────┐ │  Device name            [Profile ▾] ●Sync │
+//!  │ │ sidebar  │ │  ( DPI | Buttons | Macros | General )      │  ← floating Clear glass
+//!  │ │  (glass) │ │  ┌ card ─────────┐ ┌ card ────────┐       │  ← Panel glass
 //!  │ └──────────┘ │  └───────────────┘ └──────────────┘       │
 //!  └──────────────┴─────────────────────────────────────────┘
 //! ```
 //!
-//! 状態はすべてこの 1 つの entity に置く (GPUI のリスナーから素直に触れる)。
-//! 各画面は `pages/*.rs` に `impl Shell` として分けてある。
+//! All state lives in this single entity (so GPUI listeners can touch it directly).
+//! Each screen is split into `pages/*.rs` as an `impl Shell`.
 
 use crate::prefs::Prefs;
 use crate::store::{Hub, Msg};
@@ -25,20 +25,20 @@ use std::collections::{BTreeSet, HashMap};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-// ====================================================================== ルート
+// ====================================================================== Root
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Route {
     Home,
     Device(DeviceId),
     Settings,
-    /// OBS オーバーレイの見た目・表示キーの編集。
+    /// Editor for the OBS overlay's appearance and displayed keys.
     Obs,
-    /// プロファイル + プロセス連動の自動化。
+    /// Profiles + process-linked automation.
     Auto,
 }
 
-/// デバイス画面のタブ (caps から出し分ける)。
+/// Tabs of the device screen (shown or hidden according to caps).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Tab {
     Dpi,
@@ -59,17 +59,17 @@ impl Tab {
     pub fn label(self) -> &'static str {
         match self {
             Tab::Dpi => "DPI",
-            Tab::Buttons => "ボタン",
-            Tab::Performance => "性能",
-            Tab::Keymap => "キー割り当て",
-            Tab::Trigger => "トリガー",
-            Tab::Advanced => "高度キー",
-            Tab::Lighting => "ライティング",
-            Tab::Live => "ライブ",
-            Tab::Macros => "マクロ",
-            Tab::Audio => "オーディオ",
-            Tab::Test => "テスト",
-            Tab::System => "一般",
+            Tab::Buttons => "Buttons",
+            Tab::Performance => "Performance",
+            Tab::Keymap => "Key mapping",
+            Tab::Trigger => "Triggers",
+            Tab::Advanced => "Advanced keys",
+            Tab::Lighting => "Lighting",
+            Tab::Live => "Live",
+            Tab::Macros => "Macros",
+            Tab::Audio => "Audio",
+            Tab::Test => "Test",
+            Tab::System => "General",
         }
     }
     pub fn icon(self) -> &'static str {
@@ -90,7 +90,7 @@ impl Tab {
     }
 }
 
-/// 汎用設定の section がどのタブに出るか。
+/// Which tab a generic settings section appears in.
 pub fn tab_of_section(section: &str, keyboard: bool) -> Tab {
     use devhub_core::section::*;
     match section {
@@ -138,7 +138,7 @@ pub fn tabs_for(caps: &Capabilities) -> Vec<Tab> {
     {
         v.push(Tab::Lighting);
     }
-    // ライブライティング: DirectDrive + 押し込み深さのライブ読み出しがある機種だけ。
+    // Live lighting: only models that have DirectDrive + a live press-depth readout.
     if caps.lighting.iter().any(|a| a.direct_drive)
         && caps
             .keyboard
@@ -179,23 +179,23 @@ pub fn tabs_for(caps: &Capabilities) -> Vec<Tab> {
     v
 }
 
-// ====================================================================== オーバーレイ
+// ====================================================================== Overlays
 
 pub type Cb = Rc<dyn Fn(&mut Shell, &mut Window, &mut Context<Shell>)>;
 pub type CbIdx = Rc<dyn Fn(&mut Shell, usize, &mut Window, &mut Context<Shell>)>;
 pub type CbF = Rc<dyn Fn(&mut Shell, f32, &mut Context<Shell>)>;
-/// 2D ドラッグ (x, y はトラック矩形内の 0..1。y は上が 1)。
+/// 2D drag (x, y are 0..1 within the track rect; y is 1 at the top).
 pub type CbXY = Rc<dyn Fn(&mut Shell, f32, f32, &mut Context<Shell>)>;
 
-/// スライダー等のドラッグ中の状態。
+/// State while dragging a slider etc.
 pub struct Drag {
-    /// motion::rect のキー (トラックの矩形)。
+    /// motion::rect key (the track's rect).
     pub rect: String,
-    /// 0..1 の位置で呼ばれる。
+    /// Called with a 0..1 position.
     pub apply: CbF,
-    /// 縦方向のドラッグ (トラベル図)。
+    /// Vertical drag (travel diagram).
     pub vertical: bool,
-    /// 2D ドラッグ (EQ グラフ)。Some なら `apply` の代わりにこちらを呼ぶ。
+    /// 2D drag (EQ graph). If Some, this is called instead of `apply`.
     pub xy: Option<CbXY>,
 }
 
@@ -236,7 +236,7 @@ pub struct Toast {
     pub born: Instant,
 }
 
-/// モーダル。中身は `overlay.rs` が描く。
+/// Modal. Its contents are drawn by `overlay.rs`.
 pub enum Modal {
     Confirm {
         title: String,
@@ -245,40 +245,40 @@ pub enum Modal {
         danger: bool,
         on_ok: Cb,
     },
-    /// マウスボタンの割り当て編集。
+    /// Mouse button assignment editor.
     Button {
         slot: usize,
         draft: ButtonAction,
         capture: bool,
     },
-    /// キーボード 1 打の取り込み (ショートカット)。結果は `on_key`。
+    /// Capture of a single keystroke (shortcut). The result goes to `on_key`.
     CaptureKey {
         title: String,
         got: Option<KeyStroke>,
         on_key: Rc<dyn Fn(&mut Shell, KeyStroke, &mut Window, &mut Context<Shell>)>,
     },
-    /// 色選択。
+    /// Color picker.
     Color {
         title: String,
         draft: Rgb,
         on_ok: Rc<dyn Fn(&mut Shell, Rgb, &mut Window, &mut Context<Shell>)>,
     },
-    /// コマンドパレット (Ctrl+K)。入力欄は `inputs["palette"]`。
+    /// Command palette (Ctrl+K). The input field is `inputs["palette"]`.
     Palette,
-    /// キャリブレーション・ウィザード。`maxes` はキーごとの最大押下深さ (mm)。
+    /// Calibration wizard. `maxes` is the maximum press depth per key (mm).
     Calibrate { started: bool, maxes: Vec<f32> },
-    /// テキスト入力 (名前変更など)。入力欄は `inputs["modal"]`。
+    /// Text input (rename etc.). The input field is `inputs["modal"]`.
     Text {
         title: String,
         on_ok: Rc<dyn Fn(&mut Shell, String, &mut Window, &mut Context<Shell>)>,
     },
 }
 
-/// マクロ記録中。
+/// Macro recording in progress.
 pub struct Recording {
     pub started: Instant,
     pub last: Instant,
-    /// 0 = 実時間を記録, 1 = 固定遅延, 2 = 遅延なし。
+    /// 0 = record real time, 1 = fixed delay, 2 = no delay.
     pub delay_mode: u8,
     pub fixed_ms: u32,
     pub mods: Modifiers,
@@ -290,7 +290,7 @@ pub struct Shell {
     pub hub: Hub,
     pub prefs: Prefs,
     pub route: Route,
-    /// 起動時に復元するデバイス。最初の列挙成功かユーザーの画面操作で消費する。
+    /// Device to restore at startup. Consumed by the first successful enumeration or a user action on screen.
     startup_device: Option<DeviceId>,
     pub tab: Tab,
     pub focus: FocusHandle,
@@ -301,7 +301,7 @@ pub struct Shell {
     pub modal: Option<Modal>,
     pub toasts: Vec<Toast>,
     pub inputs: HashMap<String, Entity<InputState>>,
-    /// `num:*` 入力欄のコミット先 (min, max, step, apply)。レンダリングごとに登録し直す。
+    /// Commit target of `num:*` inputs (min, max, step, apply). Re-registered on every render.
     pub num_fields: HashMap<
         String,
         (
@@ -311,105 +311,105 @@ pub struct Shell {
             Rc<dyn Fn(&mut Shell, f32, &mut Context<Shell>)>,
         ),
     >,
-    /// 数値入力欄に最後に書き込んだ表示文字列 (フォーカス中は上書きしない)。
+    /// Display string last written to a numeric input (not overwritten while focused).
     num_sync: HashMap<String, String>,
 
-    // ---- 画面ごとの UI 状態
-    /// DPI: 編集中のステージ。
+    // ---- Per-screen UI state
+    /// DPI: stage being edited.
     pub dpi_sel: usize,
-    /// DPI: ユーザーがステージを選んだか。未選択なら現在使用中の
-    /// ステージ (active_stage) に追従する。
+    /// DPI: whether the user picked a stage. If not, it follows the stage
+    /// currently in use (active_stage).
     pub dpi_sel_touch: bool,
-    /// オーディオ: 編集中の EQ バンド。
+    /// Audio: EQ band being edited.
     pub peq_sel: usize,
-    /// ライブライティングのエンジン状態。
+    /// Live lighting engine state.
     pub fx: crate::livefx::Engine,
-    /// ライブライティング実行中のデバイス (None = 停止)。タブやデバイスを離れても続く。
+    /// Device running live lighting (None = stopped). Keeps running after leaving the tab or device.
     pub fx_on: Option<DeviceId>,
-    /// 前フレームの時刻 (dt 計算用)。
+    /// Time of the previous frame (for dt).
     pub fx_last: Instant,
-    /// 起動時自動開始を試したか。
+    /// Whether auto-start at launch was tried.
     pub fx_autostarted: bool,
-    /// キーボード: 表示中のレイヤー。
+    /// Keyboard: layer being shown.
     pub kb_layer: u8,
-    /// キーボード: 選択中のキー (layout index)。
+    /// Keyboard: selected key (layout index).
     pub kb_sel: BTreeSet<usize>,
-    /// キー割り当ての候補グループ。
+    /// Candidate group for key assignment.
     pub key_group: usize,
-    /// 組み合わせキーの修飾 (キー割り当て)。
+    /// Modifiers for key combinations (key mapping).
     pub combo_mods: u8,
-    /// 高度キーの編集中の下書き。
+    /// Draft of the advanced key being edited.
     pub adv: crate::pages::advanced::AdvDraft,
-    /// ライティング: 領域と塗り色。
+    /// Lighting: zone and fill color.
     pub light_area: u8,
     pub paint: Rgb,
-    /// ライティング連動 (公式の link): ON のとき上/下ゾーンスイッチを同時に動かす。
+    /// Lighting link (official "link"): when ON, the top/bottom zone switches move together.
     pub light_link: bool,
-    /// ライティングプレビューのアニメーション位相 (秒)。ティッカーが加算する。
+    /// Animation phase of the lighting preview (seconds). Advanced by the ticker.
     pub anim_t: f32,
-    /// OBS オーバーレイの設定 (`%APPDATA%\DeviceHub\obs_overlay.json`)。
+    /// OBS overlay settings (`%APPDATA%\DeviceHub\obs_overlay.json`).
     pub obs_cfg: devhub_obs::config::OverlayCfg,
-    /// プレビューするソース種別。
+    /// Source type to preview.
     pub obs_mode: devhub_obs::render::Mode,
-    /// プレビュー画像 (毎フレーム差し替え。古いものは drop_image で解放)。
+    /// Preview image (replaced every frame; old ones are freed with drop_image).
     pub obs_img: Option<std::sync::Arc<gpui::RenderImage>>,
-    /// プレビューのアニメ時刻 / 和文フォント。
+    /// Preview animation time / Japanese-text font.
     pub obs_t: f32,
     pub obs_font: Option<std::rc::Rc<Option<fontdue::Font>>>,
-    /// ライティングページがアニメする効果を表示中か (render が毎回セット)。
+    /// Whether the Lighting page is showing an animated effect (set by render every time).
     pub light_anim: bool,
-    /// 「実機でプレビュー」最後に DirectDrive フレームを送った時刻 (間引き用)。
+    /// Time the last DirectDrive frame was sent for "Preview on device" (for throttling).
     pub dd_last: Instant,
-    /// マクロ: 選択スロットと下書き。
+    /// Macros: selected slot and draft.
     pub macro_sel: usize,
     pub macro_draft: Option<MacroDef>,
     pub macro_event_sel: Option<usize>,
     pub recording: Option<Recording>,
-    /// 元に戻す / やり直し (デバイス, 変更前のスナップショット)。
+    /// Undo / redo (device, snapshot from before the change).
     pub undo: Vec<(DeviceId, DeviceState)>,
     pub redo: Vec<(DeviceId, DeviceState)>,
     last_snap: Option<(DeviceId, Instant)>,
-    /// undo/redo/プリセット適用で書き込み中 (履歴に積まない)。
+    /// Writing due to undo/redo/preset apply (not pushed onto the history).
     restoring: bool,
-    /// 構成切替+再読が終わったら適用する状態 (別構成への undo/redo 等)。
+    /// State to apply once the config switch + re-read finishes (undo/redo to another config, etc.).
     pending_restore: Option<PendingRestore>,
-    /// テストタブの状態。
+    /// Test tab state.
     pub test: crate::pages::test::TestState,
-    /// 録画中のプロファイル (prefs.profiles の index)。`apply` で Change を追記する。
+    /// Profile being recorded (index into prefs.profiles). `apply` appends Changes.
     pub rec_profile: Option<usize>,
-    /// アクティブ中のプロセスルール (rule_key → 離脱時の復帰に使う記録)。
+    /// Active process rules (rule_key → record used to restore on leaving).
     pub proc_states: std::collections::HashMap<String, crate::procmon::ProcApplied>,
-    /// 直前 tick の前面 exe (Some = 解決成功)。遷移は 2 tick 連続で同じときだけ評価。
+    /// Foreground exe at the previous tick (Some = resolved). A transition is evaluated only when it is the same for 2 consecutive ticks.
     pub proc_fg: Option<String>,
-    /// セッションが書き込み可能になるまで保留した変更列 (デバイス id → 残りの Change)。
+    /// Changes held until the session becomes writable (device id → remaining Changes).
     pub proc_pending: Vec<(String, Vec<Change>)>,
-    /// Failed セッションの最後の reload 試行時刻 (drain の再試行間引き用)。
+    /// Time of the last reload attempt for a Failed session (to throttle drain retries).
     pub proc_retry: std::collections::HashMap<String, std::time::Instant>,
-    /// 自動化ページのフォーム選択状態。
+    /// Form selection state of the automation page.
     pub auto_form: crate::pages::auto::AutoForm,
 
     toast_timer: bool,
-    /// 自窓の HWND — 最小化/背面中にワーキングセットを OS へ返すために使う。
+    /// HWND of our own window — used to return the working set to the OS while minimized/in the background.
     #[cfg(windows)]
     hwnd: isize,
-    /// メモリ優先度を下げているか (背面・最小化中に立てる)。
+    /// Whether memory priority is lowered (set while in the background or minimized).
     #[cfg(windows)]
     mem_low: bool,
-    /// 背面に入ってからのティック数 (再トリム間隔用)。
+    /// Ticks since going to the background (for the re-trim interval).
     #[cfg(windows)]
     mem_ticks: u32,
-    /// 窓が前面にあるか (render で毎フレーム更新)。
-    /// 背面では Windows 11 が raw input 配信を制限するため、ポーリング実測の
-    /// 表示はこのフラグで信用できるかを出し分ける。
+    /// Whether the window is in the foreground (updated by render every frame).
+    /// In the background Windows 11 throttles raw input delivery, so the measured polling
+    /// display uses this flag to decide whether the value can be trusted.
     pub(crate) last_window_active: bool,
-    /// ポーリング 5 秒計測の終了時刻 (Some の間は計測中 — カーソル固定中)。
+    /// End time of the 5-second polling measurement (Some = measuring — cursor pinned).
     pub(crate) poll_meas_end: Option<std::time::Instant>,
-    /// 直近の 5 秒計測結果 (ピーク Hz, 間隔中央値 ms, カウント/秒)。
+    /// Latest 5-second measurement result (peak Hz, median interval ms, counts/s).
     pub(crate) poll_meas_result: Option<(f32, f32, f32)>,
 }
 
-/// 構成切替が完了してから適用する状態 (別構成への undo/redo など)。
-/// 切替と再読が失敗したら `rollback_*` を履歴へ戻す。
+/// State to apply after the config switch completes (undo/redo to another config, etc.).
+/// If the switch or re-read fails, `rollback_*` is put back into the history.
 struct PendingRestore {
     id: DeviceId,
     state: DeviceState,
@@ -417,17 +417,17 @@ struct PendingRestore {
     rollback_redo: Option<DeviceState>,
 }
 
-/// `apply_state` の結果。
+/// Result of `apply_state`.
 pub enum RestoreOutcome {
-    /// 差分を書き込んだ (件数)。
+    /// Wrote the diff (count).
     Applied(usize),
-    /// 構成切替を先に送った — 切替+再読が終わってから適用される。
+    /// Sent the config switch first — applied after the switch + re-read finishes.
     Switching,
-    /// 適用できなかった (セッション・状態・caps なし、または切替中)。
+    /// Could not apply (no session/state/caps, or a switch in progress).
     Nothing,
 }
 
-/// 別構成への復元が失敗したとき履歴を戻す先。
+/// Where to restore history to when a restore to another config fails.
 enum HistSrc {
     None,
     Undo,
@@ -451,7 +451,7 @@ impl Shell {
         hub.fw_native = prefs.fw_native_notify;
         hub.scan();
 
-        // ワーカーからの結果を受け取る (来たときだけ起きる)。
+        // Receive results from the worker (wakes only when one arrives).
         cx.spawn(async move |this: WeakEntity<Shell>, cx: &mut AsyncApp| {
             while let Some(msg) = rx.next().await {
                 let alive = this
@@ -472,7 +472,7 @@ impl Shell {
         })
         .detach();
 
-        // 定期: 列挙 (2 秒) とバッテリー (30 秒)。
+        // Periodic: enumeration (2 s) and battery (30 s).
         cx.spawn(async move |this: WeakEntity<Shell>, cx: &mut AsyncApp| {
             let mut ticks = 0u32;
             loop {
@@ -496,11 +496,11 @@ impl Shell {
         })
         .detach();
 
-        // ライティングプレビュー用の軽いティッカー (~30fps)。
-        // render 側が立てた `light_anim` が真の間だけ位相を進めて再描画する。
-        // 実機プレビュー (DirectDrive) もこの位相からフレームを送るので、
-        // レートは実機の滑らかさに直結する (probe9: 87fps まで輻輳しない)。
-        // ついでに ~400ms ごと実測レポートレートも取る (性能/テスト表示中のみ)。
+        // Light ticker for the lighting preview (~30fps).
+        // Advances the phase and redraws only while `light_anim`, set by render, is true.
+        // The on-device preview (DirectDrive) also sends frames from this phase, so
+        // the rate directly affects smoothness on the device (probe9: no congestion up to 87fps).
+        // Also samples the measured report rate every ~400ms (only while Performance/Test is shown).
         cx.spawn(async move |this: WeakEntity<Shell>, cx: &mut AsyncApp| {
             let mut n = 0u32;
             loop {
@@ -514,24 +514,24 @@ impl Shell {
                             this.anim_t += 0.033;
                             cx.notify();
                         }
-                        // OBS オーバーレイのプレビュー (~15fps)。
+                        // OBS overlay preview (~15fps).
                         if this.route == Route::Obs && n.is_multiple_of(2) {
                             this.obs_t += 0.066;
                             cx.notify();
                         }
-                        // ライブライティング (タブ/デバイスを離れても・最小化中も動かす)。
+                        // Live lighting (keeps running after leaving the tab/device and while minimized).
                         this.fx_tick(cx);
-                        // ライティング画面表示中だけ点灯色ポーリングを回す
-                        // (公式 HUB と同じく [5,3] readback の実機そのまま表示)。
+                        // Poll the lit color only while the Lighting screen is shown
+                        // (as in the official HUB, shows the real device's [5,3] readback as is).
                         let lit_id = if this.tab == Tab::Lighting {
                             this.device_id()
                         } else {
                             None
                         };
                         this.hub.live_light(lit_id.as_ref());
-                        // ライティング以外のタブに出たら実機プレビューを止める
-                        // (フレーム供給が切れても最後の絵が残るため明示的に止める)。
-                        // ライブライティング中のデバイスは除く。
+                        // Stop the on-device preview when moving to a tab other than Lighting
+                        // (the last picture stays even if the frame supply stops, so stop it explicitly).
+                        // Devices running live lighting are excluded.
                         if this.tab != Tab::Lighting {
                             if let Some(id) = this
                                 .device_id()
@@ -543,16 +543,16 @@ impl Shell {
                                 }
                             }
                         }
-                        // 実測ポーリングレートは開いているデバイスで常時 (~400ms)。
-                        // INPUTSINK なので背面でも届くが、Windows 11 は背面プロセスへの
-                        // raw input 配信を制限する — 値の信用可否は last_window_active で
-                        // 表示側が出し分ける (計測自体は続ける)。
+                        // The measured polling rate is taken continuously for the open device (~400ms).
+                        // INPUTSINK delivers it in the background too, but Windows 11 throttles
+                        // raw input delivery to background processes — whether the value can be trusted is
+                        // decided on the display side via last_window_active (measurement itself continues).
                         if n.is_multiple_of(12) && matches!(this.route, Route::Device(_)) {
                             if let Some(id) = this.device_id() {
                                 this.hub.poll_rate(&id);
                             }
                         }
-                        // 5 秒計測の終了処理 — 結果を確定してカーソル固定を解除。
+                        // End of the 5-second measurement — finalize the result and release the cursor lock.
                         if this
                             .poll_meas_end
                             .is_some_and(|end| std::time::Instant::now() >= end)
@@ -577,7 +577,7 @@ impl Shell {
                             }
                             cx.notify();
                         }
-                        // プロセス監視 (~1s): フォアグラウンド遷移でプロファイル適用。
+                        // Process monitoring (~1s): apply a profile on foreground transitions.
                         if n.is_multiple_of(30) {
                             this.proc_tick(cx);
                         }
@@ -661,7 +661,7 @@ impl Shell {
         }
     }
 
-    /// 列挙結果が来た後: 最後に開いていたデバイスへ自動で入る / 抜けたらホームへ。
+    /// After an enumeration result arrives: automatically enter the last opened device / go Home when it is unplugged.
     fn after_msg(&mut self, scan_succeeded: bool, cx: &mut Context<Self>) {
         if let Route::Device(id) = &self.route {
             if !self.hub.devices.iter().any(|d| d.id == *id) && self.hub.scanned {
@@ -677,17 +677,17 @@ impl Shell {
                 }
             }
         }
-        // 構成切替の結果を見て、切替を待っている復元を処理する。
+        // Look at the config switch result and handle the restore waiting for it.
         if let Some(pr) = &self.pending_restore {
             let (failed, ready) = match self.hub.session(&pr.id) {
                 Some(s) if s.switch_failed => (true, false),
                 Some(s) if !s.switching_profile && s.state.is_some() => (false, true),
-                _ => (false, false), // まだ切替+再読の途中 — 次のメッセージで再評価。
+                _ => (false, false), // still in the middle of the switch + re-read — re-evaluated on the next message.
             };
             if failed || ready {
                 let pr = self.pending_restore.take().unwrap();
                 if failed {
-                    // 何も書かずに履歴へ戻す。
+                    // Return to the history without writing anything.
                     if let Some(st) = pr.rollback_undo {
                         self.undo.push((pr.id.clone(), st));
                     }
@@ -698,14 +698,14 @@ impl Shell {
                         s.switch_failed = false;
                     }
                 } else {
-                    // 新しい構成の状態との差分だけを書く。
+                    // Write only the diff against the new config's state.
                     self.apply_state_to(&pr.id, &pr.state, false, HistSrc::None, cx);
                 }
             }
         }
     }
 
-    // ------------------------------------------------------------------ 共通操作
+    // ------------------------------------------------------------------ Common operations
 
     pub fn toast(&mut self, msg: impl Into<String>, error: bool, cx: &mut Context<Self>) {
         self.toasts.push(Toast {
@@ -749,7 +749,7 @@ impl Shell {
 
     fn stop_device_preview(&mut self) {
         if let Some(id) = self.device_id() {
-            // ライブライティング中のデバイスは測定も DirectDrive も止めない。
+            // A device running live lighting stops neither measurement nor DirectDrive.
             if self.fx_on.as_ref() == Some(&id) {
                 return;
             }
@@ -785,7 +785,7 @@ impl Shell {
         self.macro_draft = None;
         self.light_area = 0;
         self.adv = Default::default();
-        // 最初のタブ。
+        // First tab.
         self.tab = self
             .hub
             .session(&id)
@@ -803,20 +803,20 @@ impl Shell {
         }
     }
 
-    /// 開いているデバイスへ変更を送る。
+    /// Send a change to the open device.
     pub fn apply(&mut self, change: Change, cx: &mut Context<Self>) {
         if let Some(id) = self.device_id() {
-            // 構成切替+全読み直しの最中は構成内の編集を止める
-            // (切替前の構成の値を切替後の構成へ書かないため)。
+            // Block edits within a config during a config switch + full re-read
+            // (so values from the pre-switch config are not written to the post-switch config).
             if self.hub.session(&id).is_some_and(|s| s.switching_profile) {
-                self.toast("構成を切り替えています…", false, cx);
+                self.toast("Switching configuration…", false, cx);
                 return;
             }
             if !self.restoring {
                 self.snapshot(&id);
             }
-            // プロファイル録画中: 対象デバイスへの変更を Change 列として追記する。
-            // 直前と同じ対象への連続変更 (スライダードラッグの中間値) は最新だけ残す。
+            // While recording a profile: append changes to the target device as a Change list.
+            // Consecutive changes to the same target as the previous one (intermediate slider-drag values) keep only the latest.
             if let Some(pi) = self.rec_profile {
                 if let Some(p) = self.prefs.profiles.get_mut(pi) {
                     if let Some(t) = p.devices.iter_mut().find(|t| t.device == id.0) {
@@ -833,7 +833,7 @@ impl Shell {
         }
     }
 
-    /// 変更前の状態を履歴に積む。0.8 秒以内の連続操作 (スライダーのドラッグ等) は 1 回分にまとめる。
+    /// Push the pre-change state onto the history. Consecutive operations within 0.8 s (slider drags etc.) are merged into one.
     fn snapshot(&mut self, id: &DeviceId) {
         let fresh = match &self.last_snap {
             Some((d, t)) => d != id || t.elapsed() > Duration::from_millis(800),
@@ -851,8 +851,8 @@ impl Shell {
         self.last_snap = Some((id.clone(), Instant::now()));
     }
 
-    /// 状態をまるごと `target` に揃える (差分だけ書く)。
-    /// 構成が違う場合は先に切替を送り、再読が終わってから適用する (`pending_restore`)。
+    /// Bring the whole state to `target` (writing only the diff).
+    /// If the config differs, send the switch first and apply after the re-read finishes (`pending_restore`).
     pub fn apply_state(
         &mut self,
         target: &DeviceState,
@@ -882,7 +882,7 @@ impl Shell {
         if s.switching_profile {
             return RestoreOutcome::Nothing;
         }
-        // 別構成のスナップショットへ差分を書くと切替後の構成を壊す — 先に切り替える。
+        // Writing a diff against another config's snapshot would corrupt the post-switch config — switch first.
         if cur.profile.active != target.profile.active {
             if caps
                 .profiles
@@ -923,41 +923,41 @@ impl Shell {
         RestoreOutcome::Applied(n)
     }
 
-    /// プリセットを現在選択中の構成へ適用する (適用前に互換性を検査する)。
+    /// Apply a preset to the currently selected config (compatibility is checked before applying).
     pub fn apply_preset(&mut self, name: &str, mut st: DeviceState, cx: &mut Context<Self>) {
         let Some((caps, cur)) = self
             .device_id()
             .and_then(|id| self.hub.session(&id))
             .and_then(|s| s.caps.clone().zip(s.state.clone()))
         else {
-            self.toast("デバイスの設定を読み込めていません", true, cx);
+            self.toast("Device settings have not been loaded yet", true, cx);
             return;
         };
         match crate::store::state_compatible(&caps, &st) {
             Err(e) => {
-                self.toast(format!("「{name}」は適用できません: {e}"), true, cx);
+                self.toast(format!("Cannot apply \"{name}\": {e}"), true, cx);
                 return;
             }
             Ok(Some(w)) => self.toast(w, false, cx),
             Ok(None) => {}
         }
-        // プリセットは現在選択中の構成へだけ反映する。
+        // A preset is applied only to the currently selected config.
         st.profile.active = cur.profile.active;
         match self.apply_state(&st, true, cx) {
             RestoreOutcome::Applied(n) => self.toast(
-                format!("「{name}」を適用しました ({n} 項目) — Ctrl+Z で戻せます"),
+                format!("Applied \"{name}\" ({n} item(s)) — Ctrl+Z to undo"),
                 false,
                 cx,
             ),
-            RestoreOutcome::Switching => self.toast("構成を切り替えて適用します…", false, cx),
-            RestoreOutcome::Nothing => self.toast("適用できませんでした", true, cx),
+            RestoreOutcome::Switching => self.toast("Switching configuration to apply…", false, cx),
+            RestoreOutcome::Nothing => self.toast("Could not apply", true, cx),
         }
     }
 
     pub fn undo(&mut self, cx: &mut Context<Self>) {
         let Some(id) = self.device_id() else { return };
         let Some(pos) = self.undo.iter().rposition(|(d, _)| *d == id) else {
-            self.toast("元に戻せる変更はありません", false, cx);
+            self.toast("Nothing to undo", false, cx);
             return;
         };
         let (_, st) = self.undo.remove(pos);
@@ -966,9 +966,9 @@ impl Shell {
         }
         match self.apply_state_to(&id, &st, false, HistSrc::Undo, cx) {
             RestoreOutcome::Applied(n) => {
-                self.toast(format!("元に戻しました ({n} 項目)"), false, cx)
+                self.toast(format!("Undone ({n} item(s))"), false, cx)
             }
-            RestoreOutcome::Switching => self.toast("構成を切り替えて元に戻します…", false, cx),
+            RestoreOutcome::Switching => self.toast("Switching configuration to undo…", false, cx),
             RestoreOutcome::Nothing => {
                 self.undo.push((id, st));
                 self.redo.pop();
@@ -987,9 +987,9 @@ impl Shell {
         }
         match self.apply_state_to(&id, &st, false, HistSrc::Redo, cx) {
             RestoreOutcome::Applied(n) => {
-                self.toast(format!("やり直しました ({n} 項目)"), false, cx)
+                self.toast(format!("Redone ({n} item(s))"), false, cx)
             }
-            RestoreOutcome::Switching => self.toast("構成を切り替えてやり直します…", false, cx),
+            RestoreOutcome::Switching => self.toast("Switching configuration to redo…", false, cx),
             RestoreOutcome::Nothing => {
                 self.redo.push((id, st));
                 self.undo.pop();
@@ -1006,7 +1006,7 @@ impl Shell {
             .is_some_and(|id| self.redo.iter().any(|(d, _)| *d == id))
     }
 
-    /// 確認ダイアログ付きで実行。
+    /// Run with a confirmation dialog.
     pub fn confirm(
         &mut self,
         title: &str,
@@ -1062,7 +1062,7 @@ impl Shell {
         self.drag_to(pos, cx);
     }
 
-    /// 2D ドラッグを始める (`f` は x, y = 0..1 で呼ばれる。y は上が 1)。
+    /// Start a 2D drag (`f` is called with x, y = 0..1; y is 1 at the top).
     pub fn begin_drag_xy(
         &mut self,
         rect: &str,
@@ -1101,7 +1101,7 @@ impl Shell {
         cx.notify();
     }
 
-    /// テキスト入力欄 (キーごとに 1 つ作って使い回す)。
+    /// Text input (one is created per key and reused).
     pub fn input(
         &mut self,
         key: &str,
@@ -1147,7 +1147,7 @@ impl Shell {
         e
     }
 
-    /// 入力欄の値を外から書き換える (別のスロットを選んだとき等)。
+    /// Rewrite an input's value from outside (e.g. when another slot is selected).
     pub fn set_input(&mut self, key: &str, v: &str, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(e) = self.inputs.get(key).cloned() {
             let v = v.to_string();
@@ -1155,8 +1155,8 @@ impl Shell {
         }
     }
 
-    /// 数値入力欄: `num:{id}` のエンティティを用意し、値が変わっていたら (フォーカス中以外)
-    /// 表示を同期する。`f` は Enter/フォーカスアウト時に量化済みの値で呼ばれる。
+    /// Numeric input: prepare the `num:{id}` entity and, if the value changed (unless focused),
+    /// sync the display. `f` is called with the quantized value on Enter/focus-out.
     pub fn num_field(
         &mut self,
         id: &str,
@@ -1187,7 +1187,7 @@ impl Shell {
 
     fn commit_input(&mut self, key: &str, v: String, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(id) = key.strip_prefix("num:") {
-            // 数値入力: パースできなければ現在表示のまま (次のレンダリングで正規形に戻る)。
+            // Numeric input: if it cannot be parsed, keep what is shown (it returns to the canonical form on the next render).
             let v = v.trim().replace(',', ".");
             if let (Ok(v), Some((min, max, step, f))) =
                 (v.parse::<f32>(), self.num_fields.get(id).cloned())
@@ -1212,7 +1212,7 @@ impl Shell {
                 }
             }
             "modal" => {
-                // Enter で OK と同じ。
+                // Enter acts the same as OK.
                 if matches!(self.modal, Some(Modal::Text { .. })) {
                     if let Some(Modal::Text { on_ok, .. }) = self.modal.take() {
                         on_ok(self, v, window, cx);
@@ -1223,7 +1223,7 @@ impl Shell {
         }
     }
 
-    // ------------------------------------------------------------------ テーマ
+    // ------------------------------------------------------------------ Theme
 
     pub fn set_light(&mut self, light: bool, cx: &mut Context<Self>) {
         self.prefs.theme = if light { "light" } else { "dark" }.into();
@@ -1242,10 +1242,10 @@ impl Shell {
         cx.notify();
     }
 
-    // ------------------------------------------------------------------ キー入力
+    // ------------------------------------------------------------------ Key input
 
     fn on_key_down(&mut self, e: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        // ボタン割り当て中のキー取り込み。
+        // Key capture while assigning a button.
         if let Some(Modal::Button {
             draft,
             capture: true,
@@ -1269,7 +1269,7 @@ impl Shell {
             cx.notify();
             return;
         }
-        // ショートカット取り込み。
+        // Shortcut capture.
         if let Some(Modal::CaptureKey { got, .. }) = self.modal.as_mut() {
             if let Some(u) = crate::keycode::usage_of(&e.keystroke.key) {
                 let m = crate::keycode::mods_of(&e.keystroke.modifiers);
@@ -1335,7 +1335,7 @@ impl Shell {
 
     fn on_modifiers(&mut self, e: &ModifiersChangedEvent, cx: &mut Context<Self>) {
         if let Some(Modal::CaptureKey { got, .. }) = self.modal.as_mut() {
-            // 修飾だけの押下も表示する。
+            // Also show presses of modifiers alone.
             let m = crate::keycode::mods_of(&e.modifiers);
             if m != 0 && got.is_none_or(|g| g.usage == 0) {
                 *got = Some(KeyStroke { mods: m, usage: 0 });
@@ -1390,7 +1390,7 @@ impl Shell {
         let Some(d) = self.macro_draft.as_mut() else {
             return;
         };
-        // 直前のイベントの「後の待ち」を実時間で埋める。
+        // Fill the previous event's "wait after" in real time.
         if let Some(last) = d.events.last_mut() {
             last.delay_ms = match mode {
                 0 => since.min(max_delay),
@@ -1426,7 +1426,7 @@ impl Shell {
             .map(|k| k.layout.len())
     }
 
-    /// 開いているデバイスのセッション。
+    /// Session of the open device.
     pub fn cur(&self) -> Option<&crate::store::Session> {
         match &self.route {
             Route::Device(id) => self.hub.session(id),
@@ -1434,7 +1434,7 @@ impl Shell {
         }
     }
 
-    // ------------------------------------------------------------------ サイドバー
+    // ------------------------------------------------------------------ Sidebar
 
     fn sidebar(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let p = theme::pal();
@@ -1453,9 +1453,9 @@ impl Shell {
                     .text_size(px(12.))
                     .text_color(p.faint)
                     .child(if self.hub.scanned {
-                        "デバイスが見つかりません"
+                        "No devices found"
                     } else {
-                        "検索中…"
+                        "Searching…"
                     }),
             );
         }
@@ -1488,7 +1488,7 @@ impl Shell {
                     .pt(px(46.))
                     .px(px(10.))
                     .pb(px(10.))
-                    // ブランド
+                    // Brand
                     .child(
                         div()
                             .flex()
@@ -1526,9 +1526,9 @@ impl Shell {
                                     )
                                     .child(div().text_size(px(10.5)).text_color(p.faint).child(
                                         if self.hub.demo {
-                                            "デモモード"
+                                            "Demo mode"
                                         } else {
-                                            "ブラウザ不要の設定ツール"
+                                            "No browser needed"
                                         },
                                     )),
                             ),
@@ -1554,7 +1554,7 @@ impl Shell {
                                     .flex_1()
                                     .text_size(px(12.5))
                                     .text_color(p.faint)
-                                    .child("検索"),
+                                    .child("Search"),
                             )
                             .child(
                                 div()
@@ -1567,13 +1567,13 @@ impl Shell {
                     .child(self.side_nav(
                         "home",
                         "layout-grid",
-                        "ホーム",
+                        "Home",
                         home_sel,
                         Route::Home,
                         cx,
                     ))
                     .child(
-                        ui::section_label("デバイス")
+                        ui::section_label("Devices")
                             .px(px(10.))
                             .pt(px(14.))
                             .pb(px(6.)),
@@ -1590,7 +1590,7 @@ impl Shell {
                     .child(self.side_nav(
                         "obs",
                         "cast",
-                        "OBS オーバーレイ",
+                        "OBS overlay",
                         obs_sel,
                         Route::Obs,
                         cx,
@@ -1598,7 +1598,7 @@ impl Shell {
                     .child(self.side_nav(
                         "auto",
                         "zap",
-                        "自動化",
+                        "Automation",
                         self.route == Route::Auto,
                         Route::Auto,
                         cx,
@@ -1606,7 +1606,7 @@ impl Shell {
                     .child(self.side_nav(
                         "settings",
                         "settings",
-                        "アプリ設定",
+                        "App settings",
                         settings_sel,
                         Route::Settings,
                         cx,
@@ -1683,17 +1683,18 @@ impl Shell {
             DeviceKind::Keyboard => "keyboard",
             DeviceKind::Other if d.driver == DriverKind::Walkplay => "headphones",
             DeviceKind::Other => "usb",
+            DeviceKind::Audio => "headphones",
         };
         let sub = if !d.supported {
-            "未対応".to_string()
+            "Unsupported".to_string()
         } else if d.asleep {
-            "スリープ中".to_string()
+            "Asleep".to_string()
         } else {
             match d.transport {
-                Transport::Wired => "有線".to_string(),
+                Transport::Wired => "Wired".to_string(),
                 Transport::Wireless24G => "2.4GHz".to_string(),
                 Transport::Bluetooth => "Bluetooth".to_string(),
-                Transport::Unknown => "接続中".to_string(),
+                Transport::Unknown => "Connected".to_string(),
             }
         };
         let pending = self
@@ -1777,7 +1778,7 @@ impl Shell {
                             .text_size(px(11.))
                             .text_color(p.faint)
                             .child(ui::icon("battery", 14., p.faint))
-                            .child(format!("{pc}% · スリープ中"))
+                            .child(format!("{pc}% · Asleep"))
                     } else {
                         ui::battery_pill(pc, ch)
                     })
@@ -1835,7 +1836,7 @@ impl Shell {
             .child(opt("theme-light", "sun", light, cx))
     }
 
-    // ------------------------------------------------------------------ 本文
+    // ------------------------------------------------------------------ Content
 
     fn content(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         match self.route.clone() {
@@ -1848,7 +1849,7 @@ impl Shell {
     }
 }
 
-/// gpui-component のテーマ色のうち、ガラスの邪魔になる窓枠の色を消す。
+/// Clear the window-frame colors of the gpui-component theme that get in the way of the glass.
 pub fn clear_component_chrome(cx: &mut App) {
     let t = Theme::global_mut(cx);
     t.colors.title_bar = hsla(0., 0., 0., 0.);
@@ -1909,7 +1910,7 @@ impl Render for Shell {
                 }),
             )
             .child(motion::track("root-size"))
-            // 壁紙
+            // Wallpaper
             .child(
                 div()
                     .absolute()
@@ -1917,7 +1918,7 @@ impl Render for Shell {
                     .bg(p.solid)
                     .child(img(wall).size_full().object_fit(ObjectFit::Cover)),
             )
-            // サイドバー | 本文
+            // Sidebar | content
             .child(
                 div()
                     .absolute()
@@ -1929,7 +1930,7 @@ impl Render for Shell {
                     .child(sidebar)
                     .child(div().flex_1().min_w_0().h_full().relative().child(content)),
             )
-            // タイトルバー (透明・ドラッグ可能・右端に窓ボタン)
+            // Title bar (transparent, draggable, window buttons at the right edge)
             .child(
                 div().absolute().top_0().left_0().right_0().child(
                     TitleBar::new()
@@ -1955,8 +1956,8 @@ impl Render for Shell {
 
 impl Drop for Shell {
     fn drop(&mut self) {
-        // 終了時: DirectDrive を止めて実機が最後のフレームで固まるのを防ぐ。
-        // ワーカーへの配達を待つ猶予を少し取る (プロセス終了が間に合わないこともある)。
+        // On exit: stop DirectDrive so the device does not freeze on the last frame.
+        // Allow a short grace period for delivery to the worker (the process may exit before it is delivered).
         self.hub.dd_stop_all();
         std::thread::sleep(Duration::from_millis(80));
     }
@@ -1972,14 +1973,14 @@ fn window_hwnd(window: &Window) -> isize {
 }
 
 impl Shell {
-    /// メモリ管理 (2 秒ティックから呼ぶ)。
-    /// - 最小化中: 毎回ワーキングセットを OS に返す (描画が止まるので ~5MB に縮む)。
-    /// - 背面 (非アクティブ) 中: 遷移時に一度トリム + メモリ優先度を
-    ///   BELOW_NORMAL に下げ、60 秒おきに再トリム。
-    ///   背面でも 250ms 間隔で描画が走るので毎回トリムすると
-    ///   ページフォルトの往復で churn になる — 優先度を下げておくと
-    ///   OS がメモリ不足時にこのプロセスから優先的に回収する。
-    /// - 前面に戻ったら優先度を NORMAL に戻す。
+    /// Memory management (called from the 2-second tick).
+    /// - Minimized: return the working set to the OS every time (rendering stops, so it shrinks to ~5MB).
+    /// - In the background (inactive): trim once on transition + lower the memory priority
+    ///   to BELOW_NORMAL, and re-trim every 60 seconds.
+    ///   Rendering still runs every 250ms in the background, so trimming every time
+    ///   causes churn from page-fault round trips — with the priority lowered,
+    ///   the OS reclaims from this process first when memory is short.
+    /// - When returning to the foreground, restore the priority to NORMAL.
     #[cfg(windows)]
     fn mem_tick(&mut self) {
         use windows::Win32::Foundation::HWND;
@@ -2010,7 +2011,7 @@ impl Shell {
                         &mpi as *const _ as *const _,
                         std::mem::size_of::<MEMORY_PRIORITY_INFORMATION>() as u32,
                     );
-                    trim(); // 遷移時に一度切り詰める
+                    trim(); // trim once on transition
                     self.mem_ticks = 0;
                 }
                 self.mem_ticks += 1;
