@@ -1,4 +1,4 @@
-// RT キー (W = r2c2) と通常キー (Esc = r1c0) で deadzone 書き込み→読み戻し比較。
+// Compare deadzone write → read back on an RT key (W = r2c2) and a normal key (Esc = r1c0).
 use devhub_core::Change;
 
 fn main() {
@@ -17,7 +17,7 @@ fn main() {
         println!("== {}", info.name);
         let st = drv.read().unwrap();
         let kb = st.keyboard.as_ref().unwrap();
-        // W (index 16 = r2c2) と Esc (index 0 = r1c0)
+        // W (index 16 = r2c2) and Esc (index 0 = r1c0)
         for &i in &[0usize, 16] {
             let p = kb.perf[i];
             println!(
@@ -43,7 +43,7 @@ fn main() {
                 "  after: tdz={} bdz={}",
                 p2.top_deadzone, p2.bottom_deadzone
             );
-            // 復元
+            // Restore
             let mut p3 = p2;
             p3.top_deadzone = p.top_deadzone;
             p3.bottom_deadzone = p.bottom_deadzone;

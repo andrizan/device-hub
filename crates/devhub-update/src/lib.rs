@@ -1,44 +1,44 @@
-//! ファームウェア更新通知 (読み取り専用 — 書き込み/DFU は行わない)。
+//! Firmware update notification (read-only - no write/DFU is performed).
 //!
-//! - mouse.fit: `Config/<ui_folder>/FWLINK.txt` → zip の ETag/Last-Modified/Length が指紋
-//! - Sparklink: `getKeyboardFirmware` (board_id/vid/pid + Xs-API-Key) → バージョン比較
+//! - mouse.fit: `Config/<ui_folder>/FWLINK.txt` → the zip's ETag/Last-Modified/Length is the fingerprint
+//! - Sparklink: `getKeyboardFirmware` (board_id/vid/pid + Xs-API-Key) → version comparison
 //!
-//! ネットワーク断・タイムアウト・サーバーエラーは全部 `Err(UpdateError)` で静かに
-//! 返すだけ — アプリ側は失敗を無視してよい。
+//! Network outages, timeouts, and server errors are all quietly returned as `Err(UpdateError)`
+//! and nothing more - the app side may ignore failures.
 
 use devhub_core::model::FirmwareFeed;
 use std::time::Duration;
 
 const TIMEOUT: Duration = Duration::from_secs(5);
 const SPARKLINK_API: &str = "https://api.sparklinkplayjoy.com/api/v1/getKeyboardFirmware";
-// hub.xsyd.top の同梱 SDK が送る公開キー (firmware 参照のみに使われる)。
+// hub.xsyd.top: the public key sent by its bundled SDK (used only for firmware lookups).
 const SPARKLINK_KEY: &str = "860DE3DB584158536BC89030D8640E29";
 const MOUSEFIT_BASE: &str = "https://www.mouse.fit";
 
-/// 1 回の確認結果。`fingerprint` は次回比較用に保存する。
+/// Result of one check. `fingerprint` is saved for the next comparison.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UpdateStatus {
-    /// 新しいファームウェアが公開されている。
-    /// 初回観測 (基準値なし) は必ず false — いきなり通知は出さない。
+    /// A new firmware has been published.
+    /// The first observation (no baseline) is always false - no notification is shown right away.
     pub new_available: bool,
-    /// 分かれば新バージョンの表示用文字列。
+    /// Display string for the new version, if known.
     pub version: Option<String>,
-    /// 「公式ページを開く」ボタンの遷移先。
+    /// Destination of the "Open the official page" button.
     pub url: Option<String>,
-    /// 配布物の変化を検知する指紋 (ETag+日時+サイズ、またはバージョン文字列)。
+    /// Fingerprint for detecting changes to the distribution (ETag + date + size, or the version string).
     pub fingerprint: String,
-    /// 確認時刻 (UNIX 秒)。
+    /// Time of the check (UNIX seconds).
     pub checked_at: u64,
 }
 
-/// 失敗は全部この 1 型 — 呼び出し側は単に今回分を捨てればよい。
+/// All failures are this single type - the caller can simply discard this round.
 #[derive(Debug)]
 pub struct UpdateError(pub String);
 
-/// 公式の配布元を 1 回確認する。
+/// Check the official distribution source once.
 ///
-/// `last_fp`: 前回保存した指紋 (空 = 初回)。`current_fw`: デバイスの現在バージョン。
-/// 成功したら必ず fingerprint を保存する (初回は基準値確立 = new_available: false)。
+/// `last_fp`: the fingerprint saved last time (empty = first time). `current_fw`: the device's current version.
+/// On success, always save the fingerprint (the first time establishes the baseline = new_available: false).
 pub fn check(
     feed: &FirmwareFeed,
     current_fw: Option<&str>,
@@ -56,15 +56,15 @@ pub fn check(
         }
     };
     st.checked_at = checked_at;
-    // 指紋の変化は「バージョン比較ができなかった系統」でのみ新しい扱いにする —
-    // バージョンが取れて「同じ/古い」と分かるなら、配布物のヘッダ変更だけで通知しない。
+    // A fingerprint change counts as new only for lines where "version comparison was not possible" -
+    // if the version could be obtained and it is known to be "same/older", do not notify on a mere header change of the distribution.
     st.new_available =
         st.new_available || (st.version.is_none() && is_new(&st.fingerprint, last_fp));
     Ok(st)
 }
 
-/// `a.b.c` 形式の版比較 — `dist > cur` のときだけ true。
-/// 両方とも数値の点列に parse できなければ比較不能 → 新しいとは扱わない。
+/// Version comparison in `a.b.c` form - true only when `dist > cur`.
+/// If both cannot be parsed as numeric dotted sequences, it cannot be compared → not treated as new.
 fn version_newer(dist: &str, cur: &str) -> bool {
     fn parse(s: &str) -> Option<Vec<u32>> {
         s.trim_start_matches(['v', 'V'])
@@ -82,13 +82,13 @@ fn version_newer(dist: &str, cur: &str) -> bool {
     d > c
 }
 
-/// 指紋が「新しい」か。初回 (last_fp 空) は必ず false = 基準値を作るだけ。
-/// 指紋が取れない応答 (Sparklink の空 data 等) でも false。
+/// Whether the fingerprint is "new". The first time (last_fp empty) is always false = it only builds the baseline.
+/// Also false for responses where no fingerprint can be obtained (such as Sparklink's empty data).
 fn is_new(fp: &str, last_fp: &str) -> bool {
     !fp.is_empty() && !last_fp.is_empty() && fp != last_fp
 }
 
-/// mouse.fit: FWLINK.txt が指す zip の HTTP ヘッダを指紋にする。
+/// mouse.fit: use the HTTP headers of the zip that FWLINK.txt points to as the fingerprint.
 fn mousefit(agent: &ureq::Agent, ui_folder: &str) -> Result<UpdateStatus, UpdateError> {
     let feed_url = format!("{MOUSEFIT_BASE}/Config/{ui_folder}/FWLINK.txt");
     let body = agent
@@ -107,7 +107,7 @@ fn mousefit(agent: &ureq::Agent, ui_folder: &str) -> Result<UpdateStatus, Update
     } else {
         format!("{MOUSEFIT_BASE}/{}", zip.trim_start_matches('/'))
     };
-    // zip は 14MB 級なので HEAD だけ。
+    // The zip is ~14MB, so HEAD only.
     let head = agent
         .head(&zip_url)
         .call()
@@ -116,7 +116,7 @@ fn mousefit(agent: &ureq::Agent, ui_folder: &str) -> Result<UpdateStatus, Update
     let lastmod = head.header("Last-Modified").unwrap_or("");
     let len = head.header("Content-Length").unwrap_or("");
     let fingerprint = format!("{etag}|{lastmod}|{len}");
-    // バージョンらしき数字列をファイル名から拾う (…/3955/xxx_3955JM.zip → "3955")。
+    // Pick a version-like number string from the file name (…/3955/xxx_3955JM.zip → "3955").
     let version = zip_url
         .rsplit('/')
         .next()
@@ -131,7 +131,7 @@ fn mousefit(agent: &ureq::Agent, ui_folder: &str) -> Result<UpdateStatus, Update
     })
 }
 
-/// Sparklink: getKeyboardFirmware → data[] のバージョンを現在値と比較する。
+/// Sparklink: compare the version in getKeyboardFirmware → data[] with the current value.
 fn sparklink(
     agent: &ureq::Agent,
     vid: u16,
@@ -154,7 +154,7 @@ fn sparklink(
         .into_json()
         .map_err(|e| UpdateError(format!("json: {e}")))?;
     let code = json.get("code").and_then(|v| v.as_i64()).unwrap_or(-1);
-    // 415「固件未上传」は正常な「公開物なし」。他の非 0 も保守的に無し扱い。
+    // 415 ("firmware not uploaded") is a normal "nothing published". Any other non-0 code is also conservatively treated as none.
     if code != 0 && code != 200 {
         return Ok(UpdateStatus {
             new_available: false,
@@ -169,7 +169,7 @@ fn sparklink(
         .and_then(|d| d.as_array())
         .cloned()
         .unwrap_or_default();
-    // 応答のキー名は公開物が無いため確定していない — ありそうな名前を順に拾う。
+    // The key names of the response are not confirmed because nothing is published - pick likely names in order.
     let pick = |keys: &[&str]| -> Option<String> {
         data.iter().find_map(|item| {
             keys.iter().find_map(|k| {
@@ -198,7 +198,7 @@ fn sparklink(
         "downloadUrl",
         "path",
     ]);
-    // 指紋は「バージョン + ファイル URL」。バージョン比較でも更新検知する。
+    // The fingerprint is "version + file URL". Updates are also detected by version comparison.
     let fingerprint = match (&version, &file) {
         (None, None) => String::new(),
         (v, f) => format!(
@@ -207,8 +207,8 @@ fn sparklink(
             f.clone().unwrap_or_default()
         ),
     };
-    // 比較できる版同士だけ「新しい」とする — 表記違い・現在値不明・配布の方が
-    // 古い場合は新規と言わない (順序を定義できない版は「不明」)。
+    // Only versions that can be compared count as "new" - differing notation, unknown current value, or a distribution that is
+    // older are not called new (a version whose order cannot be defined is "unknown").
     let newer = match (&version, current_fw) {
         (Some(v), Some(cur)) => version_newer(v, cur),
         _ => false,
@@ -222,14 +222,14 @@ fn sparklink(
     })
 }
 
-/// API は vid/pid を 10 進で受ける実績があるが、4 桁 16 進でも通した実績がある。
-/// ここでは公式サイトの表記に合わせて 16 進 4 桁で送る。
+/// The API has a track record of accepting vid/pid in decimal, and also of accepting 4-digit hex.
+/// Here we send 4-digit hex to match the official site's notation.
 fn fmt_vidpid(v: u16) -> String {
     format!("{v:04X}")
 }
 
-/// Sparklink の軸名データベース (`getAxisListV3`)。公式 HUB はこれで軸ライブラリの
-/// u16 id → 名称 (例「磁白軸」) を引いている。失敗は `Err` で静かに返すだけ。
+/// Sparklink's axis name database (`getAxisListV3`). The official HUB uses it to look up the axis library's
+/// u16 id → name (e.g. "Magnetic White switch"). Failure is just quietly returned as `Err`.
 pub fn sparklink_axis_names(
     board_id: u32,
     vid: u16,
@@ -287,10 +287,10 @@ mod tests {
 
     #[test]
     fn is_new_rules() {
-        assert!(!is_new("a|b|1", "")); // 初回は基準値だけ
-        assert!(!is_new("", "old")); // 指紋が取れない
+        assert!(!is_new("a|b|1", "")); // first time: only the baseline
+        assert!(!is_new("", "old")); // no fingerprint obtained
         assert!(!is_new("same", "same"));
-        assert!(is_new("a|b|2", "a|b|1")); // 変化 = 新しい
+        assert!(is_new("a|b|2", "a|b|1")); // change = new
     }
 
     #[test]

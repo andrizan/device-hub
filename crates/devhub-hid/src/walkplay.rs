@@ -1,39 +1,39 @@
-//! WalkPlay CB 系プロトコル (peq.szwalkplay.com) — TP55 等の USB DAC ドングル向け。
+//! WalkPlay CB family protocol (peq.szwalkplay.com) — for USB DAC dongles such as the TP55.
 //!
-//! 物理レイヤー:
-//! - consumer control IF (up=0x000C) 上の **report 0x4B** (IN/OUT とも 64B)。
-//! - 読み取り: `[0x80, sub, params...]` → 応答 `[0x4B, 0x80, sub, params…, data…]`
-//!   (応答は先頭 2 バイトがコマンドエコー、データは r[3..])。
-//! - 書き込み: `[0x01, sub, params...]` (応答無し)。保存は `[1,1,0]` (refereshToFlash)。
-//! - ⚠ `[1,255]` は**ブートローダ移行** (0666:0888 "USB20" 救砖モード) — 絶対に送らない。
+//! Physical layer:
+//! - **report 0x4B** on the consumer control IF (up=0x000C) (64B for both IN and OUT).
+//! - Read: `[0x80, sub, params...]` → response `[0x4B, 0x80, sub, params…, data…]`
+//!   (the first 2 bytes of the response are the command echo, the data is r[3..]).
+//! - Write: `[0x01, sub, params...]` (no response). Save with `[1,1,0]` (refereshToFlash).
+//! - ⚠ `[1,255]` **enters the bootloader** (0666:0888 "USB20" recovery mode) — never send it.
 //!
-//! サブコマンド (peq.szwalkplay.com CB クラス + 実機プローブで確認):
-//! - `[80,0c]` → fw バージョン ASCII
-//! - `[80,09]` → EQ フレーム (tag+1バンド。`[80,9,0,0,band]` でバンド別読み取り)
-//! - `[80,02]` → マイクオフセット (e[3..4] int16 LE、UI 値 = raw*15/32767)
-//! - `[80,03]` → EQ ボリューム (e[4]、UI 値 -16..+6 = raw-16)
-//! - `[80,0e]` → 4B (シリアル/機能フラグ?。記録のみ)
-//! - `[80,11]` → DAC フィルター index (e[3]-1 → 0..4)
-//! - `[80,16,2,ch,0]` → チャンネルバランス (e[3]=ch, e[5]=signed8 減衰値)
-//! - `[80,19]` → フィルター出力ゲインモード (e[3]+1 → 1..3)
-//! - `[80,1d]` → DAC ワークモード (e[3] → 0/1)
-//! - `[80,18]` / `[80,1e]` → 値のみ確認 (意味未確定。記録のみ)
-//! - タイムアウト (TP55 非対応): ENC `[80,1b]`、フィルターバンク `[80,25,1,n]`、
-//!   `[80,22,24,26]`、`[80,d3]`、`[80,da]`
+//! Subcommands (confirmed from the peq.szwalkplay.com CB class + real-device probing):
+//! - `[80,0c]` → fw version ASCII
+//! - `[80,09]` → EQ frame (tag + 1 band. Per-band read with `[80,9,0,0,band]`)
+//! - `[80,02]` → mic offset (e[3..4] int16 LE, UI value = raw*15/32767)
+//! - `[80,03]` → EQ volume (e[4], UI value -16..+6 = raw-16)
+//! - `[80,0e]` → 4B (serial / feature flags? Recorded only)
+//! - `[80,11]` → DAC filter index (e[3]-1 → 0..4)
+//! - `[80,16,2,ch,0]` → channel balance (e[3]=ch, e[5]=signed8 attenuation value)
+//! - `[80,19]` → filter output gain mode (e[3]+1 → 1..3)
+//! - `[80,1d]` → DAC work mode (e[3] → 0/1)
+//! - `[80,18]` / `[80,1e]` → values confirmed only (meaning undetermined. Recorded only)
+//! - Timeout (unsupported on TP55): ENC `[80,1b]`, filter bank `[80,25,1,n]`,
+//!   `[80,22,24,26]`, `[80,d3]`, `[80,da]`
 //!
-//! DAC EQ (公式 s2/CB1300D クラスと実機で確認):
-//! - 書き込み: バンドごとに 36B フレーム `[1,9,24, 0,band, 0,0, <係数20B>,
+//! DAC EQ (confirmed against the official s2/CB1300D class and on a real device):
+//! - Write: one 36B frame per band `[1,9,24, 0,band, 0,0, <20B coefficients>,
 //!   freq u16LE, q*256 u16LE, gain*256 i16LE, type, 0(offset), tag]`
-//! - 係数: biquad [b0,b1,b2,-a1,-a2] 各 i32 LE。**96kHz で計算** (実機応答と
-//!   バイト一致)。PK/LS/LP/HP は Q30、HS のみ公式 X1 クラスに倣い **Q27**
-//!   (±(2^27-1) でクランプ、gain×0.85 ヘッドルーム、Q は 0.5..5 にクランプ)。
-//! - 適用: 全フレーム送信 → `[1,10,4,0,0,255,255]` (refereshToMemery)
-//! - 保存: さらに `[1,1,0]` (refereshToFlash)。公式 saveEqInfo と同じ順序。
-//! - 読み取り: `[80,9,0,0,band]` → 応答 = `[4B,80,09]` + param エコー
-//!   `[0,0,band]` + 書き込みフレーム v[5..35] (実機ダンプで確認:
-//!   生 [8..27]=係数, [28..29]=freq, [30..31]=q*256, [32..33]=gain*256,
-//!   [34]=type, [35]=offset, [36]=tag)。
-//! - type index: LS=1 PK=2 HS=3 LP=4 HP=5 (getFilterIndexs)。
+//! - Coefficients: biquad [b0,b1,b2,-a1,-a2], each i32 LE. **Computed at 96kHz** (byte-identical to
+//!   the real-device response). PK/LS/LP/HP use Q30; only HS follows the official X1 class with **Q27**
+//!   (clamped at ±(2^27-1), gain×0.85 headroom, Q clamped to 0.5..5).
+//! - Apply: send all frames → `[1,10,4,0,0,255,255]` (refereshToMemery)
+//! - Save: additionally `[1,1,0]` (refereshToFlash). Same order as the official saveEqInfo.
+//! - Read: `[80,9,0,0,band]` → response = `[4B,80,09]` + param echo
+//!   `[0,0,band]` + write frame v[5..35] (confirmed by real-device dump:
+//!   raw [8..27]=coefficients, [28..29]=freq, [30..31]=q*256, [32..33]=gain*256,
+//!   [34]=type, [35]=offset, [36]=tag).
+//! - type index: LS=1 PK=2 HS=3 LP=4 HP=5 (getFilterIndexs).
 
 use devhub_core::backend::*;
 use devhub_core::model::*;
@@ -52,12 +52,12 @@ const PROBE_WAIT_MS: u64 = 300;
 
 mod sub {
     pub const MIC_OFFSET: u8 = 0x02;
-    /// EQ タブの Volume スライダー (公式 setDacOffset → [1,3,2,0,v])。
-    /// MIC タブの L/R バーは VU メーター (視覚化) で設定項目ではない。
+    /// Volume slider on the EQ tab (official setDacOffset → [1,3,2,0,v]).
+    /// The L/R bars on the MIC tab are VU meters (visualization), not settings.
     pub const EQ_VOLUME: u8 = 0x03;
-    /// DAC EQ バンドフレームの読み書き。
+    /// Reads and writes DAC EQ band frames.
     pub const EQ: u8 = 0x09;
-    /// 書き込んだ EQ をレジスタへ即時適用 (refereshToMemery)。
+    /// Immediately applies the written EQ to the registers (refereshToMemery).
     pub const APPLY: u8 = 0x0A;
     pub const FW_VER: u8 = 0x0C;
     pub const FILTER_IDX: u8 = 0x11;
@@ -66,10 +66,10 @@ mod sub {
     pub const WORK_MODE: u8 = 0x1D;
 }
 
-/// DAC デジタルフィルター (公式 DAC Filter タブの 5 択。実機で確認: index 2 = SLOW-LL)。
+/// DAC digital filters (the 5 options of the official DAC Filter tab. Confirmed on a real device: index 2 = SLOW-LL).
 const FILTERS: [&str; 5] = ["FAST-LL", "FAST-PC", "SLOW-LL", "SLOW-PC", "NON-OS"];
 
-/// PeqFilter → wire の type index (公式 getFilterIndexs: LS=1,PK=2,HS=3,LP=4,HP=5)。
+/// PeqFilter → wire type index (official getFilterIndexs: LS=1,PK=2,HS=3,LP=4,HP=5).
 fn wire_filter(f: PeqFilter) -> u8 {
     match f {
         PeqFilter::LowShelf => 1,
@@ -102,7 +102,7 @@ pub fn open(dev: hidapi::HidDevice, info: DeviceInfo) -> HubResult<WalkplayDrive
         saving: Arc::new(AtomicBool::new(false)),
         info,
     };
-    // firmware を取得して名札に入れる
+    // Fetch the firmware and put it in the name label
     if let Ok(r) = d.cmd(&[0x80, sub::FW_VER]) {
         let end = r.iter().rposition(|&b| b != 0).map(|i| i + 1).unwrap_or(0);
         let fw: String = r[..end]
@@ -122,19 +122,19 @@ pub struct WalkplayDriver {
     caps: Mutex<Option<Capabilities>>,
     fails: AtomicU32,
     dead_since: Mutex<Option<Instant>>,
-    /// 最後に読んだ EQ のタグ (応答 e[35])。書き込みフレーム v[35] にそのまま入れる。
+    /// Tag of the last EQ read (response e[35]). Put as-is into the write frame v[35].
     eq_tag: Mutex<u8>,
-    /// フラッシュ保存の予約世代。`save()` のたびに +1、ワーカーは世代が
-    /// 1 秒間変わらなければ 1 回だけ `[1,1,0]` を送る (連続変更を合体)。
+    /// Flash-save reservation generation. Incremented on every `save()`; the worker sends `[1,1,0]` once if the generation
+    /// has not changed for 1 second (coalesces consecutive changes).
     save_gen: Arc<AtomicU64>,
     saving: Arc<AtomicBool>,
     info: DeviceInfo,
 }
 
 impl WalkplayDriver {
-    /// `[0x80, sub, params...]` → 応答データ (r[3..]、エコーの後)。
-    /// タイムアウト時は 40ms 後に 1 回だけ再送する (書き込み直後に稀に
-    /// 応答が 1 回落ちる実機癖への対処)。
+    /// `[0x80, sub, params...]` → response data (r[3..], after the echo).
+    /// On timeout, resend only once after 40ms (works around a real-device quirk where
+    /// a response is occasionally dropped right after a write).
     fn cmd(&self, req: &[u8]) -> HubResult<Vec<u8>> {
         match self.cmd_once(req) {
             Err(HubError::Protocol(_)) => {
@@ -162,8 +162,8 @@ impl WalkplayDriver {
         while Instant::now() < deadline {
             match self.ch.recv(POLL_MS) {
                 Ok(b) if b.first().copied() == Some(RID) => {
-                    // 応答は先頭 2B [0x80,sub] のエコー。パラメータ部は応答側で
-                    // 値に置き換わることがある (ch/値フィールド) ので先頭だけ見る。
+                    // The response echoes the first 2B [0x80,sub]. The parameter part may be replaced
+                    // by values on the response side (ch/value fields), so look only at the start.
                     if b.len() > 3 && b[1] == req[0] && b[2] == req[1] {
                         self.fails.store(0, Ordering::Relaxed);
                         *self.dead_since.lock().unwrap_or_else(|p| p.into_inner()) = None;
@@ -183,22 +183,22 @@ impl WalkplayDriver {
         Err(HubError::Protocol("walkplay: response timeout".into()))
     }
 
-    /// 読み取り `[0x80, sub, params...]` → e[2..] (`cmd` は r[3..] を返すので
-    /// 公式ディスパッチャの `e[n]` は `data[n-2]`)。
+    /// Read `[0x80, sub, params...]` → e[2..] (`cmd` returns r[3..], so
+    /// the official dispatcher's `e[n]` is `data[n-2]`).
     fn query(&self, sub: u8, params: &[u8]) -> HubResult<Vec<u8>> {
         let mut req = vec![0x80, sub];
         req.extend_from_slice(params);
         self.cmd(&req)
     }
 
-    /// 読み取り → e[3] の u8 (= data[1])。
+    /// Read → the u8 at e[3] (= data[1]).
     fn query_u8(&self, sub: u8, params: &[u8]) -> HubResult<u8> {
         Ok(self.query(sub, params)?.get(1).copied().unwrap_or(0))
     }
 
-    /// 書き込み `[0x01, sub, params...]`。応答は待たない (無い)。
+    /// Write `[0x01, sub, params...]`. Does not wait for a response (there is none).
     fn write(&self, sub: u8, params: &[u8]) -> HubResult<()> {
-        // fail-fast 中は送らない
+        // Do not send during fail-fast
         if self.fails.load(Ordering::Relaxed) >= FAIL_FAST_AFTER {
             return Err(HubError::Disconnected);
         }
@@ -207,13 +207,13 @@ impl WalkplayDriver {
         self.ch.send_report(RID, &req)
     }
 
-    /// `[1,1,0]` — 設定をフラッシュへ保存 (refereshToFlash)。
-    /// 実機版は「最後の変更から ~1 秒後に 1 回」へ合体する (公式 saveEqInfo の
-    /// 1 秒待ちと同じ + スライダードラッグ中の連続 apply でフラッシュを
-    /// 擦り減らさないため)。世代カウンタ方式で取りこぼし無し。
+    /// `[1,1,0]` — saves the settings to flash (refereshToFlash).
+    /// The real-device version coalesces to "once, ~1 second after the last change" (same as the official saveEqInfo's
+    /// 1-second wait, and so that consecutive applies during a slider drag do not
+    /// wear out the flash). The generation counter scheme ensures nothing is missed.
     #[cfg(not(test))]
     fn save(&self) -> HubResult<()> {
-        // fail-fast 中は予約だけしない (書き込み自体も拒否されるので)
+        // Do not even reserve during fail-fast (the write itself is rejected too)
         if self.fails.load(Ordering::Relaxed) >= FAIL_FAST_AFTER {
             return Err(HubError::Disconnected);
         }
@@ -223,7 +223,7 @@ impl WalkplayDriver {
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_err()
         {
-            return Ok(()); // ワーカー稼働中 — 積んだ世代は後で拾われる
+            return Ok(()); // worker is running — the generation we queued will be picked up later
         }
         let ch = self.ch.clone();
         let gen = self.save_gen.clone();
@@ -233,15 +233,15 @@ impl WalkplayDriver {
                 let g = gen.load(Ordering::Acquire);
                 std::thread::sleep(Duration::from_secs(1));
                 if gen.load(Ordering::Acquire) != g {
-                    continue; // まだ変更が来ている — 静まるまで待つ
+                    continue; // changes are still arriving — wait until it settles
                 }
                 let _ = ch.send_report(RID, &[0x01, 0x01, 0x00]);
                 if gen.load(Ordering::Acquire) != g {
-                    continue; // 送信中に積まれた分はもう一周
+                    continue; // anything queued during the send gets another pass
                 }
                 saving.store(false, Ordering::Release);
-                // store(false) との競合: 直前に積まれた世代は自分で拾う
-                // (相手は saving==true を見てワーカーを立てていない可能性がある)。
+                // Race with store(false): pick up a generation queued just before ourselves
+                // (the other side may have seen saving==true and not started a worker).
                 if gen.load(Ordering::Acquire) == g || saving.swap(true, Ordering::AcqRel) {
                     break;
                 }
@@ -257,8 +257,8 @@ impl WalkplayDriver {
         self.write(0x01, &[0])
     }
 
-    /// biquad 係数 → 20B。公式の quantizer と同じ: [b0,b1,b2,-a1,-a2] を
-    /// 固定小数で i32 LE に。HS (X1) のみ Q27+クランプ、それ以外 Q30。
+    /// biquad coefficients → 20B. Same as the official quantizer: converts [b0,b1,b2,-a1,-a2]
+    /// to i32 LE in fixed point. Only HS (X1) uses Q27 + clamping, everything else Q30.
     fn peq_coefs(b: &PeqBand) -> [i32; 5] {
         let c = devhub_core::peq::coefs(b.filter, b.freq as f32, b.q, b.gain, devhub_core::peq::FS);
         let mut out = [0i32; 5];
@@ -270,18 +270,18 @@ impl WalkplayDriver {
             }
         } else {
             for (o, x) in out.iter_mut().zip(c) {
-                // 公式は丸めた整数を int32 へそのまま流す (2^30 超は wrap)。
+                // The official app feeds the rounded integer straight into an int32 (wraps above 2^30).
                 *o = (x * (1i64 << 30) as f64).round() as i64 as i32;
             }
         }
         out
     }
 
-    /// EQ バンド書き込みフレーム (36B) — 公式 buildEqBuffer と同一レイアウト。
-    /// write() が先頭に [1,9] を付けるので、ここでは v[2..] を返す。
+    /// EQ band write frame (36B) — same layout as the official buildEqBuffer.
+    /// write() prepends [1,9], so this returns v[2..].
     fn peq_params(&self, band: usize, b: &PeqBand) -> Vec<u8> {
         let mut v = Vec::with_capacity(34);
-        v.push(24); // 4 + 係数 20B
+        v.push(24); // 4 + 20B coefficients
         v.extend_from_slice(&[0, band as u8, 0, 0]);
         for c in Self::peq_coefs(b) {
             v.extend_from_slice(&c.to_le_bytes());
@@ -290,18 +290,18 @@ impl WalkplayDriver {
         v.extend_from_slice(&((b.q * 256.).round() as i32 as u16).to_le_bytes());
         v.extend_from_slice(&((b.gain * 256.).round() as i32 as i16).to_le_bytes());
         v.push(wire_filter(b.filter));
-        v.push(0); // offset (公式 t.offset、常に 0 を観測)
+        v.push(0); // offset (official t.offset, always observed as 0)
         v.push(*self.eq_tag.lock().unwrap_or_else(|p| p.into_inner()));
         debug_assert_eq!(v.len(), 34);
         v
     }
 
-    /// バンド 1 個分を書き込みフレームで送る。
+    /// Sends one band as a write frame.
     fn write_peq_band(&self, band: usize, b: &PeqBand) -> HubResult<()> {
         self.write(sub::EQ, &self.peq_params(band, b))
     }
 
-    /// `[1,10,4,0,0,255,255]` — 書き込んだ EQ をレジスタへ適用 (refereshToMemery)。
+    /// `[1,10,4,0,0,255,255]` — applies the written EQ to the registers (refereshToMemery).
     fn apply_peq(&self) -> HubResult<()> {
         self.write(sub::APPLY, &[4, 0, 0, 255, 255])
     }
@@ -325,7 +325,7 @@ impl DeviceDriver for WalkplayDriver {
                 SettingSpec::choice(
                     "dac_filter",
                     section::AUDIO,
-                    "デジタルフィルター",
+                    "Digital filter",
                     FILTERS
                         .iter()
                         .enumerate()
@@ -335,38 +335,30 @@ impl DeviceDriver for WalkplayDriver {
                 SettingSpec::choice(
                     "dac_work_mode",
                     section::AUDIO,
-                    "DAC ワークモード",
+                    "DAC work mode",
                     vec![ChoiceOpt::new(0, "Class-H"), ChoiceOpt::new(1, "Class-AB")],
                 ),
                 SettingSpec::choice(
                     "output_gain",
                     section::AUDIO,
-                    "出力ゲインモード",
+                    "Output gain mode",
                     vec![ChoiceOpt::new(0, "Low"), ChoiceOpt::new(1, "High")],
                 ),
                 SettingSpec::slider(
                     "channel_balance",
                     section::AUDIO,
-                    "チャンネルバランス",
+                    "Channel balance",
                     -127.,
                     127.,
                     1.,
                     "",
                 )
-                .help("正 = 右に寄せる (左を減衰)。0 で中央。"),
-                SettingSpec::slider(
-                    "eq_volume",
-                    section::AUDIO,
-                    "EQ ボリューム",
-                    -16.,
-                    6.,
-                    1.,
-                    "dB",
-                ),
+                .help("Positive = shift to the right (attenuates the left). 0 = center."),
+                SettingSpec::slider("eq_volume", section::AUDIO, "EQ volume", -16., 6., 1., "dB"),
                 SettingSpec::slider(
                     "mic_offset",
                     section::AUDIO,
-                    "マイクオフセット",
+                    "Mic offset",
                     -15.,
                     15.,
                     1.,
@@ -376,10 +368,10 @@ impl DeviceDriver for WalkplayDriver {
             actions: vec![ActionSpec::new(
                 "eq_def",
                 section::AUDIO,
-                "EQ を工場出荷値 (DEF) に戻す",
+                "Reset EQ to factory values (DEF)",
             )
-            .help("公式 DEF プリセットの 8 バンドを書き込みます (バンド 9/10 は変わりません)")
-            .confirm("EQ を DEF プリセットに戻します。よろしいですか?")],
+            .help("Writes the 8 bands of the official DEF preset (bands 9/10 are unchanged)")
+            .confirm("Reset the EQ to the DEF preset. Continue?")],
             profiles: None,
             mouse: None,
             keyboard: None,
@@ -440,9 +432,9 @@ impl DeviceDriver for WalkplayDriver {
                 &mut st,
             );
         }
-        // バランス: 各 ch の減衰値 (e[5], 0 か負値エンコード) → 1 本スライダーに合成。
-        // 公式応答ディスパッチャ: ch0 減衰 → +r、ch1 減衰 → -r。
-        // 値 = ch0減衰 - ch1減衰 (正 = 左が減衰され音が右に寄る、公式と同じ向き)。
+        // Balance: attenuation value of each ch (e[5], encoded as 0 or negative) → combined into a single slider.
+        // Official response dispatcher: ch0 attenuation → +r, ch1 attenuation → -r.
+        // value = ch0 attenuation - ch1 attenuation (positive = left is attenuated and the sound shifts right, same direction as official).
         let mut atten = [0f32; 2];
         for ch in 0..2u8 {
             if let Ok(r) = self.query(sub::BALANCE, &[2, ch, 0]) {
@@ -455,12 +447,12 @@ impl DeviceDriver for WalkplayDriver {
             SettingValue::Num(atten[0] - atten[1]),
             &mut st,
         );
-        // EQ ボリューム: e[4] = data[2] = raw → UI 値 = raw - 16 (範囲 -16..+6)
+        // EQ volume: e[4] = data[2] = raw → UI value = raw - 16 (range -16..+6)
         if let Ok(r) = self.query(sub::EQ_VOLUME, &[2, 0, 0]) {
             let v = r.get(2).copied().unwrap_or(16);
             self.set("eq_volume", SettingValue::Num(v as f32 - 16.), &mut st);
         }
-        // マイクオフセット: e[3..4] int16 LE → UI 値 = round(raw*15/32767)
+        // Mic offset: e[3..4] int16 LE → UI value = round(raw*15/32767)
         if let Ok(r) = self.query(sub::MIC_OFFSET, &[0]) {
             let lo = r.get(1).copied().unwrap_or(0) as i32;
             let hi = r.get(2).copied().unwrap_or(0) as i32;
@@ -471,12 +463,12 @@ impl DeviceDriver for WalkplayDriver {
                 &mut st,
             );
         }
-        // DAC EQ: [80,9,0,0,band] でバンド別フレーム。
-        // 応答 = [4B,80,09] + param エコー [0,0,band] + 書き込みフレーム v[5..35]
-        // (実機ダンプで確認)。query() は b[3..] を返すので:
-        // r[0..2]=param エコー, r[5..24]=係数, r[25..26]=freq u16LE,
+        // DAC EQ: per-band frames via [80,9,0,0,band].
+        // response = [4B,80,09] + param echo [0,0,band] + write frame v[5..35]
+        // (confirmed by real-device dump). query() returns b[3..], so:
+        // r[0..2]=param echo, r[5..24]=coefficients, r[25..26]=freq u16LE,
         // r[27..28]=q*256, r[29..30]=gain*256 i16LE, r[31]=type,
-        // r[32]=offset, r[33]=tag。
+        // r[32]=offset, r[33]=tag.
         let mut bands = vec![];
         let mut ok = false;
         for i in 0..10usize {
@@ -522,9 +514,9 @@ impl DeviceDriver for WalkplayDriver {
                 }
                 "channel_balance" => {
                     let v = value.as_num().clamp(-127., 127.);
-                    // 公式 setDacBalance: 減衰させる側を書き、反対側を 0 クリアする
-                    // (書かなかった側の古い減衰値は残る)。
-                    // 正 = ch0 減衰 (公式の t>0 側 = 音が右へ)。負 = ch1 減衰。
+                    // Official setDacBalance: write the side to attenuate and clear the opposite side to 0
+                    // (the stale attenuation value of the side not written stays).
+                    // Positive = ch0 attenuation (the official t>0 side = sound goes right). Negative = ch1 attenuation.
                     if v > 0. {
                         self.write(0x16, &[4, 0, 0, (-(v as i8)) as u8, 0])?;
                         self.write(0x16, &[4, 1, 0, 0, 0])?;
@@ -541,23 +533,23 @@ impl DeviceDriver for WalkplayDriver {
                     self.write(0x03, &[2, 0, (v + 16.) as u8])?;
                 }
                 "mic_offset" => {
-                    // 公式 setMicphoneOffset: UI -15..15 → int16 (v*32767/15) LE
+                    // Official setMicphoneOffset: UI -15..15 → int16 (v*32767/15) LE
                     let v = value.as_num().clamp(-15., 15.);
                     let raw = (v * 32767. / 15.).round().clamp(-32767., 32767.) as i16 as u16;
                     self.write(0x02, &[2, (raw & 0xFF) as u8, (raw >> 8) as u8])?;
                 }
-                _ => return Err(HubError::Invalid(format!("未知の設定 {id}"))),
+                _ => return Err(HubError::Invalid(format!("unknown setting {id}"))),
             },
             Change::Peq { band, value } => {
                 if *band >= 10 {
-                    return Err(HubError::Invalid(format!("バンド {band} は範囲外")));
+                    return Err(HubError::Invalid(format!("band {band} out of range")));
                 }
                 self.write_peq_band(*band, value)?;
                 self.apply_peq()?;
             }
             Change::PeqAll { bands } => {
                 if bands.len() > 10 {
-                    return Err(HubError::Invalid("バンド数が多すぎます".into()));
+                    return Err(HubError::Invalid("too many bands".into()));
                 }
                 for (i, b) in bands.iter().enumerate() {
                     self.write_peq_band(i, b)?;
@@ -565,17 +557,17 @@ impl DeviceDriver for WalkplayDriver {
                 self.apply_peq()?;
             }
             Change::Profile(_) => return Err(HubError::Unsupported("profiles")),
-            _ => return Err(HubError::Unsupported("この変更")),
+            _ => return Err(HubError::Unsupported("this change")),
         }
-        // 全書き込みの後にフラッシュへ保存 (電源を落としても残る)
+        // Save to flash after all writes (persists across power-off)
         self.save()
     }
 
     fn run_action(&self, id: &str, _file: Option<&std::path::Path>) -> HubResult<ActionOutcome> {
         match id {
-            // 公式バンドルにハードコードされている DEF プリセット 8 バンド分
-            // (50/200/500/1000/2500/5000/10000/15000 Hz, PK, Q 0.75, 0dB)。
-            // 公式はバンド 8/9 に触らないので、こちらも 8 本だけ書く。
+            // The 8 bands of the DEF preset hard-coded in the official bundle
+            // (50/200/500/1000/2500/5000/10000/15000 Hz, PK, Q 0.75, 0dB).
+            // The official app does not touch bands 8/9, so we also write only the 8.
             "eq_def" => {
                 const DEF_FREQS: [u16; 8] = [50, 200, 500, 1000, 2500, 5000, 10000, 15000];
                 for (i, f) in DEF_FREQS.iter().enumerate() {
@@ -592,7 +584,7 @@ impl DeviceDriver for WalkplayDriver {
                 self.apply_peq()?;
                 self.save()?;
                 Ok(ActionOutcome {
-                    message: Some("DEF プリセットを適用しました".into()),
+                    message: Some("Applied the DEF preset".into()),
                     reload: true,
                 })
             }
@@ -636,7 +628,7 @@ mod tests {
         }
     }
 
-    /// 応答フレーム: report 0x4B + [0x80,sub] エコー + データ。
+    /// Response frame: report 0x4B + [0x80,sub] echo + data.
     fn reply(sub: u8, data: &[u8]) -> Vec<u8> {
         let mut r = vec![0x4B, 0x80, sub];
         r.extend_from_slice(data);
@@ -653,11 +645,11 @@ mod tests {
         d.ch.mock_reply(&reply(0x1D, &[0, 0]));
         // output_gain: e[3]=1 → High
         d.ch.mock_reply(&reply(0x19, &[0, 1]));
-        // balance L/R: [80,16,2,ch,0] → e[3]=ch, e[5]=val。
-        // ch0 (L) が -30 → 値 = +30 (公式: ch0減衰=正)
+        // balance L/R: [80,16,2,ch,0] → e[3]=ch, e[5]=val.
+        // ch0 (L) at -30 → value = +30 (official: ch0 attenuation = positive)
         d.ch.mock_reply(&reply(0x16, &[2, 0, 0, 0xE2]));
         d.ch.mock_reply(&reply(0x16, &[2, 1, 0, 0]));
-        // eq_volume: e[4]=15 → UI 値 -1 dB
+        // eq_volume: e[4]=15 → UI value -1 dB
         d.ch.mock_reply(&reply(0x03, &[2, 0, 15]));
         // mic_offset: e[3..4] int16 LE = 10922 → round(10922*15/32767) = +5
         d.ch.mock_reply(&reply(0x02, &[0, 0xAA, 0x2A]));
@@ -678,7 +670,7 @@ mod tests {
     #[test]
     fn write_wire_fixture() {
         let d = mock_driver();
-        // 書き込み系は応答を待たない — 送信列だけ検証
+        // Writes do not wait for a response — verify only the send sequence
         d.apply(&Change::Setting {
             id: "dac_filter".into(),
             value: SettingValue::Choice(4),
@@ -708,12 +700,12 @@ mod tests {
         assert_eq!(
             sent,
             vec![
-                // [0x4B, 1, 17, 1, 5] フィルター idx+1=5 (NON-OS)
+                // [0x4B, 1, 17, 1, 5] filter idx+1=5 (NON-OS)
                 vec![0x4B, 1, 17, 1, 5],
                 vec![0x4B, 1, 1, 0],     // save
                 vec![0x4B, 1, 25, 1, 0], // gain Low
                 vec![0x4B, 1, 1, 0],
-                // balance +20 → ch0 減衰 -20 + ch1 クリア (公式と同じ 2 フレーム)
+                // balance +20 → ch0 attenuation -20 + ch1 cleared (the same 2 frames as official)
                 vec![0x4B, 1, 22, 4, 0, 0, 236, 0],
                 vec![0x4B, 1, 22, 4, 1, 0, 0, 0],
                 vec![0x4B, 1, 1, 0],
@@ -727,11 +719,11 @@ mod tests {
         );
     }
 
-    /// EQ 応答の実機レイアウト: [4B,80,09] + param エコー [0,0,band]
-    /// + v[5..] = [0,0] + 係数 20B + freq + q + gain + type + offset + tag。
+    /// Real-device layout of an EQ response: [4B,80,09] + param echo [0,0,band]
+    /// + v[5..] = [0,0] + 20B coefficients + freq + q + gain + type + offset + tag.
     fn eq_reply(band: u8, freq: u16, q256: u16, gain256: i16, ty: u8, tag: u8) -> Vec<u8> {
         let mut f = vec![0x4B, 0x80, 0x09, 0, 0, band, 0, 0];
-        f.extend_from_slice(&[0u8; 20]); // 係数領域 (デコードしない)
+        f.extend_from_slice(&[0u8; 20]); // coefficient area (not decoded)
         f.extend_from_slice(&freq.to_le_bytes());
         f.extend_from_slice(&q256.to_le_bytes());
         f.extend_from_slice(&gain256.to_le_bytes());
@@ -742,8 +734,8 @@ mod tests {
 
     #[test]
     fn peq_coefs_match_device() {
-        // 実機 band0 (freq=31, q=0.75, gain=+2, PK) の読み取り係数と
-        // バイト単位で一致すること (96kHz・Q30 で検証済み)。
+        // Must match the coefficients read from a real-device band0 (freq=31, q=0.75, gain=+2, PK)
+        // byte for byte (verified at 96kHz, Q30).
         let c = WalkplayDriver::peq_coefs(&PeqBand {
             freq: 31,
             q: 0.75,
@@ -765,7 +757,7 @@ mod tests {
     #[test]
     fn peq_read_decode_fixture() {
         let d = mock_driver();
-        // スカラー設定は全てタイムアウトさせて失敗させないため、まず通常分を埋める
+        // So that no scalar setting times out and fails, fill in the regular ones first
         d.ch.mock_reply(&reply(0x11, &[0, 3]));
         d.ch.mock_reply(&reply(0x1D, &[0, 0]));
         d.ch.mock_reply(&reply(0x19, &[0, 1]));
@@ -773,7 +765,7 @@ mod tests {
         d.ch.mock_reply(&reply(0x16, &[2, 1, 0, 0]));
         d.ch.mock_reply(&reply(0x03, &[2, 0, 15]));
         d.ch.mock_reply(&reply(0x02, &[0, 0, 0]));
-        // EQ 10 バンド (band1 = 62Hz 実機値、tag=0x65)
+        // EQ 10 bands (band1 = 62Hz real-device value, tag=0x65)
         let freqs = [31u16, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
         for (i, f) in freqs.iter().enumerate() {
             d.ch.mock_reply(&eq_reply(
@@ -845,7 +837,7 @@ mod tests {
         assert_eq!(sent.len(), 12, "10 frames + apply + save");
         assert_eq!(sent[10], vec![0x4B, 1, 10, 4, 0, 0, 255, 255]);
         assert_eq!(sent[11], vec![0x4B, 1, 1, 0]);
-        // band 9 フレームのバンド番号位置
+        // Band-number position of the band 9 frame
         assert_eq!(sent[9][5], 9);
     }
 }

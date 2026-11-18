@@ -1,4 +1,4 @@
-//! 解析プローブ #8: [3,6] エコー形式 + [2,10]/[2,11] 再試行 + DD flag バイト差分
+//! Analysis probe #8: [3,6] echo format + [2,10]/[2,11] retry + DD flag byte difference
 
 fn open(api: &hidapi::HidApi) -> Option<hidapi::HidDevice> {
     let dev = api
@@ -60,7 +60,7 @@ fn fmt(r: &[u8]) -> String {
 }
 
 fn main() {
-    // [3,6] エコー形式: sel/row が r[2],r[3] に返るか
+    // [3,6] echo format: are sel/row returned in r[2], r[3]?
     println!("== [3,6] echo check");
     for sel in [0x01u8, 0x02, 0x11] {
         match cmd(3, 6, &[sel, 2]) {
@@ -76,7 +76,7 @@ fn main() {
         }
     }
 
-    // [2,10]/[2,11] 再試行 (前回 timeout — flaky か確認)
+    // [2,10]/[2,11] retry (timed out last time — check whether it is flaky)
     println!("== [2,10]/[2,11] retry");
     for (sub, arg) in [(10u8, 0u8), (10, 1), (11, 0), (11, 1)] {
         match cmd(2, sub, &[arg]) {
@@ -85,16 +85,16 @@ fn main() {
         }
     }
 
-    // DirectDrive flag バイト差分: 前半 flag=0xff (実装済み) vs 後半 flag=0x00
-    // → flag=0 が「消灯/デフォルト」なら下半分が別の光り方になるはず (目視)
+    // DirectDrive flag byte difference: first half flag=0xff (implemented) vs second half flag=0x00
+    // → if flag=0 means "off/default", the lower half should light differently (visual check)
     println!("== DirectDrive flag variant");
     let area = 0u8;
     let mut cells = Vec::new();
     for i in 0..135u8 {
         let (b, g, r, flag) = if i < 68 {
-            (0u8, 0u8, 255u8, 0xffu8) // 赤, flag=255
+            (0u8, 0u8, 255u8, 0xffu8) // red, flag=255
         } else {
-            (0u8, 255u8, 0u8, 0x00u8) // 青, flag=0
+            (0u8, 255u8, 0u8, 0x00u8) // blue, flag=0
         };
         cells.extend_from_slice(&[b, g, r, flag]);
     }
@@ -109,9 +109,9 @@ fn main() {
         }
         std::thread::sleep(std::time::Duration::from_millis(4));
     }
-    println!("  frames sent: {ok} (前半=赤flag255, 後半=青flag0 — 3秒)");
+    println!("  frames sent: {ok} (first half=red flag255, second half=blue flag0 — 3 s)");
     std::thread::sleep(std::time::Duration::from_secs(3));
-    // 復帰: 通常ライティング設定を読んで再送 (firmware 駆動に戻す)
+    // Recover: read the normal lighting settings and resend them (return to firmware control)
     if let Some(r) = cmd(5, 1, &[0, 0]) {
         let mut args = vec![0u8];
         args.extend_from_slice(&r[4..r.len().min(64)]);

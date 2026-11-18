@@ -1,4 +1,4 @@
-//! コマンドパレット (Ctrl+K): 画面・設定・操作・デバイスを名前で探して飛ぶ。
+//! Command palette (Ctrl+K): find and jump to screens, settings, actions and devices by name.
 
 use crate::app::{tab_of_section, tabs_for, Modal, Route, Shell, Tab};
 use crate::{theme, ui};
@@ -32,7 +32,13 @@ impl Shell {
     pub fn open_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.popup = None;
         self.modal = Some(Modal::Palette);
-        let e = self.input("palette", "", "画面・設定・操作を検索…", window, cx);
+        let e = self.input(
+            "palette",
+            "",
+            "Search screens, settings, actions…",
+            window,
+            cx,
+        );
         e.update(cx, |s, cx| {
             s.set_value("", window, cx);
             s.focus(window, cx);
@@ -49,21 +55,21 @@ impl Shell {
             act,
         };
         v.push(it(
-            "ホーム".into(),
-            "画面",
+            "Home".into(),
+            "Screen",
             "layout-grid",
             PalAction::Route(Route::Home),
         ));
         v.push(it(
-            "アプリ設定".into(),
-            "画面",
+            "App settings".into(),
+            "Screen",
             "settings",
             PalAction::Route(Route::Settings),
         ));
         if self.fx_on.is_some() {
             v.push(it(
-                "ライブライティングを停止".into(),
-                "ライブ・DirectDrive",
+                "Stop live lighting".into(),
+                "Live / DirectDrive",
                 "square",
                 PalAction::StopLiveLighting,
             ));
@@ -71,7 +77,7 @@ impl Shell {
         for d in &self.hub.devices {
             v.push(it(
                 d.name.clone(),
-                "デバイスを開く",
+                "Open device",
                 "usb",
                 PalAction::Device(d.id.clone()),
             ));
@@ -80,13 +86,13 @@ impl Shell {
             if let Some(c) = &s.caps {
                 let kb = c.keyboard.is_some();
                 for t in tabs_for(c) {
-                    v.push(it(t.label().into(), "タブ", t.icon(), PalAction::Tab(t)));
+                    v.push(it(t.label().into(), "Tab", t.icon(), PalAction::Tab(t)));
                 }
                 for sp in &c.settings {
                     let t = tab_of_section(&sp.section, kb);
                     v.push(it(
                         sp.label.clone(),
-                        &format!("設定 · {}", t.label()),
+                        &format!("Setting · {}", t.label()),
                         "sliders-horizontal",
                         PalAction::Tab(t),
                     ));
@@ -94,12 +100,12 @@ impl Shell {
                 for a in c.actions.iter().filter(|a| !a.id.ends_with("_finish")) {
                     v.push(it(
                         a.label.clone(),
-                        "操作を実行",
+                        "Run action",
                         "play",
                         PalAction::Action(a.clone()),
                     ));
                 }
-                // DirectDrive 対応デバイス: ライティングの実機プレビュー切替。
+                // DirectDrive-capable device: toggle the on-device preview of Lighting.
                 if self.tab == Tab::Lighting
                     && self.fx_on.as_ref() != Some(&s.id)
                     && s.live_rgb.is_empty()
@@ -110,11 +116,11 @@ impl Shell {
                     let on = s.dd_on;
                     v.push(it(
                         if on {
-                            "実機プレビュー停止".into()
+                            "Stop device preview".into()
                         } else {
-                            "実機でプレビュー".into()
+                            "Preview on device".into()
                         },
-                        "ライティング",
+                        "Lighting",
                         "monitor",
                         PalAction::DdToggle,
                     ));
@@ -122,8 +128,8 @@ impl Shell {
                 if let Some(m) = &c.mouse {
                     for b in &m.buttons {
                         v.push(it(
-                            format!("{} の割り当て", b.name),
-                            "ボタン",
+                            format!("{} assignment", b.name),
+                            "Buttons",
                             "mouse-pointer-click",
                             PalAction::Tab(Tab::Buttons),
                         ));
@@ -131,27 +137,27 @@ impl Shell {
                 }
             }
             v.push(it(
-                "元に戻す (Ctrl+Z)".into(),
-                "編集",
+                "Undo (Ctrl+Z)".into(),
+                "Edit",
                 "undo-2",
                 PalAction::Undo,
             ));
             v.push(it(
-                "やり直し (Ctrl+Y)".into(),
-                "編集",
+                "Redo (Ctrl+Y)".into(),
+                "Edit",
                 "redo-2",
                 PalAction::Redo,
             ));
         }
         v.push(it(
-            "ダークテーマ".into(),
-            "見た目",
+            "Dark theme".into(),
+            "Appearance",
             "moon",
             PalAction::Theme(false),
         ));
         v.push(it(
-            "ライトテーマ".into(),
-            "見た目",
+            "Light theme".into(),
+            "Appearance",
             "sun",
             PalAction::Theme(true),
         ));
@@ -215,12 +221,18 @@ impl Shell {
 
     pub fn modal_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = theme::pal();
-        let input = self.input("palette", "", "画面・設定・操作を検索…", window, cx);
+        let input = self.input(
+            "palette",
+            "",
+            "Search screens, settings, actions…",
+            window,
+            cx,
+        );
         let q = self.input_value("palette", cx).unwrap_or_default();
         let items = self.palette_items(&q);
         let mut list = div().flex().flex_col().gap(px(2.));
         if items.is_empty() {
-            list = list.child(ui::faint("見つかりません").p(px(12.)));
+            list = list.child(ui::faint("Nothing found").p(px(12.)));
         }
         for (i, it) in items.into_iter().enumerate() {
             list = list.child(
@@ -247,7 +259,7 @@ impl Shell {
             .gap(px(10.))
             .child(Input::new(&input))
             .child(list)
-            .child(ui::faint("Enter で一番上を実行 · Esc で閉じる"))
+            .child(ui::faint("Enter to run the top result · Esc to close"))
             .into_any_element()
     }
 }

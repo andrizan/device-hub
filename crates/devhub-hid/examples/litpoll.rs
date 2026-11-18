@@ -1,5 +1,5 @@
-//! アプリのワーカーと同じ経路で `live_lighting(0)` を繰り返し呼び、
-//! 返る色マップかエラーを表示する。UI でライブ点灯が出ない原因の切り分け用。
+//! Repeatedly calls `live_lighting(0)` through the same path as the app's worker and
+//! prints the returned color map or the error. For isolating why live lighting does not show up in the UI.
 
 fn main() {
     let backend = devhub_hid::connect().expect("connect");

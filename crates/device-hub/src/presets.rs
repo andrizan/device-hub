@@ -1,8 +1,8 @@
-//! PC に保存するプリセット (ゲームごとの設定など)。Web 版のクラウド構成の代わりで、
-//! オンボードの枠 (4 個など) に縛られずにいくつでも保存できる。
+//! Presets saved on the PC (per-game settings etc.). Replaces the Web version's cloud configs, and
+//! any number can be saved without being tied to the on-board slots (4 etc.).
 //!
-//! 保存先: `%APPDATA%\DeviceHub\presets\<model>\<name>.json` (中身は `DeviceState`)。
-//! 適用は `diff_changes` で差分だけ書くので速い。
+//! Location: `%APPDATA%\DeviceHub\presets\<model>\<name>.json` (contents are a `DeviceState`).
+//! Applying writes only the diff via `diff_changes`, so it is fast.
 
 use devhub_core::DeviceState;
 use std::path::PathBuf;
@@ -70,7 +70,7 @@ pub fn list(model: &str) -> Vec<Preset> {
 }
 
 pub fn save(model: &str, name: &str, st: &DeviceState) -> Result<(), String> {
-    let d = dir(model).ok_or("保存先が見つかりません")?;
+    let d = dir(model).ok_or("Save location not found")?;
     std::fs::create_dir_all(&d).map_err(|e| e.to_string())?;
     let s = serde_json::to_string_pretty(st).map_err(|e| e.to_string())?;
     std::fs::write(d.join(file_name(name)), s).map_err(|e| e.to_string())

@@ -1,15 +1,15 @@
-//! LAMZU Aurora (www.lamzu.net) 系マウス — 64B feature report プロトコル。
+//! LAMZU Aurora (www.lamzu.net) family mice — 64B feature report protocol.
 //!
-//! 公式 Web HUB の JS 解析 + Maya X V2 / LM20 有線 (37b0:0044) 実機検証
-//! (docs/PROTOCOL_NOTES.md §5)。
+//! Based on analysis of the official Web HUB JS + verified on a real wired Maya X V2 / LM20 (37b0:0044)
+//! (docs/PROTOCOL_NOTES.md §5).
 //!
-//! - 設定チャネル: if2 `FFFF:00`、64B feature report のみ (output report 無し)。
-//! - 送信 `[0,0,2,sub,f,cmd,devID,args…]` (devID = プロファイル番号 1..4、
-//!   ライト系と一部の devID 無しコマンドは別レイアウト)。
-//! - 応答 `a[1]`=ステータス (A1=ACK)、`a[4]`=ペイロード長、`a[6]`=cmd エコー、
-//!   `a[7]`=devID、`a[8..]`=値。書き込みは即時適用・flash 永続。
-//! - 自律通知 `[4,type,…]` は if1 `FFA0:01` の input report。
-//! - 未初期化プロファイル枠は走査しない (p4 が HID エラーを起こす場合あり)。
+//! - Settings channel: if2 `FFFF:00`, 64B feature reports only (no output report).
+//! - Send `[0,0,2,sub,f,cmd,devID,args…]` (devID = profile number 1..4,
+//!   lighting commands and some commands without devID use a different layout).
+//! - Response: `a[1]`=status (A1=ACK), `a[4]`=payload length, `a[6]`=cmd echo,
+//!   `a[7]`=devID, `a[8..]`=value. Writes apply immediately and persist to flash.
+//! - Autonomous notifications `[4,type,…]` arrive as input reports on if1 `FFA0:01`.
+//! - Uninitialized profile slots are not scanned (p4 may cause an HID error).
 
 use devhub_core::backend::*;
 use devhub_core::lamzu::{caps as lamzu_caps, model_by_pid, LamzuModel, MODELS};
@@ -20,14 +20,14 @@ use std::sync::{Arc, Mutex};
 use std::thread::sleep;
 use std::time::Duration;
 
-/// feature report 往復の待ち。有線は ~10-30ms で済むが、ドングル中継は
-/// 応答バッファの更新が ~200ms 遅れることがある。
+/// Wait for a feature report round trip. Wired needs only ~10-30ms, but via the dongle relay
+/// the response buffer update can lag by ~200ms.
 const CMD_DELAY: Duration = Duration::from_millis(120);
 
-// ---------------------------------------------------------------- コマンド
+// ---------------------------------------------------------------- commands
 
-/// feature report 往復: `[0,0,b2,sub,f,cmd,args…]` を送り応答を返す。
-/// 応答は report ID 込み 65B。`None` は a1 でない応答/失敗。
+/// Feature report round trip: sends `[0,0,b2,sub,f,cmd,args…]` and returns the response.
+/// The response is 65B including the report ID. `None` means a non-a1 response or a failure.
 fn cmd(
     dev: &hidapi::HidDevice,
     b2: u8,
@@ -36,11 +36,11 @@ fn cmd(
     command: u8,
     args: &[u8],
 ) -> HubResult<Vec<u8>> {
-    // 初期化系 (cmd 13 = resetProfile) は再送しない — 二重実行を避ける。
+    // Do not retry reset-type commands (cmd 13 = resetProfile) — avoids running them twice.
     cmd_ex(dev, b2, sub, f, command, args, command != 13)
 }
 
-/// 送信だけして応答を待たない (公式 `defaultDevice` と同じ。完全初期化は応答を返さない)。
+/// Sends without waiting for a response (same as the official `defaultDevice`; a full reset returns no response).
 fn send_only(dev: &hidapi::HidDevice, b2: u8, sub: u8, f: u8, command: u8, args: &[u8]) -> HubResult<()> {
     let mut w = [0u8; 65];
     w[3] = b2;
@@ -70,19 +70,19 @@ fn cmd_ex(
     w[6] = command;
     let n = args.len().min(56);
     w[7..7 + n].copy_from_slice(&args[..n]);
-    // 送信は 1 回 — ドングル中継では応答生成が遅れるので、get を
-    // 繰り返して a[6]==cmd の新しい応答が来るのを待つ。
-    // (再送信するとデバイス側の処理タイマーがリセットされて余計遅れる。)
+    // Send only once — response generation is delayed behind the dongle relay, so repeat get
+    // until a fresh response with a[6]==cmd arrives.
+    // (Resending resets the device-side processing timer and delays things further.)
     dev.send_feature_report(&w)
         .map_err(|e| HubError::Io(format!("lamzu feature write: {e}")))?;
     let mut last = HubError::Protocol("lamzu: response timeout".into());
-    // ドングル経由の一部書込み (ポーリング変更等) は RF 再ネゴシエーションで
-    // 応答生成まで数秒かかることがある — get は余裕を持って繰り返す。
-    // 送信自体が取りこぼされると応答が再生成されず stale バッファのまま
-    // 固まるので、公式 retrySetGet と同じく途中で 1 度だけ再送する。
+    // Some writes through the dongle (polling changes, etc.) need an RF renegotiation, so
+    // response generation can take a few seconds — repeat get with plenty of margin.
+    // If the send itself is dropped, no response is regenerated and the buffer stays stale
+    // and stuck, so resend once midway, as the official retrySetGet does.
     for i in 0..25 {
-        // フラッシュ書込みのコミット中は次コマンドを取りこぼすことがある —
-        // 2 回まで再送 (retrySetGet 相当)。
+        // The next command can be dropped while a flash write is being committed —
+        // resend up to 2 times (equivalent to retrySetGet).
         if resend && (i == 8 || i == 16) {
             dev.send_feature_report(&w).ok();
         }
@@ -90,16 +90,16 @@ fn cmd_ex(
         let mut r = [0u8; 65];
         match dev.get_feature_report(&mut r) {
             Ok(len) if len >= 8 => {
-                // 応答レイアウト (fixtures/lamzu/lm20-wired-active.txt):
-                // r[3]=target エコー, r[4]=宣言ペイロード長, r[5]=f エコー,
-                // r[6]=cmd エコー, r[7..7+r[4]]=ペイロード。
-                // cmd だけでは f 違いの残りバッファ (ボタン get f3 と
-                // ポーリング get f1 は共に cmd=0x80) と衝突するので全照合する。
+                // Response layout (fixtures/lamzu/lm20-wired-active.txt):
+                // r[3]=target echo, r[4]=declared payload length, r[5]=f echo,
+                // r[6]=cmd echo, r[7..7+r[4]]=payload.
+                // cmd alone collides with leftover buffers that differ only in f (button get f3 and
+                // polling get f1 both use cmd=0x80), so match on everything.
                 if r[6] == command && r[5] == f && r[3] == b2 {
-                    // GET 系 (cmd>=0x80) はペイロード先頭に args[0]
-                    // (dev/profile) をエコー。ボタン get はスロット番号
-                    // args[1] も r[8] にエコー — 連続スロット読みで隣の
-                    // 古い応答を誤採用しないための識別。
+                    // GET commands (cmd>=0x80) echo args[0]
+                    // (dev/profile) at the start of the payload. Button get also echoes the slot number
+                    // args[1] in r[8] — an identifier so that sequential slot reads do not
+                    // mistakenly accept a neighbor's stale response.
                     let arg_ok = command < 0x80 || args.first().is_none_or(|a| r[7] == *a);
                     let btn_ok = !(f == 3 && command == 0x80)
                         || args.get(1).is_none_or(|a| r[8] == *a);
@@ -108,7 +108,7 @@ fn cmd_ex(
                         return if r[1] == 0xA1 {
                             Ok(r[..len].to_vec())
                         } else {
-                            // このコマンドへの正式な応答だが ACK ではない (a2/a3)。
+                            // A valid response to this command, but not an ACK (a2/a3).
                             Err(HubError::Protocol(format!(
                                 "lamzu: cmd {command:#04x} -> tag {:02x}",
                                 r[1]
@@ -133,23 +133,23 @@ fn cmd_ex(
     Err(last)
 }
 
-/// プロファイル対象コマンド (devID=profile 1..4 を args 先頭に置く) の値 `a[8]`。
+/// The value `a[8]` of a profile-targeted command (devID=profile 1..4 placed at the start of args).
 fn u8_at(resp: &[u8], i: usize) -> HubResult<u8> {
     resp.get(i)
         .copied()
         .ok_or_else(|| HubError::Protocol("lamzu: short payload".into()))
 }
 
-// ---------------------------------------------------------------- ドライバ
+// ---------------------------------------------------------------- driver
 
 pub struct LamzuDriver {
     dev: Mutex<hidapi::HidDevice>,
     info: Mutex<DeviceInfo>,
-    /// 機種 (ペア先) とセンサーで決まる。ドングルでペア先が後から分かれば作り直す。
+    /// Determined by the model (paired mouse) and sensor. Rebuilt if the paired mouse becomes known later via the dongle.
     caps: Mutex<Capabilities>,
-    /// 公式機種定義の行。None = 未接続 / 未知のペア先。
+    /// A row of the official model definitions. None = not connected / unknown paired mouse.
     model: Mutex<Option<&'static LamzuModel>>,
-    /// センサー型番コマンドの応答 (4 = PAW3955)。
+    /// Response to the sensor model command (4 = PAW3955).
     sensor: Mutex<u8>,
     stop: Arc<AtomicBool>,
 }
@@ -161,7 +161,7 @@ pub fn open(
 ) -> HubResult<LamzuDriver> {
     dev.set_blocking_mode(false).ok();
     let stop = Arc::new(AtomicBool::new(false));
-    // 通知チャネル if1 FFA0:01 — 自分で開いて input report を読む。
+    // Notification channel if1 FFA0:01 — opened by us to read input reports.
     if let Some(ev) = events {
         spawn_notify(info.clone(), ev, stop.clone());
     }
@@ -183,7 +183,7 @@ impl Drop for LamzuDriver {
     }
 }
 
-/// `if1 FFA0:01` の input report を読み、`[4,type,…]` を HubEvent に変換する。
+/// Reads input reports from `if1 FFA0:01` and converts `[4,type,…]` into HubEvent.
 fn spawn_notify(info: DeviceInfo, ev: Arc<dyn Fn(HubEvent) + Send + Sync>, stop: Arc<AtomicBool>) {
     let (vid, pid) = (info.vid, info.pid);
     let serial = info.serial.clone();
@@ -191,8 +191,8 @@ fn spawn_notify(info: DeviceInfo, ev: Arc<dyn Fn(HubEvent) + Send + Sync>, stop:
         let Ok(api) = hidapi::HidApi::new() else {
             return;
         };
-        // 同じ VID/PID の受信機が複数あると先頭一致で別個体に紐付く —
-        // シリアルが取れていれば一致を要求する。
+        // With several receivers sharing the same VID/PID, first-match binds to the wrong unit —
+        // require a match when the serial is available.
         let Some(d) = api
             .device_list()
             .find(|d| {
@@ -214,7 +214,7 @@ fn spawn_notify(info: DeviceInfo, ev: Arc<dyn Fn(HubEvent) + Send + Sync>, stop:
         while !stop.load(Ordering::Relaxed) {
             match d.read_timeout(&mut buf, 250) {
                 Ok(n) if n >= 3 && buf[0] == 4 => match buf[1] {
-                    // type3 = 電池 (b[2]=%, b[3]=充電)
+                    // type3 = battery (b[2]=%, b[3]=charging)
                     3 => {
                         let id = info.id.clone();
                         ev(HubEvent::Battery(
@@ -225,8 +225,8 @@ fn spawn_notify(info: DeviceInfo, ev: Arc<dyn Fn(HubEvent) + Send + Sync>, stop:
                             },
                         ));
                     }
-                    // type1=DPI, 2=プロファイル, 6=接続/切断, 7=LOD,
-                    // 8=ポーリング, 13=モード — UI に再読させる。
+                    // type1=DPI, 2=profile, 6=connect/disconnect, 7=LOD,
+                    // 8=polling, 13=mode — have the UI re-read.
                     1 | 2 | 6 | 7 | 8 | 13 => {
                         ev(HubEvent::StateChanged(info.id.clone()));
                     }
@@ -239,8 +239,8 @@ fn spawn_notify(info: DeviceInfo, ev: Arc<dyn Fn(HubEvent) + Send + Sync>, stop:
 }
 
 impl LamzuDriver {
-    /// 機種 (有線 = 自分の PID、ドングル = GetDevicePID のペア先) とセンサーを判定し、
-    /// 製品名・モデル・caps を確定する。未知のペア先は `supported=false`。
+    /// Determines the model (wired = own PID, dongle = paired mouse from GetDevicePID) and the sensor,
+    /// and fixes the product name, model and caps. An unknown paired mouse gets `supported=false`.
     fn detect(&self) {
         let (transport, own_pid) = {
             let i = self.info.lock().unwrap_or_else(|p| p.into_inner());
@@ -254,7 +254,7 @@ impl LamzuDriver {
                     (vid == 0x37B0).then_some(pid)
                 }
                 _ => {
-                    // マウスが眠っている/未接続 — 受信機名のまま。
+                    // The mouse is asleep / not connected — keep the receiver name.
                     self.info.lock().unwrap_or_else(|p| p.into_inner()).asleep = true;
                     return;
                 }
@@ -263,7 +263,7 @@ impl LamzuDriver {
             Some(own_pid)
         };
         let model = pid.and_then(model_by_pid);
-        // センサー型番 [2,1,1,143] → a[7] (1=3395, 2=3950, 4=3955)。
+        // Sensor model [2,1,1,143] → a[7] (1=3395, 2=3950, 4=3955).
         let sensor = self
             .run(2, 1, 1, 143, &[])
             .ok()
@@ -280,7 +280,7 @@ impl LamzuDriver {
             i.name = m.name.into();
             i.model = m.model.into();
         } else if transport == Transport::Wireless24G {
-            i.name = "LAMZU 8K レシーバー (未対応のマウス)".into();
+            i.name = "LAMZU 8K receiver (unsupported mouse)".into();
             i.model = "lamzu-dongle".into();
         }
     }
@@ -298,16 +298,16 @@ impl LamzuDriver {
         cmd(&dev, b2, sub, f, command, args)
     }
 
-    /// get: `[2,sub,f,cmd|0x80,dev]` → `a[8]` 値。
+    /// get: `[2,sub,f,cmd|0x80,dev]` → value in `a[8]`.
     fn get(&self, sub: u8, f: u8, command: u8, dev: u8) -> HubResult<u8> {
         let r = self.run(2, sub, f, command, &[dev])?;
         u8_at(&r, 8)
     }
 
-    /// set: `[2,sub,f,cmd,dev,val]`。
-    /// 同値書込みは FW が応答を生成しない (応答バッファが前コマンドのまま
-    /// 固まる) ので、まず現在値を読んで同じなら送らない。
-    /// ドングル経由の応答遅延で失敗したら get (cmd|0x80) で読み戻し検証。
+    /// set: `[2,sub,f,cmd,dev,val]`.
+    /// The FW generates no response for a same-value write (the response buffer stays at the previous command
+    /// and gets stuck), so read the current value first and skip the send if it is the same.
+    /// If it fails because of response delay through the dongle, verify by reading back with get (cmd|0x80).
     fn set(&self, sub: u8, f: u8, command: u8, dev: u8, val: u8) -> HubResult<()> {
         if self.get(sub, f, command | 0x80, dev).ok() == Some(val) {
             return Ok(());
@@ -324,7 +324,7 @@ impl LamzuDriver {
         }
     }
 
-    /// ドングル経由か (37b0:0048 Orbital 8K)。
+    /// Whether it goes through the dongle (37b0:0048 Orbital 8K).
     fn is_dongle(&self) -> bool {
         self.info
             .lock()
@@ -333,8 +333,8 @@ impl LamzuDriver {
             == Transport::Wireless24G
     }
 
-    /// 現在のプロファイル (1..4)。不明なときは Err —
-    /// 勝手に 1 に落とすと別プロファイルを編集中に 1 番を書き潰し得る。
+    /// The current profile (1..4). Err when unknown —
+    /// silently falling back to 1 could overwrite profile 1 while another profile is being edited.
     fn active_profile(&self) -> HubResult<u8> {
         let r = self.run(2, 1, 0, 133, &[])?;
         let p = u8_at(&r, 7)?;
@@ -347,7 +347,7 @@ impl LamzuDriver {
         }
     }
 
-    /// ボタン 1 個読み出し。空エントリは echo が返るので Disabled。
+    /// Reads one button. An empty entry returns an echo, so it is Disabled.
     fn read_button(&self, profile: u8, btn: u8) -> ButtonAction {
         let Ok(r) = self.run(2, 15, 3, 128, &[profile, btn, 0, 255, 10]) else {
             return ButtonAction::Disabled;
@@ -360,7 +360,7 @@ impl LamzuDriver {
             u8_at(&r, 11).unwrap_or(0) as usize,
         );
         if ty == 0xFF || len == 0x0A {
-            // リクエスト echo (未初期化エントリ)。
+            // Request echo (uninitialized entry).
             return ButtonAction::Disabled;
         }
         let p = &r[12..(12 + len).min(r.len())];
@@ -375,9 +375,9 @@ impl LamzuDriver {
             .map(|_| ())
     }
 
-    /// ステージ値+色の読み出し。count=0・範囲外・短い応答は Err
-    /// (異常値を正常データに丸めない)。
-    /// 速度連動 DPI カーブ (公式 getAdaptiveDPICurve)。
+    /// Reads stage values + colors. count=0, out-of-range and short responses are Err
+    /// (abnormal values are not rounded into valid data).
+    /// Speed-linked DPI curve (official getAdaptiveDPICurve).
     fn read_adaptive(&self, dev: u8) -> HubResult<AdaptiveCurve> {
         let r = self.run(2, 9, 1, 154, &[dev])?;
         let enabled = u8_at(&r, 8)? == 1;
@@ -397,15 +397,15 @@ impl LamzuDriver {
         Ok(AdaptiveCurve { enabled, points })
     }
 
-    /// 速度連動 DPI カーブの書き込み (公式 setAdaptiveDPICurve:
-    /// `[2,4+4N,1,26,prof,en,0,N,(速度 u16BE, 倍率×100 u16BE)×N]`)。入力は先に検証する。
+    /// Writes the speed-linked DPI curve (official setAdaptiveDPICurve:
+    /// `[2,4+4N,1,26,prof,en,0,N,(speed u16BE, multiplier×100 u16BE)×N]`). Input is validated first.
     fn write_adaptive(&self, prof: u8, c: &AdaptiveCurve) -> HubResult<()> {
         let Some(ac) = self.caps_now().mouse.and_then(|m| m.adaptive_dpi) else {
             return Err(HubError::Unsupported("adaptive dpi"));
         };
         let n = c.points.len();
         if n < ac.min_points || n > ac.max_points {
-            return Err(HubError::Invalid("速度連動 DPI の点の数".into()));
+            return Err(HubError::Invalid("speed-linked DPI point count".into()));
         }
         let mut last = None;
         for p in &c.points {
@@ -413,7 +413,7 @@ impl LamzuDriver {
                 || !(0.0..=ac.ratio_max + 1e-3).contains(&p.ratio)
                 || last.is_some_and(|l| p.speed <= l)
             {
-                return Err(HubError::Invalid("速度連動 DPI の点の値".into()));
+                return Err(HubError::Invalid("speed-linked DPI point value".into()));
             }
             last = Some(p.speed);
         }
@@ -424,7 +424,7 @@ impl LamzuDriver {
         }
         match self.run(2, (4 + n * 4) as u8, 1, 26, &args) {
             Ok(_) => Ok(()),
-            // 同値書込み等で応答が来ないときは読み戻しで判定。
+            // When no response arrives (e.g. a same-value write), decide by reading back.
             Err(e) => match self.read_adaptive(prof) {
                 Ok(back) if back.enabled == c.enabled && back.points.len() == n => Ok(()),
                 _ => Err(e),
@@ -464,8 +464,8 @@ impl LamzuDriver {
             .collect())
     }
 
-    /// ステージ値+色の書き込み (アクティブ段は変えない)。
-    /// 値→色→有効段の順に別コマンドなので、入力検証を先に済ませる。
+    /// Writes stage values + colors (does not change the active stage).
+    /// Value → color → active stage are separate commands in that order, so validate the input first.
     fn write_stages(&self, prof: u8, stages: &[DpiStage]) -> HubResult<()> {
         if stages.is_empty() || stages.len() > 5 {
             return Err(HubError::Invalid("dpi stage count".into()));
@@ -483,20 +483,20 @@ impl LamzuDriver {
             args.extend_from_slice(&(s.y.unwrap_or(s.x) as u16).to_be_bytes());
         }
         self.run(2, 26, 1, 1, &args)?;
-        // 色: [2,19,2,1,dev,RGB×6] — 6枠分パディング。
+        // Color: [2,19,2,1,dev,RGB×6] — padded to 6 slots.
         let mut cargs = vec![prof];
         for s in stages {
             cargs.extend_from_slice(&[s.color.r, s.color.g, s.color.b]);
         }
         cargs.resize(1 + 18, 0);
         self.run(2, 19, 2, 1, &cargs)?;
-        // フラッシュコミット待ち — 直後のコマンドが取りこぼされるのを防ぐ。
+        // Wait for the flash commit — prevents the next command from being dropped.
         sleep(Duration::from_millis(300));
         Ok(())
     }
 }
 
-// ---------------------------------------------------------------- ボタン
+// ---------------------------------------------------------------- buttons
 
 fn decode_button(ty: u8, p: &[u8]) -> ButtonAction {
     match ty {
@@ -508,8 +508,8 @@ fn decode_button(ty: u8, p: &[u8]) -> ButtonAction {
             5 => MouseFn::Forward,
             16 => MouseFn::ScrollUp,
             17 => MouseFn::ScrollDown,
-            // due enum の旧 DPI コード (公式 jM は type7 を使うが、過去の
-            // 書き込みで残っている可能性があるので読みだけは対応)。
+            // Old DPI code of the due enum (the official jM uses type7, but earlier
+            // writes may have left it, so only reads support it).
             18 => return ButtonAction::Dpi(DpiFn::Up),
             19 => return ButtonAction::Dpi(DpiFn::Down),
             20 | 21 => return ButtonAction::Dpi(DpiFn::Cycle),
@@ -560,8 +560,8 @@ fn decode_button(ty: u8, p: &[u8]) -> ButtonAction {
                 }
             })
         }
-        // DPI 系は公式 jM() と同じ type7 + Er enum
-        // (CycleUp=6/CycleDown=7/Up=1/Down=2/Lock=5+[Xhi,Xlo,Xhi,Xlo])。
+        // DPI actions use type7 + the Er enum, same as the official jM()
+        // (CycleUp=6/CycleDown=7/Up=1/Down=2/Lock=5+[Xhi,Xlo,Xhi,Xlo]).
         7 => ButtonAction::Dpi(match p.first().copied().unwrap_or(0) {
             1 => DpiFn::Up,
             2 => DpiFn::Down,
@@ -576,8 +576,8 @@ fn decode_button(ty: u8, p: &[u8]) -> ButtonAction {
         }),
         8 => ButtonAction::ProfileCycle,
         13 => ButtonAction::PollingCycle,
-        // 公式 MacroI/II/III: type16=回数 [slotHi,slotLo,count]、
-        // 17=離すまで、18=再押下まで (params は slot のみ)。
+        // Official MacroI/II/III: type16=count [slotHi,slotLo,count],
+        // 17=until release, 18=until pressed again (params are the slot only).
         16 if p.len() >= 3 => ButtonAction::Macro {
             slot: u16::from_be_bytes([p[0], p[1]]) as u8,
             run: MacroRun::Times(p[2] as u16),
@@ -590,8 +590,8 @@ fn decode_button(ty: u8, p: &[u8]) -> ButtonAction {
             slot: u16::from_be_bytes([p[0], p[1]]) as u8,
             run: MacroRun::Toggle,
         },
-        // 解釈できない type (14=LOD循環, 20=競技モード切替 等) は
-        // Disabled に潰さず Unsupported で保持 — 往復書き戻しで消えない。
+        // A type we cannot interpret (14=LOD cycle, 20=competitive mode toggle, etc.) is
+        // kept as Unsupported instead of collapsing to Disabled — it survives a write-back round trip.
         _ => ButtonAction::Unsupported {
             ty,
             params: p.to_vec(),
@@ -616,7 +616,7 @@ fn encode_button(a: &ButtonAction) -> HubResult<(u8, Vec<u8>)> {
             };
             (1, vec![c])
         }
-        // 公式 jM(): DPI は type7 + Er enum、ロックは [5,Xhi,Xlo,Xhi,Xlo]。
+        // Official jM(): DPI is type7 + the Er enum, lock is [5,Xhi,Xlo,Xhi,Xlo].
         Dpi(DpiFn::Cycle) => (7, vec![6]),
         Dpi(DpiFn::Up) => (7, vec![1]),
         Dpi(DpiFn::Down) => (7, vec![2]),
@@ -629,9 +629,9 @@ fn encode_button(a: &ButtonAction) -> HubResult<(u8, Vec<u8>)> {
             count,
             interval_ms,
         } => {
-            // 公式の連射 (Xクリック) は左クリック固定。他のボタンは実機未検証なので書かない。
+            // The official rapid fire (X-click) is fixed to left click. Other buttons are unverified on a real device, so they are not written.
             if *button != MouseFn::Left {
-                return Err(HubError::Unsupported("連射は左クリックのみ (公式と同じ)"));
+                return Err(HubError::Unsupported("rapid fire is left click only (same as the official app)"));
             }
             let b = 1;
             let [hi, lo] = interval_ms.to_be_bytes();
@@ -657,8 +657,8 @@ fn encode_button(a: &ButtonAction) -> HubResult<(u8, Vec<u8>)> {
             };
             (5, usage.to_be_bytes().to_vec())
         }
-        // 公式 MacroI/II/III: 回数=type16 [slot,count]、離すまで=17、
-        // 再押下まで=18 (params は slot のみ、回数フィールドなし)。
+        // Official MacroI/II/III: count=type16 [slot,count], until release=17,
+        // until pressed again=18 (params are the slot only, no count field).
         Macro { slot, run } => {
             let [hi, lo] = (*slot as u16).to_be_bytes();
             match run {
@@ -667,11 +667,11 @@ fn encode_button(a: &ButtonAction) -> HubResult<(u8, Vec<u8>)> {
                 MacroRun::Toggle => (18, vec![hi, lo]),
             }
         }
-        // 公式は循環パラメータ LoopUp=3 を送る。
+        // The official app sends the cycle parameter LoopUp=3.
         PollingCycle => (13, vec![3]),
         ProfileCycle => (8, vec![3]),
         ScrollModeToggle => return Err(HubError::Unsupported("scroll-mode toggle")),
-        // デバイス側の未解釈割当はそのまま往復で書き戻せる。
+        // Device-side assignments we cannot interpret can be written back unchanged in a round trip.
         Unsupported { ty, params } => (*ty, params.clone()),
     })
 }
@@ -682,12 +682,12 @@ fn encode_button(a: &ButtonAction) -> HubResult<(u8, Vec<u8>)> {
 
 impl DeviceDriver for LamzuDriver {
     fn info(&self) -> DeviceInfo {
-        // ドングルで開いた時にマウスが寝ていた/未判定なら、ここで判定し直す。
+        // If the mouse was asleep / undetermined when opened via the dongle, determine it again here.
         if self.model.lock().unwrap_or_else(|p| p.into_inner()).is_none() {
             self.detect();
         }
         let mut i = self.info.lock().unwrap_or_else(|p| p.into_inner()).clone();
-        // マウス FW: [2,16,0,129] → a[7..11] = 4B バージョン (監査: 4B目固定0は誤り)。
+        // Mouse FW: [2,16,0,129] → a[7..11] = 4B version (audit: the "4th byte fixed at 0" assumption was wrong).
         match self.run(2, 16, 0, 129, &[]) {
             Ok(r) => {
                 i.asleep = false;
@@ -695,11 +695,11 @@ impl DeviceDriver for LamzuDriver {
                     i.firmware = Some(format!("{}.{}.{}.{}", v[0], v[1], v[2], v[3]));
                 }
             }
-            // ドングル経由でマウスが応答しない = スリープ/未接続。
+            // Mouse not responding behind the dongle = asleep / not connected.
             Err(_) if i.transport == Transport::Wireless24G => i.asleep = true,
             Err(_) => {}
         }
-        // 受信機 FW: [0,16,0,129] (target 0)。
+        // Receiver FW: [0,16,0,129] (target 0).
         if i.transport == Transport::Wireless24G {
             if let Ok(r) = self.run(0, 16, 0, 129, &[]) {
                 if let Some(v) = r.get(7..11) {
@@ -710,7 +710,7 @@ impl DeviceDriver for LamzuDriver {
         if let Ok(b) = self.battery() {
             i.battery = Some(b);
         }
-        // シリアル: EID 応答 a[9..] ASCII
+        // Serial: EID response a[9..] ASCII
         if let Ok(r) = self.run(2, 1, 0, 130, &[]) {
             if let Some(tail) = r.get(9..) {
                 if let Some(end) = tail.iter().position(|&b| b == 0 || b == 0xFF) {
@@ -720,7 +720,7 @@ impl DeviceDriver for LamzuDriver {
                 }
             }
         }
-        // supported は detect() が機種表で決めた値のまま (未知のペア先は false)。
+        // supported stays as decided by detect() from the model table (false for an unknown paired mouse).
         i
     }
 
@@ -729,20 +729,20 @@ impl DeviceDriver for LamzuDriver {
     }
 
     fn read(&self) -> HubResult<DeviceState> {
-        // プロファイル不明のまま続行すると、読み取った値がどの
-        // プロファイルのものか分からず書き込み先も誤る — 失敗を伝える。
+        // Continuing with an unknown profile would leave it unclear which
+        // profile the values read belong to and would also misdirect writes — report the failure.
         let prof = self.active_profile()?;
         let dev = prof;
         let mut settings = BTreeMap::new();
 
-        // ポーリング: 8,4,2,1,32,64,128 → Hz。
-        // 読めなければ入れない (既定値で埋めると 1000Hz と誤表示する)。
+        // Polling: 8,4,2,1,32,64,128 → Hz.
+        // Leave it out if it cannot be read (filling in a default would wrongly show 1000Hz).
         if let Ok(code) = self.get(2, 1, 128, dev) {
             let rate = match code {
                 8 => 125,
                 4 => 250,
                 2 => 500,
-                // 公式 getPollingRate は 16 を 1 (1000Hz) として扱う。
+                // The official getPollingRate treats 16 as 1 (1000Hz).
                 1 | 16 => 1000,
                 32 => 2000,
                 64 => 4000,
@@ -752,7 +752,7 @@ impl DeviceDriver for LamzuDriver {
             settings.insert("polling_wireless".into(), SettingValue::Choice(rate));
         }
 
-        // LOD: >=128 は (v-128)/10 mm、BCD 0x1x は 1.xmm、1=1mm、2=2mm。
+        // LOD: >=128 is (v-128)/10 mm, BCD 0x1x is 1.xmm, 1=1mm, 2=2mm.
         if let Ok(v) = self.get(2, 1, 136, dev) {
             let mm10 = if v >= 128 {
                 (v - 128) as i64
@@ -782,17 +782,17 @@ impl DeviceDriver for LamzuDriver {
             let signed = if v > 100 { v as i64 - 256 } else { v as i64 };
             settings.insert("angle_tune".into(), SettingValue::Num(signed as f32));
         }
-        // SensorOffset は値が a[9] (a[8] は空き)。
+        // SensorOffset's value is in a[9] (a[8] is unused).
         if let Ok(r) = self.run(2, 3, 1, 149, &[dev]) {
             let v = u8_at(&r, 9).unwrap_or(0);
             let signed = if v > 100 { v as i64 - 256 } else { v as i64 };
             settings.insert("sensor_offset".into(), SettingValue::Num(signed as f32));
         }
-        // ドングル経由のみ有効な項目 (有線 FW では a3/無視): 受信機 3 灯、
-        // ガラスモード。DPI インジケーターは無線でも a3 なので読まない。
+        // Items valid only behind a dongle (a3/ignored on wired FW): receiver 3 lights,
+        // glass mode. The DPI indicator is a3 even on wireless, so it is not read.
         if self.is_dongle() {
-            // マスタースイッチ: light_idx=255 のモード — 公式 K0() は
-            // 既知設定があり値が 0 以外なら ON (実機は 0xFF を返す)。
+            // Master switch: the mode at light_idx=255 — the official K0()
+            // treats it as ON when a known setting exists and its value is non-zero (the real device returns 0xFF).
             if let Ok(r) = self.run(1, 5, 2, 128, &[dev, 255]) {
                 settings.insert(
                     "dongle_led".into(),
@@ -813,8 +813,8 @@ impl DeviceDriver for LamzuDriver {
         }
         if let Ok(r) = self.run(2, 3, 0, 135, &[dev]) {
             let secs = u16::from_be_bytes([u8_at(&r, 8).unwrap_or(0), u8_at(&r, 9).unwrap_or(0)]);
-            // 公式は 0/0xFF00/0xFFFF を「無効」と表示する (書き込みの選択肢には無い)。
-            // その場合は値を入れない — UI は選択なしで表示し、選べば有効な分数を書く。
+            // The official app shows 0/0xFF00/0xFFFF as "disabled" (not among the write options).
+            // In that case leave the value out — the UI shows no selection, and choosing one writes a valid number of minutes.
             if !matches!(secs, 0 | 0xFF00 | 0xFFFF) {
                 settings.insert(
                     "sleep_min".into(),
@@ -822,7 +822,7 @@ impl DeviceDriver for LamzuDriver {
                 );
             }
         }
-        // SpeedEnable: a[8]=L, a[9]=R。
+        // SpeedEnable: a[8]=L, a[9]=R.
         if let Ok(r) = self.run(2, 3, 0, 154, &[dev]) {
             settings.insert(
                 "rapid_left".into(),
@@ -833,7 +833,7 @@ impl DeviceDriver for LamzuDriver {
                 SettingValue::Bool(u8_at(&r, 9).unwrap_or(0) == 1),
             );
         }
-        // ScrollHP (B-hop): a[8]=方向, a[9..11]=u16BE ms。
+        // ScrollHP (B-hop): a[8]=direction, a[9..11]=u16BE ms.
         if let Ok(r) = self.run(2, 4, 0, 153, &[dev]) {
             settings.insert(
                 "bhop_dir".into(),
@@ -842,7 +842,7 @@ impl DeviceDriver for LamzuDriver {
             let ms = u16::from_be_bytes([u8_at(&r, 9).unwrap_or(0), u8_at(&r, 10).unwrap_or(0)]);
             settings.insert("bhop_ms".into(), SettingValue::Num(ms as f32));
         }
-        // 速度連動 DPI (AdaDPI): a[8]=有効, a[12]=点数, a[13..]=(速度 u16BE, 倍率×100 u16BE)×N。
+        // Speed-linked DPI (AdaDPI): a[8]=enabled, a[12]=point count, a[13..]=(speed u16BE, multiplier×100 u16BE)×N.
         let adaptive = if self
             .caps_now()
             .mouse
@@ -853,7 +853,7 @@ impl DeviceDriver for LamzuDriver {
         } else {
             None
         };
-        // ガラスモード: [2,1,1,142] (プロファイル引数なし) → a[7]。
+        // Glass mode: [2,1,1,142] (no profile argument) → a[7].
         if self.has("glass_mode") {
             if let Ok(r) = self.run(2, 1, 1, 142, &[]) {
                 settings.insert(
@@ -863,8 +863,8 @@ impl DeviceDriver for LamzuDriver {
             }
         }
 
-        // DPI ステージ: get [dev,6] → a[8]=数, a[9..]=4B×N (X,Y u16BE)。
-        // 読めなければ空のまま (異常値を丸めない)。
+        // DPI stages: get [dev,6] → a[8]=count, a[9..]=4B×N (X,Y u16BE).
+        // Stay empty if unreadable (abnormal values are not rounded).
         let stages = self.read_stages(dev).unwrap_or_default();
         let mut active = 0usize;
         if let Ok(v) = self.get(2, 1, 130, dev) {
@@ -895,7 +895,7 @@ impl DeviceDriver for LamzuDriver {
     }
 
     fn apply(&self, change: &Change) -> HubResult<()> {
-        // プロファイル切替は active 不明でも通す (修正手段になり得る)。
+        // Allow a profile switch even when the active profile is unknown (it can be the means of recovery).
         if let Change::Profile(i) = change {
             return self
                 .run(2, 1, 0, 5, &[i.saturating_add(1)])
@@ -914,7 +914,7 @@ impl DeviceDriver for LamzuDriver {
                             _ => false,
                         });
                     if !allowed {
-                        return Err(HubError::Invalid("この接続では選べないポーリングレートです".into()));
+                        return Err(HubError::Invalid("polling rate not available on this connection".into()));
                     }
                     let code = match hz {
                         125 => 8,
@@ -929,7 +929,7 @@ impl DeviceDriver for LamzuDriver {
                     self.set(2, 1, 0, prof, code)
                 }
                 "lod" => {
-                    // 公式 setLOD: <1mm → v*10|0x80、1.xmm → BCD 0x1x、その他 → mm。
+                    // Official setLOD: <1mm → v*10|0x80, 1.xmm → BCD 0x1x, otherwise → mm.
                     let mm10 = value.as_choice();
                     let v = match mm10 {
                         1..=9 => (mm10 | 0x80) as u8,
@@ -945,7 +945,7 @@ impl DeviceDriver for LamzuDriver {
                 "hyper_mode" => {
                     let on = value.as_bool();
                     self.set(2, 1, 11, prof, on as u8)?;
-                    // 公式 s2(): 競技モード OFF なら 20K FPS も OFF にする。
+                    // Official s2(): when competitive mode is OFF, also turn 20K FPS OFF.
                     if !on {
                         self.set(2, 1, 19, prof, 0)?;
                     }
@@ -953,16 +953,16 @@ impl DeviceDriver for LamzuDriver {
                 }
                 "tracking_mode" => {
                     let on = value.as_bool();
-                    // 公式: 20K FPS は競技モードが ON のときだけ有効にできる。
+                    // Official: 20K FPS can be enabled only while competitive mode is ON.
                     if on && self.get(2, 1, 139, prof).ok() != Some(1) {
                         return Err(HubError::Invalid(
-                            "20K FPS は先に競技モードを ON にしてください".into(),
+                            "Turn on competitive mode before enabling 20K FPS".into(),
                         ));
                     }
                     self.set(2, 1, 19, prof, on as u8)
                 }
                 "dpi_xy" => {
-                    // 公式 $2(): 切替時に段の X/Y も書き直す (OFF 時は Y=X)。
+                    // Official $2(): also rewrite the stage X/Y on toggle (Y=X when OFF).
                     let on = value.as_bool();
                     self.set(2, 1, 13, prof, on as u8)?;
                     let stages = self.read_stages(prof)?;
@@ -989,7 +989,7 @@ impl DeviceDriver for LamzuDriver {
                     )
                 }
                 "sensor_offset" => {
-                    // 値は o[8] (o[7] は空き) — 公式 setSensorOffsetValue と同じ。
+                    // The value is in o[8] (o[7] is unused) — same as the official setSensorOffsetValue.
                     let v = value.as_num().clamp(-5., 5.) as i32;
                     let enc = if v < 0 { (255 + v + 1) as u8 } else { v as u8 };
                     let read_back = || {
@@ -1011,8 +1011,8 @@ impl DeviceDriver for LamzuDriver {
                     }
                 }
                 "dongle_led" => {
-                    // 公式: ON=SetLightness(1,prof,0,255)、
-                    // OFF=SetLightEffect idx255 mode0。モード値が 0 以外なら ON。
+                    // Official: ON=SetLightness(1,prof,0,255),
+                    // OFF=SetLightEffect idx255 mode0. ON when the mode value is non-zero.
                     if value.as_bool() {
                         self.run(1, 3, 2, 2, &[prof, 0, 255]).map(|_| ())
                     } else {
@@ -1028,7 +1028,7 @@ impl DeviceDriver for LamzuDriver {
                     let mode = value.as_choice() as u8;
                     self.run(1, 5, 2, 0, &[prof, idx, mode, 0, 0]).map(|_| ())
                 }
-                // ガラスモード: 公式 setGlassModeDetect [2,1,1,14,v] (プロファイル引数なし)。
+                // Glass mode: official setGlassModeDetect [2,1,1,14,v] (no profile argument).
                 "glass_mode" => {
                     let v = value.as_bool() as u8;
                     let read = || {
@@ -1043,17 +1043,17 @@ impl DeviceDriver for LamzuDriver {
                     match read() {
                         Some(b) if b == v => Ok(()),
                         Some(_) => Err(HubError::Protocol(
-                            "ガラスモードが反映されませんでした (このファームウェアでは未対応の可能性)".into(),
+                            "Glass mode was not applied (this firmware may not support it)".into(),
                         )),
                         None => res,
                     }
                 }
                 "debounce" => self.set(2, 0, 8, prof, value.as_num().clamp(0., 255.) as u8),
                 "sleep_min" => {
-                    // 公式の選択肢は 1/5/10/15/20/25 分のみ (OFF は書けない)。
+                    // The official options are only 1/5/10/15/20/25 minutes (OFF cannot be written).
                     let min = value.as_choice();
                     if !matches!(min, 1 | 5 | 10 | 15 | 20 | 25) {
-                        return Err(HubError::Invalid("スリープ時間は 1〜25 分から選んでください".into()));
+                        return Err(HubError::Invalid("Choose a sleep time between 1 and 25 minutes".into()));
                     }
                     let secs = (min * 60) as u16;
                     let [hi, lo] = secs.to_be_bytes();
@@ -1133,11 +1133,11 @@ impl DeviceDriver for LamzuDriver {
                 _ => Err(HubError::Unsupported("setting")),
             },
             Change::DpiStages { stages, active } => {
-                // 値→色→有効段の 3 コマンド — 先に入力検証を済ませてから書く。
+                // Three commands: value → color → active stage — finish input validation before writing.
                 self.write_stages(prof, stages)?;
                 self.set(2, 1, 2, prof, (*active as u8) + 1)?;
-                // X/Y 個別フラグはステージ内容と同期 (UI トグルは段だけを
-                // 書き換えるので、ここで公式 $2() 相当の整合を取る)。
+                // The per-axis X/Y flag is synced with the stage contents (the UI toggle only
+                // rewrites the stage, so keep it consistent here, as the official $2() does).
                 self.set(
                     2,
                     1,
@@ -1161,18 +1161,18 @@ impl DeviceDriver for LamzuDriver {
     fn run_action(&self, id: &str, _file: Option<&std::path::Path>) -> HubResult<ActionOutcome> {
         match id {
             "reset_profile" => {
-                // active 不明のまま 1 番を消去しない — 失敗を伝える。
+                // Do not erase profile 1 while the active profile is unknown — report the failure.
                 let prof = self.active_profile()?;
                 self.run(2, 1, 0, 13, &[prof])?;
                 sleep(Duration::from_millis(500));
                 Ok(ActionOutcome {
-                    message: Some("プロファイルを初期化しました".into()),
+                    message: Some("Profile reset".into()),
                     reload: true,
                 })
             }
             "factory_reset" => {
-                // 公式 Xv(): defaultDevice は送るだけ (応答なし)。無線は 1 秒後に
-                // 受信機 (target 0) も初期化する。再送しない (二重初期化を避ける)。
+                // Official Xv(): defaultDevice only sends (no response). On wireless, after 1 second
+                // the receiver (target 0) is also reset. No resend (avoids a double reset).
                 {
                     let dev = self.dev.lock().unwrap_or_else(|p| p.into_inner());
                     send_only(&dev, 2, 2, 0, 0, &[192, 1])?;
@@ -1184,7 +1184,7 @@ impl DeviceDriver for LamzuDriver {
                 }
                 sleep(Duration::from_millis(1500));
                 Ok(ActionOutcome {
-                    message: Some("工場出荷状態に戻しました".into()),
+                    message: Some("Restored factory defaults".into()),
                     reload: true,
                 })
             }

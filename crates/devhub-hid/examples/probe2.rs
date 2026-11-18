@@ -1,5 +1,5 @@
-//! 一時プローブ: 未対応の問い合わせを実機に投げて応答を見る。
-//! U() フレーム = report[1..] に [grp, sub, args...] を置くだけ。
+//! Temporary probe: throws unsupported queries at the real device and looks at the responses.
+//! U() frame = just put [grp, sub, args...] in report[1..].
 
 fn main() {
     let api = hidapi::HidApi::new().unwrap();
@@ -19,7 +19,7 @@ fn main() {
     );
     let d = dev.open_device(&api).unwrap();
     d.set_blocking_mode(false).ok();
-    // デバイスが溜めている古い応答を捨てる
+    // Discard old responses the device has queued up
     let mut drain = [0u8; 65];
     while d.read_timeout(&mut drain, 20).unwrap_or(0) > 0 {}
     for (name, grp, sub, args) in [

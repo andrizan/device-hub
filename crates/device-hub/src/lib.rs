@@ -1,12 +1,12 @@
-//! Device HUB — GPUI フロントエンド (Liquid Glass)。
+//! Device HUB — GPUI frontend (Liquid Glass).
 //!
-//! - `app` … 窓の殻 (Shell): 状態・ルーティング・サイドバー・イベント配線
-//! - `pages/*` … 各画面 (`impl Shell`)
-//! - `overlay` … ポップアップ・モーダル・トースト
-//! - `ui` … 部品 (カード・行・トグル・スライダー・セグメント…)
-//! - `glass` … Liquid Glass の面 (GPU backdrop-filter)
-//! - `motion` … ばねアニメーション・要素位置の記録
-//! - `store` … バックエンド (devhub-core 契約) との橋。デバイスごとのワーカースレッド
+//! - `app` … window shell (Shell): state, routing, sidebar, event wiring
+//! - `pages/*` … the screens (`impl Shell`)
+//! - `overlay` … popups, modals, toasts
+//! - `ui` … components (card, row, toggle, slider, segmented control…)
+//! - `glass` … Liquid Glass surfaces (GPU backdrop-filter)
+//! - `motion` … spring animation and element position tracking
+//! - `store` … bridge to the backend (devhub-core contract); one worker thread per device
 //! - `theme` / `wallpaper` / `prefs` / `keycode`
 
 pub mod app;

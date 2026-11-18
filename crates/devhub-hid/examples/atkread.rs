@@ -1,4 +1,4 @@
-//! ATK ドライバ経路の実機検証 — atk::open → caps → read → apply(読み戻し) → 復元。
+//! Real-device verification of the ATK driver path — atk::open → caps → read → apply (read back) → restore.
 //! `cargo run -p devhub-hid --example atkread`
 
 use devhub_core::backend::DeviceDriver;
@@ -8,7 +8,7 @@ use devhub_hid::transport;
 
 fn main() {
     let api = transport::open().expect("hidapi");
-    // 有線 12a7 優先、無ければドングル 1278 (同じ 16B 中継プロトコル)。
+    // Prefer wired 12a7, otherwise the dongle 1278 (same 16B relay protocol).
     let info_raw = api
         .device_list()
         .find(|d| {
@@ -38,7 +38,7 @@ fn main() {
         board_id: None,
     };
     let d = atk::open(dev, info, None).expect("driver");
-    // ドングル経由でマウスが寝ている可能性 — info 取得で覚醒を待つ。
+    // The mouse may be asleep behind the dongle — wait for it to wake via the info request.
     let mut i = d.info();
     for _ in 0..15 {
         if i.firmware.is_some() {
@@ -74,7 +74,7 @@ fn main() {
         println!("   {k} = {v:?}");
     }
 
-    // 安全な書き込み往復: トグル系を反転→読み戻し→元に戻す。
+    // Safe write round trip: flip the toggles → read back → restore.
     for id in ["motion_sync", "move_close_led"] {
         let cur = matches!(s.settings.get(id), Some(SettingValue::Bool(true)));
         println!("== apply {id} -> {}", !cur);
@@ -94,7 +94,7 @@ fn main() {
         .expect("restore");
     }
 
-    // 数値系: debounce を +1 → 読み戻し → 復元。
+    // Numeric: debounce +1 → read back → restore.
     for id in ["debounce", "wheel_debounce", "bhop"] {
         if let Some(SettingValue::Num(cur)) = s.settings.get(id) {
             let t = if *cur < 20.0 { *cur + 1.0 } else { *cur - 1.0 };
@@ -119,7 +119,7 @@ fn main() {
         }
     }
 
-    // スリープ: 2分にして読み戻し → 復元。
+    // Sleep: set to 2 min → read back → restore.
     if let Some(SettingValue::Choice(cur)) = s.settings.get("sleep_min") {
         let cur = *cur;
         println!("== apply sleep_min {cur} -> 2");
@@ -142,7 +142,7 @@ fn main() {
         .expect("restore");
     }
 
-    // LOD: 1.2mm (Choice 12) にして読み戻し → 復元。
+    // LOD: set to 1.2mm (Choice 12) → read back → restore.
     if let Some(SettingValue::Choice(cur)) = s.settings.get("lod") {
         let cur = *cur;
         println!("== apply lod {cur} -> 12 (1.2mm)");
@@ -165,7 +165,7 @@ fn main() {
         .expect("restore");
     }
 
-    // サイドボタン ShortcutKey: Key('a' usage=4) を書いて読み戻し → 元のアクションに復元。
+    // Side button ShortcutKey: write Key('a' usage=4) → read back → restore the original action.
     if let Some(orig) = ms.buttons.get(3).cloned() {
         let a = ButtonAction::Key(KeyStroke { mods: 0, usage: 4 });
         println!("== apply button3 -> {a:?}");

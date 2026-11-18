@@ -1,6 +1,6 @@
-//! オーディオキャプチャの確認 — 5 秒間バンド値を表示する。
-//! `cargo run -p device-hub --example audiotest` で実行し、
-//! 音楽を流した状態で値が 0 以外になるか見る。
+//! Audio capture check — prints band values for 5 seconds.
+//! Run it with `cargo run -p device-hub --example audiotest` and
+//! check that the values are non-zero while music is playing.
 
 fn main() {
     device_hub::audio::start();

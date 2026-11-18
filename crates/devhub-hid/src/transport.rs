@@ -1,41 +1,41 @@
-//! HID トランスポートの薄い層。
+//! Thin HID transport layer.
 //!
-//! レポート送受信を 1 か所に集め、各ドライバ (xsyd.rs / mousefit.rs) は
-//! プロトコルの意味づけだけを書く。
+//! Report send/receive is gathered in one place, and each driver (xsyd.rs / mousefit.rs)
+//! only writes the protocol semantics.
 
 use devhub_core::backend::{HubError, HubResult};
 
-/// HID 列挙器を開く。Windows では特別な権限は要らない
-/// (vendor-defined usage page のデバイスはユーザー権限で読み書きできる)。
+/// Opens the HID enumerator. No special privileges are needed on Windows
+/// (devices on a vendor-defined usage page can be read and written with user privileges).
 pub fn open() -> HubResult<hidapi::HidApi> {
     hidapi::HidApi::new().map_err(|e| HubError::Io(format!("hidapi init: {e}")))
 }
 
-/// 1 デバイスとのレポートチャネル。
+/// Report channel to one device.
 ///
-/// TODO(backend): 実装のたたき台。
-/// - レポート ID 先頭の 64/65 バイト送受信 (`write` は先頭に report ID を置く)
-/// - タイムアウト付き read
-/// - 必要なら feature report (`send_feature_report` / `get_feature_report`)
-///   — mouse.fit 系は feature report だけで通す機種が多い
+/// TODO(backend): starting point for the implementation.
+/// - Send/receive 64/65 bytes with the report ID first (`write` puts the report ID at the start)
+/// - read with a timeout
+/// - feature reports if needed (`send_feature_report` / `get_feature_report`)
+///   — many mouse.fit models work with feature reports only
 #[allow(dead_code)]
 pub struct Channel {
     inner: Inner,
-    /// デバイスの IN レポート長 (report ID 込み)。0 なら 64 を仮定。
+    /// Device IN report length (including the report ID). Assume 64 if 0.
     pub in_report_len: usize,
-    /// OUT レポート長。
+    /// OUT report length.
     pub out_report_len: usize,
 }
 
 enum Inner {
-    /// `HidDevice` は Send だが Sync ではない (内部バックエンドが非スレッドセーフ)。
-    /// Mutex で包んで Sync にする。呼び出しはドライバのワーカー 1 本からなので競合しない。
+    /// `HidDevice` is Send but not Sync (the inner backend is not thread-safe).
+    /// Wrap it in a Mutex to make it Sync. Calls come from a single driver worker, so there is no contention.
     Hid(std::sync::Mutex<hidapi::HidDevice>),
     #[cfg(test)]
     Mock(std::sync::Mutex<MockIo>),
 }
 
-/// テスト用の送受信スタブ: send は記録、recv はキューから順に返す。
+/// Send/receive stub for tests: send is recorded, recv returns from the queue in order.
 #[cfg(test)]
 #[derive(Default)]
 pub struct MockIo {
@@ -63,7 +63,7 @@ impl Channel {
         }
     }
 
-    /// テスト用: recv が順に返す応答を積む。
+    /// For tests: queues the replies that recv returns in order.
     #[cfg(test)]
     pub fn mock_reply(&self, reply: &[u8]) {
         if let Inner::Mock(m) = &self.inner {
@@ -74,7 +74,7 @@ impl Channel {
         }
     }
 
-    /// テスト用: send に来た全 body。
+    /// For tests: every body that came to send.
     #[cfg(test)]
     pub fn mock_sent(&self) -> Vec<Vec<u8>> {
         match &self.inner {
@@ -83,7 +83,7 @@ impl Channel {
         }
     }
 
-    /// テスト用: ヘッダが一致した次の送信だけ I/O エラーにする。
+    /// For tests: makes only the next send whose header matches fail with an I/O error.
     #[cfg(test)]
     pub fn mock_fail_send(&self, prefix: &[u8]) {
         if let Inner::Mock(m) = &self.inner {
@@ -91,8 +91,8 @@ impl Channel {
         }
     }
 
-    /// `body` を report ID 0 先頭の OUT レポートとして送る。
-    /// パディングは 0 埋め。
+    /// Sends `body` as an OUT report with report ID 0 first.
+    /// Padding is zero-filled.
     pub fn send(&self, body: &[u8]) -> HubResult<()> {
         match &self.inner {
             Inner::Hid(dev) => {
@@ -122,8 +122,8 @@ impl Channel {
         }
     }
 
-    /// 番号付きレポート: `body` を report ID `rid` の OUT レポートとして送る
-    /// (buf[0]=rid)。レポート番号を持つデバイス (WalkPlay の 0x4B 等) 用。
+    /// Numbered report: sends `body` as an OUT report with report ID `rid`
+    /// (buf[0]=rid). For devices that have report numbers (WalkPlay's 0x4B etc.).
     pub fn send_report(&self, rid: u8, body: &[u8]) -> HubResult<()> {
         match &self.inner {
             Inner::Hid(dev) => {
@@ -147,7 +147,7 @@ impl Channel {
         }
     }
 
-    /// `timeout_ms` 以内の IN レポート 1 件 (report ID は捨てて本体だけ返す)。
+    /// One IN report within `timeout_ms` (drops the report ID and returns only the body).
     pub fn recv(&self, timeout_ms: i32) -> HubResult<Vec<u8>> {
         match &self.inner {
             Inner::Hid(dev) => {
@@ -160,8 +160,8 @@ impl Channel {
                 if n == 0 {
                     return Err(HubError::Protocol("read timeout".into()));
                 }
-                // unnumbered report は buf[0] がデータ先頭。numbered なら buf[0] が report ID。
-                // 判別は呼び側のプロトコルが担うので生のまま返す。
+                // For an unnumbered report buf[0] is the start of the data. For a numbered one buf[0] is the report ID.
+                // Telling them apart is up to the caller's protocol, so return it as is.
                 Ok(buf[..n].to_vec())
             }
             #[cfg(test)]
@@ -174,7 +174,7 @@ impl Channel {
         }
     }
 
-    /// 64B feature report を送る (report ID 0)。mouse.fit 系の全コマンドに使う。
+    /// Sends a 64B feature report (report ID 0). Used for every mouse.fit command.
     pub fn send_feature(&self, body: &[u8; 64]) -> HubResult<()> {
         match &self.inner {
             Inner::Hid(dev) => {
@@ -197,9 +197,9 @@ impl Channel {
         }
     }
 
-    /// 64B feature report を読む (report ID 0)。返り値は report ID 込みの 65B。
-    /// `get_feature_report` は要求→応答の往復がカーネル側で 1 トランザクションなので
-    /// タイムアウトは OS 依存 (通常 ~1s)。失敗時は Err を返し呼び側がリトライする。
+    /// Reads a 64B feature report (report ID 0). Returns 65B including the report ID.
+    /// In `get_feature_report` the request→response round trip is one transaction on the kernel side,
+    /// so the timeout is OS dependent (usually ~1s). On failure it returns Err and the caller retries.
     pub fn get_feature(&self) -> HubResult<[u8; 65]> {
         match &self.inner {
             Inner::Hid(dev) => {

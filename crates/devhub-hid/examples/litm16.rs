@@ -1,5 +1,5 @@
-//! mode16 が「isCustom セルのみ表示モード」か検証:
-//!  Q..P 行セルにカスタム色を書き → mode16 で表示されるか観察 → 復元。
+//! Verifies whether mode16 is an "isCustom cells only" display mode:
+//!  Write custom colors to the Q..P row cells → observe whether they show in mode16 → restore.
 use devhub_core::{Change, DeviceKind, Rgb};
 use std::collections::BTreeMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -23,7 +23,7 @@ fn main() {
     let st0 = d.read().expect("read");
     let base = st0.lighting.get(&0u8).cloned().expect("lighting");
 
-    // per_key: セル index → 色。上位行 (cell 0-20) を赤, 21-41 を緑に塗る
+    // per_key: cell index → color. Paint the upper row (cells 0-20) red and 21-41 green
     let mut s = base.clone();
     s.on = true;
     s.zone_on = vec![true, true];
@@ -42,7 +42,7 @@ fn main() {
     let _ = d.apply(&Change::Lighting { area: 0, state: s });
     std::thread::sleep(Duration::from_secs(30));
 
-    // per_key 消して mode16 のまま観察 (暗転するか)
+    // Clear per_key and observe while staying in mode16 (does it go dark?)
     let mut s2 = base.clone();
     s2.on = true;
     s2.zone_on = vec![true, true];

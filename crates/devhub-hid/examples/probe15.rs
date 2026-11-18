@@ -1,4 +1,4 @@
-//! DD ピン留め解除: 全セルの isCustom を 0 → [5,2] 再送 (修正後 stop と同じ手順)
+//! DD unpin: set isCustom to 0 on all cells → resend [5,2] (same procedure as stop after the fix)
 fn main() {
     let api = hidapi::HidApi::new().unwrap();
     let dev = api
@@ -8,7 +8,7 @@ fn main() {
             api.device_list()
                 .find(|d| d.vendor_id() == 0x1ca6 && d.usage_page() & 0xff00 == 0xff00)
         })
-        .expect("SU66 — デバイスハブを閉じて");
+        .expect("SU66 — close Device HUB");
     let d = dev.open_device(&api).unwrap();
     d.set_blocking_mode(false).unwrap();
     let mut drain = [0u8; 65];
@@ -29,7 +29,7 @@ fn main() {
             Some(r[..n].to_vec())
         }
     };
-    // 全セル isCustom=0 (色バイトは読んだ現値を保持)
+    // isCustom=0 on all cells (color bytes keep the current values that were read)
     for c in 0..9u8 {
         if let Some(rb) = cmd(5, 3, &[0, c]) {
             let mut w = [0u8; 65];
@@ -45,11 +45,11 @@ fn main() {
             std::thread::sleep(std::time::Duration::from_millis(3));
         }
     }
-    // [5,1] → [5,2] 再送でファーム駆動復帰
+    // Resend [5,1] → [5,2] to return to firmware control
     if let Some(r) = cmd(5, 1, &[0, 0]) {
         let mut args = vec![0u8];
         args.extend_from_slice(&r[4..10]);
         let _ = cmd(5, 2, &args);
     }
-    println!("ピン解除 + ファーム復帰完了 — ' がアニメーションに戻ったか確認してください");
+    println!("Unpin + firmware recovery complete — check that ' is back to animating");
 }

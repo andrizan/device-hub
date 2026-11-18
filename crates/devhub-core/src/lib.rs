@@ -1,10 +1,10 @@
-//! devhub-core: Device HUB のコア (GUI 依存なし)。
+//! devhub-core: the core of Device HUB (no GUI dependency).
 //!
-//! - `model` … デバイス設定のデータ型 (UI ↔ ドライバの共通言語, 契約 v2)
-//! - `backend` … `HubBackend` / `DeviceDriver` トレイト (バックエンド契約)
-//! - `keys` … HID usage ⇔ 名前の表
-//! - `registry` … 既知デバイス対応表 + 物理レイアウト
-//! - `demo` … 実機なしで全画面を動かすデモバックエンド (caps の書き方の見本)
+//! - `model` … data types for device settings (the common language of UI and drivers, contract v2)
+//! - `backend` … the `HubBackend` / `DeviceDriver` traits (the backend contract)
+//! - `keys` … HID usage ⇔ name table
+//! - `registry` … table of known devices + physical layouts
+//! - `demo` … demo backend that drives every screen without hardware (a sample of how to write caps)
 
 pub mod backend;
 pub mod demo;

@@ -1,6 +1,6 @@
-//! 武装したハンドルを閉じるとストリームが止まるかの判定。
-//! A で [4,3,1,1] を送って武装 → A を閉じる → B で 10 秒読む。
-//! 実行: cargo run -p devhub-hid --example disarm
+//! Checks whether closing an armed handle stops the stream.
+//! Send [4,3,1,1] on A to arm → close A → read on B for 10 seconds.
+//! Run: cargo run -p devhub-hid --example disarm
 
 fn main() -> devhub_core::backend::HubResult<()> {
     let api = hidapi::HidApi::new().expect("hidapi init");

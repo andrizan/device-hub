@@ -1,12 +1,12 @@
-//! HID Keyboard/Keypad page (0x07) の usage と名前の対応表。
+//! Table mapping HID Keyboard/Keypad page (0x07) usages to names.
 //!
-//! UI の表示と、マクロ/ショートカットの記録 (`KeyStroke::usage`, `MacroInput::Key`) で使う。
-//! キーボードドライバは自分の `KeyboardCaps::catalog` を作るときに
-//! `basic_group()` を土台にしてよい (コード空間がデバイス固有なら code を変換して使う)。
+//! Used for UI display and for recording macros/shortcuts (`KeyStroke::usage`, `MacroInput::Key`).
+//! A keyboard driver may use `basic_group()` as the base when building its own
+//! `KeyboardCaps::catalog` (if the code space is device-specific, convert the code before use).
 
 use crate::model::{KeyChoice, KeyGroup, MediaFn, MouseFn};
 
-/// (usage, 一覧名, キーキャップ用の短い名前)
+/// (usage, list name, short name for keycaps)
 pub const HID_KEYS: &[(u16, &str, &str)] = &[
     (0x04, "A", "A"),
     (0x05, "B", "B"),
@@ -56,7 +56,7 @@ pub const HID_KEYS: &[(u16, &str, &str)] = &[
     (0x31, "\\", "\\"),
     (0x33, ";", ";"),
     (0x34, "'", "'"),
-    (0x35, "` (半角/全角)", "`"),
+    (0x35, "` (Hankaku/Zenkaku)", "`"),
     (0x36, ",", ","),
     (0x37, ".", "."),
     (0x38, "/", "/"),
@@ -117,22 +117,22 @@ pub const HID_KEYS: &[(u16, &str, &str)] = &[
     (0x71, "F22", "F22"),
     (0x72, "F23", "F23"),
     (0x73, "F24", "F24"),
-    (0x87, "Ro (JIS \\_)", "ろ"),
-    (0x88, "かな", "かな"),
+    (0x87, "Ro (JIS \\_)", "Ro"),
+    (0x88, "Kana", "Kana"),
     (0x89, "¥ (JIS)", "¥"),
-    (0x8A, "変換", "変換"),
-    (0x8B, "無変換", "無変換"),
-    (0xE0, "左 Ctrl", "Ctrl"),
-    (0xE1, "左 Shift", "Shift"),
-    (0xE2, "左 Alt", "Alt"),
-    (0xE3, "左 Win", "Win"),
-    (0xE4, "右 Ctrl", "RCtrl"),
-    (0xE5, "右 Shift", "RShift"),
-    (0xE6, "右 Alt", "RAlt"),
-    (0xE7, "右 Win", "RWin"),
+    (0x8A, "Convert", "Conv"),
+    (0x8B, "Non-convert", "NConv"),
+    (0xE0, "Left Ctrl", "Ctrl"),
+    (0xE1, "Left Shift", "Shift"),
+    (0xE2, "Left Alt", "Alt"),
+    (0xE3, "Left Win", "Win"),
+    (0xE4, "Right Ctrl", "RCtrl"),
+    (0xE5, "Right Shift", "RShift"),
+    (0xE6, "Right Alt", "RAlt"),
+    (0xE7, "Right Win", "RWin"),
 ];
 
-/// usage → 一覧名。未知なら `0xNN`。
+/// usage → list name. `0xNN` if unknown.
 pub fn hid_name(usage: u16) -> String {
     HID_KEYS
         .iter()
@@ -141,7 +141,7 @@ pub fn hid_name(usage: u16) -> String {
         .unwrap_or_else(|| format!("0x{usage:02X}"))
 }
 
-/// usage → キーキャップ用の短い名前。
+/// usage → short name for keycaps.
 pub fn hid_short(usage: u16) -> String {
     HID_KEYS
         .iter()
@@ -150,7 +150,7 @@ pub fn hid_short(usage: u16) -> String {
         .unwrap_or_else(|| format!("{usage:02X}"))
 }
 
-/// 修飾ビットの表示 ("Ctrl+Shift+")。
+/// Display of modifier bits ("Ctrl+Shift+").
 pub fn mods_label(m: u8) -> String {
     use crate::model::mods::*;
     let mut s = String::new();
@@ -169,7 +169,7 @@ pub fn mods_label(m: u8) -> String {
     s
 }
 
-/// 修飾 usage (0xE0..=0xE7) → modifier ビット。
+/// Modifier usage (0xE0..=0xE7) → modifier bit.
 pub fn mod_bit(usage: u16) -> Option<u8> {
     if (0xE0..=0xE7).contains(&usage) {
         Some(1 << (usage - 0xE0))
@@ -180,16 +180,16 @@ pub fn mod_bit(usage: u16) -> Option<u8> {
 
 pub fn mouse_fn_name(m: MouseFn) -> &'static str {
     match m {
-        MouseFn::Left => "左クリック",
-        MouseFn::Right => "右クリック",
-        MouseFn::Middle => "中クリック",
-        MouseFn::Back => "戻る",
-        MouseFn::Forward => "進む",
-        MouseFn::ScrollUp => "スクロール上",
-        MouseFn::ScrollDown => "スクロール下",
-        MouseFn::ScrollLeft => "スクロール左",
-        MouseFn::ScrollRight => "スクロール右",
-        MouseFn::DoubleClick => "ダブルクリック",
+        MouseFn::Left => "Left click",
+        MouseFn::Right => "Right click",
+        MouseFn::Middle => "Middle click",
+        MouseFn::Back => "Back",
+        MouseFn::Forward => "Forward",
+        MouseFn::ScrollUp => "Scroll up",
+        MouseFn::ScrollDown => "Scroll down",
+        MouseFn::ScrollLeft => "Scroll left",
+        MouseFn::ScrollRight => "Scroll right",
+        MouseFn::DoubleClick => "Double click",
     }
 }
 
@@ -208,20 +208,20 @@ pub const MOUSE_FNS: &[MouseFn] = &[
 
 pub fn media_fn_name(m: MediaFn) -> &'static str {
     match m {
-        MediaFn::PlayPause => "再生/一時停止",
-        MediaFn::Stop => "停止",
-        MediaFn::Next => "次の曲",
-        MediaFn::Prev => "前の曲",
-        MediaFn::VolumeUp => "音量 +",
-        MediaFn::VolumeDown => "音量 −",
-        MediaFn::Mute => "ミュート",
-        MediaFn::Calculator => "電卓",
-        MediaFn::MyComputer => "マイコンピュータ",
-        MediaFn::Browser => "ブラウザ",
-        MediaFn::Mail => "メール",
-        MediaFn::BrightnessUp => "画面の明るさ +",
-        MediaFn::BrightnessDown => "画面の明るさ −",
-        MediaFn::Refresh => "更新",
+        MediaFn::PlayPause => "Play/Pause",
+        MediaFn::Stop => "Stop",
+        MediaFn::Next => "Next track",
+        MediaFn::Prev => "Previous track",
+        MediaFn::VolumeUp => "Volume +",
+        MediaFn::VolumeDown => "Volume −",
+        MediaFn::Mute => "Mute",
+        MediaFn::Calculator => "Calculator",
+        MediaFn::MyComputer => "My Computer",
+        MediaFn::Browser => "Browser",
+        MediaFn::Mail => "Mail",
+        MediaFn::BrightnessUp => "Screen brightness +",
+        MediaFn::BrightnessDown => "Screen brightness −",
+        MediaFn::Refresh => "Refresh",
     }
 }
 
@@ -242,12 +242,12 @@ pub const MEDIA_FNS: &[MediaFn] = &[
     MediaFn::Refresh,
 ];
 
-/// 基本キーのグループ (code = HID usage)。デバイス固有コードへの変換が必要なら
-/// ドライバ側で `code` を書き換えて使う。
+/// Group of basic keys (code = HID usage). If a conversion to device-specific codes is needed,
+/// the driver rewrites `code` before using it.
 pub fn basic_group() -> KeyGroup {
     let mut seen = std::collections::BTreeSet::new();
     KeyGroup {
-        name: "基本キー".into(),
+        name: "Basic keys".into(),
         keys: HID_KEYS
             .iter()
             .filter(|k| seen.insert(k.0))

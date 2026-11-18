@@ -1,8 +1,8 @@
-//! ガラスの下地になる壁紙。
+//! Wallpaper that serves as the base of the glass.
 //!
-//! GPU の backdrop は「アプリが描いたもの」から作るので、デスクトップは透けない。
-//! そこで窓いっぱいに壁紙を敷く。既定は手続き生成のオーロラ (静止画 1 枚 = アイドル時の
-//! 描画コストはゼロ)。設定で好きな画像 (PNG/JPEG) に差し替えられる。
+//! The GPU backdrop is built from "what the app drew", so the desktop does not show through.
+//! So a wallpaper is laid across the whole window. The default is a procedurally generated aurora (one still image = zero
+//! drawing cost when idle). It can be replaced with any image (PNG/JPEG) in settings.
 
 use gpui_kit::*;
 use image::{Frame, RgbaImage};
@@ -111,7 +111,7 @@ fn generate(light: bool, accent: u32, w: u32, h: u32) -> RgbaImage {
 static CACHE: Mutex<Option<HashMap<String, Arc<RenderImage>>>> = Mutex::new(None);
 
 fn to_render(img: RgbaImage) -> Arc<RenderImage> {
-    // RenderImage は BGRA を期待する。
+    // RenderImage expects BGRA.
     let mut img = img;
     for p in img.pixels_mut() {
         p.0.swap(0, 2);
@@ -119,7 +119,7 @@ fn to_render(img: RgbaImage) -> Arc<RenderImage> {
     Arc::new(RenderImage::new(smallvec::smallvec![Frame::new(img)]))
 }
 
-/// 今のテーマ・アクセント・ユーザー画像に合う壁紙。
+/// A wallpaper matching the current theme, accent and user image.
 pub fn current(custom: Option<&str>) -> Arc<RenderImage> {
     let light = crate::theme::is_light();
     let accent = crate::theme::ACCENTS[crate::theme::accent_index() as usize].1;

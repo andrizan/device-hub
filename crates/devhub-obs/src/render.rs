@@ -1,19 +1,19 @@
-//! CPU で RGBA ビットマップを描く (依存は fontdue のみ)。
+//! Draw an RGBA bitmap on the CPU (the only dependency is fontdue).
 //!
-//! デザイン: アンチエイリアスの角丸キーキャップ (上→下のグラデーション)、
-//! 下から満ちるアクセントの押し込みフィル、押下時の柔らかい発光。
-//! マウスは上から見た形 (左右ボタンが押し込みで満ちる) + 横バー。
-//! テーマ (グラス / ライト / 背景なし / ネオン)・倍率・表示キーは
-//! `config::OverlayCfg` (Device HUB アプリで編集) と OBS プロパティの両方から来る。
+//! Design: anti-aliased rounded keycaps (top → bottom gradient),
+//! an accent press fill that rises from the bottom, and a soft glow when pressed.
+//! The mouse is drawn as seen from above (the left/right buttons fill as they are pressed) + horizontal bars.
+//! Theme (Glass / Light / No background / Neon), scale, and the shown keys
+//! come from both `config::OverlayCfg` (edited in the Device HUB app) and the OBS properties.
 
 use crate::config::{Arrange, FillMode, MouseStyle, OverlayCfg, Theme};
 use crate::live::{KbLive, Live, MouseLive};
 use std::collections::HashSet;
 
-/// 互換用 (旧 API)。実際のサイズは `size()`。
+/// For compatibility (old API). The actual size is `size()`.
 pub const WIDTH: u32 = 660;
 
-/// ソース種別 (キーボードのみ / マウスのみ / 両方)。
+/// Source kind (keyboard only / mouse only / both).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Mode {
     Both,
@@ -21,7 +21,7 @@ pub enum Mode {
     Mouse,
 }
 
-/// 互換用 (旧 API): 既定レイアウトでの高さ。
+/// For compatibility (old API): height with the default layout.
 pub fn height(mode: Mode) -> u32 {
     size(&Live::default(), mode, &Vis::default()).1
 }
@@ -34,59 +34,59 @@ pub struct Pix {
     pub buf: Vec<u8>,
 }
 
-/// 描画設定。OBS プロパティ (update) + アプリの設定ファイル (config) を合成したもの。
+/// Render settings. A composition of the OBS properties (update) + the app's settings file (config).
 #[derive(Clone)]
 pub struct Vis {
-    /// true = すべての表示設定を OBS プロパティから取る
-    /// (アプリの obs_overlay.json を見ない。OSS 配布で単体利用する人向け)。
+    /// true = take all display settings from the OBS properties
+    /// (do not look at the app's obs_overlay.json; for people who use the plugin standalone from an OSS distribution).
     pub obs_all: bool,
     pub title: bool,
     pub labels: bool,
-    /// 表示するキー (layout index — OBS プロパティ)。**空 = すべて表示**。
+    /// Keys to show (layout index - OBS properties). **Empty = show all**.
     pub show_kb: HashSet<usize>,
-    /// 表示するボタン (names index — OBS プロパティ)。空 = すべて表示。
+    /// Buttons to show (names index - OBS properties). Empty = show all.
     pub show_btn: HashSet<usize>,
     pub accent: Rgba,
-    /// OBS 側でアクセント色を明示したか (false ならアプリ設定の色)。
+    /// Whether the accent color was explicitly set on the OBS side (false = use the app settings color).
     pub accent_set: bool,
     pub theme: Theme,
     pub scale: f32,
     pub numbers: bool,
     pub mouse_style: MouseStyle,
-    /// 表示するキー (`LayoutKey::id` — アプリ設定)。空 = すべて表示。
+    /// Keys to show (`LayoutKey::id` - app settings). Empty = show all.
     pub show_key_ids: HashSet<u16>,
-    /// 表示するボタン (表示名 — アプリ設定)。空 = すべて表示。
+    /// Buttons to show (display names - app settings). Empty = show all.
     pub show_btn_names: HashSet<String>,
-    /// 非表示にするキー (`LayoutKey::id` — 旧設定ファイル互換)。
+    /// Keys to hide (`LayoutKey::id` - legacy settings file compatibility).
     pub hide_key_ids: HashSet<u16>,
-    /// 非表示にするボタン (表示名 — 旧設定ファイル互換)。
+    /// Buttons to hide (display names - legacy settings file compatibility).
     pub hide_btn_names: HashSet<String>,
-    // ---- 拡張カスタマイズ (アプリ設定ファイル由来) ----
-    /// キーの大きさ係数。
+    // ---- Extended customization (from the app settings file) ----
+    /// Key size factor.
     pub key_size: f32,
-    /// 角丸係数。
+    /// Corner radius factor.
     pub radius: f32,
-    /// 余白係数。
+    /// Padding factor.
     pub pad: f32,
-    /// 統合ソースの配置。
+    /// Layout of the combined source.
     pub arrange: Arrange,
-    /// 背景パネル不透明度係数 (0–1)。
+    /// Background panel opacity factor (0–1).
     pub panel_alpha: f32,
-    /// 押し込み色 (None = アクセント)。
+    /// Press color (None = accent).
     pub pressed: Option<Rgba>,
-    /// 押下時の発光係数 (0–2)。
+    /// Glow factor when pressed (0–2).
     pub glow: f32,
-    /// フィル方向。
+    /// Fill direction.
     pub fill_mode: FillMode,
-    /// 作動点ライン。
+    /// Actuation point line.
     pub trigger_line: bool,
-    /// キー内の AP/FT/R テキスト。
+    /// AP/FT/R text inside the key.
     pub badges: bool,
-    /// 数字を % で出す。
+    /// Show numbers in %.
     pub num_pct: bool,
-    /// カスタムタイトル (空 = デバイス名)。
+    /// Custom title (empty = device name).
     pub title_text: String,
-    /// 影。
+    /// Shadow.
     pub shadow: bool,
 }
 
@@ -126,8 +126,8 @@ impl Default for Vis {
 }
 
 impl Vis {
-    /// アプリの設定ファイルを重ねる (タイトル/ラベルは両方 ON のときだけ、
-    /// キーは「アプリの表示集合 ∩ OBS の表示集合 − 旧 hide」)。
+    /// Overlay the app's settings file (title/labels only when both are ON;
+    /// keys are "the app's shown set ∩ OBS's shown set − legacy hide").
     pub fn with_cfg(mut self, c: &OverlayCfg) -> Self {
         self.theme = c.theme;
         self.scale = c.scale.clamp(0.75, 3.0);
@@ -158,7 +158,7 @@ impl Vis {
         self
     }
 
-    /// 表示フィルタは AND: どちらかの集合が指定されていれば両方に入っている必要あり。
+    /// The display filter is AND: if either set is specified, a key must be in both.
     fn key_hidden(&self, i: usize, id: u16) -> bool {
         self.hide_key_ids.contains(&id)
             || (!self.show_kb.is_empty() && !self.show_kb.contains(&i))
@@ -172,16 +172,16 @@ impl Vis {
     }
 }
 
-/// アクセント色の選択肢 (名前, RGBA)。OBS プロパティの val は index 文字列。
+/// Accent color choices (name, RGBA). The OBS property's val is an index string.
 pub const ACCENTS: &[(&str, Rgba)] = &[
-    ("シアン", [60, 190, 255, 255]),
-    ("オレンジ", [255, 150, 60, 255]),
-    ("マゼンタ", [255, 90, 190, 255]),
-    ("ライム", [120, 230, 120, 255]),
-    ("バイオレット", [170, 120, 255, 255]),
+    ("Cyan", [60, 190, 255, 255]),
+    ("Orange", [255, 150, 60, 255]),
+    ("Magenta", [255, 90, 190, 255]),
+    ("Lime", [120, 230, 120, 255]),
+    ("Violet", [170, 120, 255, 255]),
 ];
 
-/// テーマごとの配色。
+/// Palette per theme.
 struct Pal {
     panel: Option<Rgba>,
     panel_edge: Rgba,
@@ -192,7 +192,7 @@ struct Pal {
     text: Rgba,
     faint: Rgba,
     track: Rgba,
-    /// ネオン: 押し込みフィルを強めに。
+    /// Neon: a stronger press fill.
     neon: bool,
     shadow: bool,
 }
@@ -264,7 +264,7 @@ fn mix(a: Rgba, b: Rgba, t: f32) -> Rgba {
     [l(a[0], b[0]), l(a[1], b[1]), l(a[2], b[2]), l(a[3], b[3])]
 }
 
-/// 角丸矩形の符号付き距離 (内側が負)。
+/// Signed distance to a rounded rectangle (negative inside).
 fn sd_rrect(px: f32, py: f32, x: f32, y: f32, w: f32, h: f32, r: f32) -> f32 {
     let (cx, cy) = (x + w / 2., y + h / 2.);
     let r = r.min(w / 2.).min(h / 2.).max(0.);
@@ -284,7 +284,7 @@ impl Pix {
         }
     }
 
-    /// straight alpha の RGBA に "over" 合成 (coverage 付き)。
+    /// Composite "over" onto straight-alpha RGBA (with coverage).
     fn blend(&mut self, x: i32, y: i32, c: Rgba, cov: f32) {
         if x < 0 || y < 0 || x as u32 >= self.w || y as u32 >= self.h || cov <= 0. {
             return;
@@ -307,7 +307,7 @@ impl Pix {
         self.buf[i + 3] = (oa * 255.).round() as u8;
     }
 
-    /// 形の塗り。`f(x, y)` が (色, coverage) を返す。bounds 内だけ走査。
+    /// Fill a shape. `f(x, y)` returns (color, coverage). Scans only within bounds.
     fn shade(&mut self, x: f32, y: f32, w: f32, h: f32, f: impl Fn(f32, f32) -> (Rgba, f32)) {
         let x0 = x.floor().max(0.) as i32;
         let y0 = y.floor().max(0.) as i32;
@@ -321,14 +321,14 @@ impl Pix {
         }
     }
 
-    /// 角丸矩形 (AA)。
+    /// Rounded rectangle (AA).
     pub fn rrect(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32, c: Rgba) {
         self.shade(x - 1., y - 1., w + 2., h + 2., |px, py| {
             (c, (0.5 - sd_rrect(px, py, x, y, w, h, r)).clamp(0., 1.))
         });
     }
 
-    /// 上→下グラデーションの角丸矩形。
+    /// Rounded rectangle with a top → bottom gradient.
     fn rrect_grad(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32, top: Rgba, bot: Rgba) {
         self.shade(x - 1., y - 1., w + 2., h + 2., |px, py| {
             let t = ((py - y) / h.max(1.)).clamp(0., 1.);
@@ -339,7 +339,7 @@ impl Pix {
         });
     }
 
-    /// 角丸の輪郭線 (AA、太さ t)。
+    /// Outline of a rounded rectangle (AA, thickness t).
     fn rrect_stroke(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32, t: f32, c: Rgba) {
         self.shade(x - 1., y - 1., w + 2., h + 2., |px, py| {
             let d = sd_rrect(
@@ -355,7 +355,7 @@ impl Pix {
         });
     }
 
-    /// 柔らかい発光 (外側にフェード)。
+    /// Soft glow (fades toward the outside).
     fn glow(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32, spread: f32, c: Rgba) {
         self.shade(
             x - spread,
@@ -373,7 +373,7 @@ impl Pix {
         );
     }
 
-    /// 角丸矩形の内側を、下から `frac` の高さだけ塗る (押し込みフィル)。
+    /// Fill the inside of a rounded rectangle from the bottom up to a height of `frac` (press fill).
     #[allow(clippy::too_many_arguments)]
     fn fill_bottom(
         &mut self,
@@ -395,7 +395,7 @@ impl Pix {
         });
     }
 
-    /// 上から `frac` の高さだけ塗る (押し込みフィルの反転)。
+    /// Fill from the top down to a height of `frac` (the inverse of the press fill).
     #[allow(clippy::too_many_arguments)]
     fn fill_top(
         &mut self,
@@ -417,7 +417,7 @@ impl Pix {
         });
     }
 
-    // ---------------- 文字
+    // ---------------- Text
 
     fn text_w(&self, fonts: &Fonts, px: f32, s: &str) -> f32 {
         s.chars()
@@ -430,7 +430,7 @@ impl Pix {
             .sum()
     }
 
-    /// ベースライン y で左揃え。
+    /// Left-aligned at baseline y.
     fn text(&mut self, fonts: &Fonts, x: f32, baseline: f32, px: f32, c: Rgba, s: &str) {
         let mut pen = x;
         for ch in s.chars() {
@@ -452,13 +452,13 @@ impl Pix {
         }
     }
 
-    /// 中央揃え (cx, 縦中心 cy)。
+    /// Centered (cx, vertical center cy).
     fn text_c(&mut self, fonts: &Fonts, cx: f32, cy: f32, px: f32, c: Rgba, s: &str) {
         let w = self.text_w(fonts, px, s);
         self.text(fonts, cx - w / 2., cy + px * 0.36, px, c, s);
     }
 
-    /// 枠に収まるまで縮めて中央揃え。
+    /// Shrink until it fits in the frame, then center.
     #[allow(clippy::too_many_arguments)]
     fn text_fit(&mut self, fonts: &Fonts, cx: f32, cy: f32, max_w: f32, px: f32, c: Rgba, s: &str) {
         let mut size = px;
@@ -469,11 +469,11 @@ impl Pix {
     }
 }
 
-// ---------------- フォント
+// ---------------- Fonts
 
 type Glyph = std::sync::Arc<(fontdue::Metrics, Vec<u8>)>;
 
-/// ラスタライズ済みグリフのキャッシュ (毎フレームのラスタライズを避ける)。
+/// Cache of rasterized glyphs (avoids rasterizing every frame).
 fn glyph(f: &fontdue::Font, ch: char, px: f32) -> Glyph {
     use std::collections::HashMap;
     static CACHE: std::sync::Mutex<Option<HashMap<(usize, char, u32), Glyph>>> =
@@ -492,7 +492,7 @@ fn glyph(f: &fontdue::Font, ch: char, px: f32) -> Glyph {
     v
 }
 
-/// 欧文 (同梱 Geist) + 和文 (システムフォント) の組。
+/// A pair of Latin (bundled Geist) + Japanese (system font) fonts.
 struct Fonts<'a> {
     latin: Option<&'static fontdue::Font>,
     jp: Option<&'a fontdue::Font>,
@@ -511,7 +511,7 @@ impl Fonts<'_> {
     }
 }
 
-/// 欧文用に Device HUB と同じ Geist を同梱 (169KB)。
+/// The same Geist as Device HUB is bundled for Latin text (169KB).
 fn latin() -> Option<&'static fontdue::Font> {
     static F: std::sync::OnceLock<Option<fontdue::Font>> = std::sync::OnceLock::new();
     F.get_or_init(|| {
@@ -524,7 +524,7 @@ fn latin() -> Option<&'static fontdue::Font> {
     .as_ref()
 }
 
-/// 和文フォント (タイトル・ボタン名用)。
+/// Japanese font (for titles and button names).
 pub fn font() -> Option<fontdue::Font> {
     let mut paths: Vec<String> = [
         "YuGothB.ttc",
@@ -537,7 +537,7 @@ pub fn font() -> Option<fontdue::Font> {
     .iter()
     .map(|n| format!(r"C:\Windows\Fonts\{n}"))
     .collect();
-    // Linux (開発時のプレビュー) 用。
+    // For Linux (preview during development).
     paths.push("/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc".into());
     paths.push("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc".into());
     paths.push("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf".into());
@@ -551,9 +551,9 @@ pub fn font() -> Option<fontdue::Font> {
     None
 }
 
-// ---------------- レイアウト計算
+// ---------------- Layout calculation
 
-/// 全キーでは物理配列、絞り込み時は行の順番を残して空行・空列を詰める。
+/// With all keys, the physical layout; when narrowed down, keep the row order and squeeze out empty rows and columns.
 fn kb_slots(layout: &[devhub_core::LayoutKey], vis: &Vis) -> Vec<(usize, f32, f32)> {
     let mut keys: Vec<_> = layout
         .iter()
@@ -600,7 +600,7 @@ fn mouse_rows(m: Option<&MouseLive>, vis: &Vis) -> usize {
     }
 }
 
-/// テーマの配色 + `Vis` のパネル不透明度・影を適用する。
+/// Apply the theme's palette + the `Vis` panel opacity and shadow.
 fn pal_of(vis: &Vis) -> Pal {
     let mut p = pal(vis.theme, vis.accent);
     p.panel = p
@@ -610,7 +610,7 @@ fn pal_of(vis: &Vis) -> Pal {
     p
 }
 
-/// キーボードブロックの大きさ (倍率 1)。
+/// Size of the keyboard block (at scale 1).
 fn kb_size(live: &Live, vis: &Vis) -> (f32, f32) {
     let fb;
     let layout = match &live.kb {
@@ -631,7 +631,7 @@ fn kb_size(live: &Live, vis: &Vis) -> (f32, f32) {
     (w * vis.key_size, h * vis.key_size)
 }
 
-/// マウスブロックの大きさ (倍率 1)。
+/// Size of the mouse block (at scale 1).
 fn mouse_size(live: &Live, vis: &Vis) -> (f32, f32) {
     let rows = mouse_rows(live.mouse.as_ref(), vis) as f32;
     let bars_h = rows * ROW_H;
@@ -644,7 +644,7 @@ fn mouse_size(live: &Live, vis: &Vis) -> (f32, f32) {
     (w, h)
 }
 
-/// キャンバスの大きさ (px、倍率込み)。
+/// Size of the canvas (px, including scale).
 pub fn size(live: &Live, mode: Mode, vis: &Vis) -> (u32, u32) {
     let t = if vis.title { TITLE_H } else { 0. };
     let pad = PAD * vis.pad;
@@ -673,7 +673,7 @@ pub fn size(live: &Live, mode: Mode, vis: &Vis) -> (u32, u32) {
     )
 }
 
-// ---------------- 描画
+// ---------------- Drawing
 
 struct Ctx<'a> {
     fonts: Fonts<'a>,
@@ -682,8 +682,8 @@ struct Ctx<'a> {
     s: f32,
 }
 
-/// `idle` = 押していない状態で全キーを描く (静的な下地用)。
-/// それ以外は「動きのあるキー」だけを上から描き足す。
+/// `idle` = draw all keys in the unpressed state (for the static base).
+/// Otherwise, only the "keys with motion" are drawn on top.
 fn draw_kb(p: &mut Pix, c: &Ctx, kb: &KbLive, ox: f32, oy: f32, idle: bool) {
     let s = c.s;
     let acc = c.vis.accent;
@@ -707,19 +707,19 @@ fn draw_kb(p: &mut Pix, c: &Ctx, kb: &KbLive, ox: f32, oy: f32, idle: bool) {
         let h = k.h * u - gap;
         let d = (smp.route / kb.travel.max(0.1)).clamp(0., 1.);
         let pressed = smp.status != 0;
-        // 押下中は外側に発光
+        // Glow outward while pressed
         if c.vis.glow > 0. && (pressed || d > 0.02) {
             let k_ = if pressed { 1. } else { d };
             let a = (if c.pal.neon { 170. } else { 110. }) * c.vis.glow;
             p.glow(x, y0k, w, h, r, 10. * s, with_a(pacc, (a * k_) as u8));
         }
-        // 押下中は少し沈む
+        // Sink slightly while pressed
         let y = y0k + if pressed { 1.2 * s } else { 0. };
         if c.pal.shadow {
             p.rrect(x, y0k + 1.6 * s, w, h, r, [0, 0, 0, 64]);
         }
         p.rrect_grad(x, y, w, h, r, c.pal.cap_top, c.pal.cap_bot);
-        // 押し込みフィル
+        // Press fill
         if d > 0. {
             let a = if c.pal.neon { 225. } else { 120. + 125. * d } as u8;
             let top = with_a(mix(pacc, [255, 255, 255, 255], 0.28), a);
@@ -755,7 +755,7 @@ fn draw_kb(p: &mut Pix, c: &Ctx, kb: &KbLive, ox: f32, oy: f32, idle: bool) {
                 ),
             }
         }
-        // 作動点ライン (マウスの trigger 線と同じ見た目。この深さで ON になる)
+        // Actuation point line (same look as the mouse's trigger line; turns ON at this depth)
         let perf = kb.perf.get(i);
         let rapid = perf.is_some_and(|p| p.mode == devhub_core::TriggerMode::Rapid);
         let trigger = perf
@@ -840,7 +840,7 @@ fn draw_kb(p: &mut Pix, c: &Ctx, kb: &KbLive, ox: f32, oy: f32, idle: bool) {
     }
 }
 
-/// 左右ボタンのインデックス (名前から推定。分からなければ 0/1)。
+/// Indices of the left/right buttons (inferred from the names; 0/1 if unknown).
 fn lr_index(m: &MouseLive) -> (Option<usize>, Option<usize>) {
     let find = |keys: &[&str]| {
         m.names.iter().position(|n| {
@@ -849,8 +849,8 @@ fn lr_index(m: &MouseLive) -> (Option<usize>, Option<usize>) {
         })
     };
     let n = m.depths.len();
-    let l = find(&["左", "left"]).or((n > 0).then_some(0));
-    let r = find(&["右", "right"]).or((n > 1).then_some(1));
+    let l = find(&["left"]).or((n > 0).then_some(0));
+    let r = find(&["right"]).or((n > 1).then_some(1));
     (l, r)
 }
 
@@ -867,7 +867,7 @@ fn draw_mouse_shape(p: &mut Pix, c: &Ctx, m: Option<&MouseLive>, ox: f32, oy: f3
     }
     p.rrect_grad(ox, oy, w, h, r, c.pal.cap_top, c.pal.cap_bot);
     let (li, ri) = m.map(lr_index).unwrap_or((None, None));
-    // 「形だけ」モードではバーの情報 (作動点線・名前・深さ・AP/RT) をボタンの内側に描く。
+    // In "Shape only" mode, the bar info (actuation line / name / depth / AP/RT) is drawn inside the buttons.
     let detail = c.vis.mouse_style == MouseStyle::Shape;
     for (side, idx) in [(0, li), (1, ri)] {
         let (b, name, hidden) = match (m, idx) {
@@ -1007,7 +1007,7 @@ fn draw_mouse_shape(p: &mut Pix, c: &Ctx, m: Option<&MouseLive>, ox: f32, oy: f3
             }
         }
     }
-    // 左右の境目・ボタンと体の境目
+    // Boundary between left and right, and between the buttons and the body
     p.rrect(
         mid - 0.75 * s,
         oy + 4. * s,
@@ -1024,7 +1024,7 @@ fn draw_mouse_shape(p: &mut Pix, c: &Ctx, m: Option<&MouseLive>, ox: f32, oy: f3
         0.,
         c.pal.cap_edge,
     );
-    // ホイール
+    // Wheel
     let (ww, wh) = (12. * s, 30. * s);
     p.rrect(mid - ww / 2., oy + 22. * s, ww, wh, ww / 2., c.pal.cap_bot);
     p.rrect_stroke(
@@ -1152,7 +1152,7 @@ fn draw_mouse(p: &mut Pix, c: &Ctx, live: &Live, ox: f32, oy: f32, block_h: f32)
     }
 }
 
-/// 下地のキャッシュキー (これが同じなら静的な部分は同じ絵)。
+/// Cache key for the base (if it is the same, the static part is the same picture).
 fn base_key(live: &Live, mode: Mode, vis: &Vis, w: u32, h: u32) -> String {
     let mut sk: Vec<_> = vis.show_kb.iter().collect();
     sk.sort();
@@ -1195,9 +1195,9 @@ fn base_key(live: &Live, mode: Mode, vis: &Vis, w: u32, h: u32) -> String {
     )
 }
 
-/// 最新フレームをビットマップに焼く。
-/// 静的な部分 (パネル・タイトル・押していないキー) はキャッシュし、
-/// 毎フレームは「動きのあるキー」とマウスだけを描き足す (1 フレーム ≲1ms)。
+/// Render the latest frame into the bitmap.
+/// The static parts (panel, title, unpressed keys) are cached,
+/// and each frame only draws the "keys with motion" and the mouse on top (≲1ms per frame).
 pub fn draw(live: &Live, font: Option<&fontdue::Font>, mode: Mode, vis: &Vis) -> Pix {
     use std::collections::HashMap;
     static BASES: std::sync::Mutex<Option<HashMap<String, std::sync::Arc<Vec<u8>>>>> =
@@ -1231,7 +1231,7 @@ pub fn draw(live: &Live, font: Option<&fontdue::Font>, mode: Mode, vis: &Vis) ->
     p
 }
 
-/// 毎フレーム描く部分 (動きのあるキー + マウス)。
+/// The part drawn every frame (keys with motion + mouse).
 fn draw_dynamic(p: &mut Pix, live: &Live, font: Option<&fontdue::Font>, mode: Mode, vis: &Vis) {
     let has_kb = live.kb.is_some() && mode != Mode::Mouse;
     let has_mouse = live.mouse.is_some() && mode != Mode::Kb;
@@ -1299,7 +1299,7 @@ fn draw_dynamic(p: &mut Pix, live: &Live, font: Option<&fontdue::Font>, mode: Mo
     }
 }
 
-/// 静的な下地 (`base` = true) を描く。
+/// Draw the static base (`base` = true).
 fn draw_layer(live: &Live, font: Option<&fontdue::Font>, mode: Mode, vis: &Vis, base: bool) -> Pix {
     let _ = base;
     let (w, h) = size(live, mode, vis);
@@ -1327,9 +1327,9 @@ fn draw_layer(live: &Live, font: Option<&fontdue::Font>, mode: Mode, vis: &Vis, 
     if !has_kb && !has_mouse {
         let msg = if live.status.is_empty() {
             match mode {
-                Mode::Kb => "キーボードを探しています…",
-                Mode::Mouse => "マウスを探しています…",
-                Mode::Both => "デバイスを探しています…",
+                Mode::Kb => "Searching for a keyboard…",
+                Mode::Mouse => "Searching for a mouse…",
+                Mode::Both => "Searching for a device…",
             }
             .to_string()
         } else {
@@ -1397,7 +1397,7 @@ fn draw_layer(live: &Live, font: Option<&fontdue::Font>, mode: Mode, vis: &Vis, 
         y += TITLE_H * s;
     }
     let body_h = hf - y - pad;
-    // 下地: 押していない状態のキー (マウスは毎フレーム描くので入れない)。
+    // Base: keys in the unpressed state (the mouse is drawn every frame, so it is not included).
     match mode {
         Mode::Kb => {
             if let Some(kb) = &live.kb {
@@ -1424,8 +1424,8 @@ fn draw_layer(live: &Live, font: Option<&fontdue::Font>, mode: Mode, vis: &Vis, 
     p
 }
 
-/// プレビュー用のデモデータ (Device HUB の編集画面・example で使う)。
-/// `t` 秒の時点で WASD とスペース、マウスボタンを擬似的に押す。
+/// Demo data for the preview (used by the Device HUB edit screen and the example).
+/// At time `t` seconds, simulate pressing WASD, space, and the mouse buttons.
 pub fn demo_live(
     kb: Option<(String, Vec<devhub_core::model::LayoutKey>, f32)>,
     mouse: Option<(String, Vec<String>)>,

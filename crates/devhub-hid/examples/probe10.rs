@@ -1,6 +1,6 @@
-//! 解析プローブ #10: ↑ と Enter の正しい LED セル index を実機で特定する。
-//! 行3 (Caps〜Enter 段) と行4 (Shift〜↑ 段) の候補セルを虹色グラデで点灯。
-//! セル index → 色相 が一対一なので、Enter/↑ の上の色から index が分かる。
+//! Analysis probe #10: identify the correct LED cell indexes of ↑ and Enter on the real device.
+//! Light the candidate cells of row 3 (Caps-Enter row) and row 4 (Shift-↑ row) in a rainbow gradient.
+//! Cell index → hue is one-to-one, so the index can be read from the color on Enter/↑.
 
 fn open(api: &hidapi::HidApi) -> Option<hidapi::HidDevice> {
     let dev = api
@@ -53,7 +53,7 @@ fn cmd(d: &hidapi::HidDevice, grp: u8, sub: u8, args: &[u8]) -> Option<Vec<u8>> 
 }
 
 fn hue(i: usize) -> [u8; 3] {
-    // cell index → HSV 色相で B,G,R を返す (135 セルで 1 周)
+    // Return B,G,R from the HSV hue for the cell index (one full cycle over 135 cells)
     let h = (i as f32 / 135.0) * 360.0;
     let x = 1.0 - ((h / 60.0) % 2.0 - 1.0).abs();
     let (r, g, b) = match (h / 60.0) as u32 {
@@ -69,82 +69,82 @@ fn hue(i: usize) -> [u8; 3] {
 
 fn main() {
     let api = hidapi::HidApi::new().unwrap();
-    let d = open(&api).expect("SU66 が見つからない");
+    let d = open(&api).expect("SU66 not found");
 
     let args: Vec<String> = std::env::args().collect();
     let mode = args.get(1).map(|s| s.as_str()).unwrap_or("rows");
 
     let mut cells = [[0u8; 4]; 135];
     match mode {
-        // 行3+行4 全体を色相スイープ — Enter/↑ の色から index 特定
+        // Hue sweep over all of row 3 + row 4 — identify the index from the color on Enter/↑
         "rows" => {
             for i in 42..105 {
                 let [b, g, r] = hue(i);
                 cells[i] = [b, g, r, 255];
             }
-            println!("行3+行4 (cells 42-104) を色相スイープで点灯 — 30秒");
-            println!("  cell42=黄緑 → 色相は index に比例 (cell÷135×360°)");
+            println!("Lighting row 3 + row 4 (cells 42-104) with a hue sweep — 30 s");
+            println!("  cell42=yellow-green → hue is proportional to index (cell÷135×360°)");
             println!(
-                "  色→index: 黄≈22-33 緑≈45-56 水色≈67-78 青≈90-101 紫≈112-124 赤≈0-11,124-134"
+                "  color→index: yellow≈22-33 green≈45-56 cyan≈67-78 blue≈90-101 purple≈112-124 red≈0-11,124-134"
             );
         }
-        // 容疑セル同時識別: Enter 候補 73-77 / ↑ 候補 96-99 を別色で点灯
+        // Identify the suspect cells at once: light Enter candidates 73-77 / ↑ candidates 96-99 in different colors
         "suspects" => {
-            // (cell, B,G,R) — 離れた index 同士は区別しやすい色で
+            // (cell, B,G,R) — use easily distinguishable colors for indexes that are far apart
             for &(cell, b, g, r) in &[
-                (73usize, 0u8, 0u8, 255u8), // 赤
-                (74, 0, 255, 0),            // 青
-                (75, 255, 0, 0),            // 緑  ← 現行の Enter 推測
-                (76, 255, 255, 255),        // 白
-                (77, 0, 255, 255),          // 黄
-                (78, 255, 0, 255),          // 紫
-                (79, 255, 255, 0),          // 水色
+                (73usize, 0u8, 0u8, 255u8), // red
+                (74, 0, 255, 0),            // blue
+                (75, 255, 0, 0),            // green  ← current Enter guess
+                (76, 255, 255, 255),        // white
+                (77, 0, 255, 255),          // yellow
+                (78, 255, 0, 255),          // purple
+                (79, 255, 255, 0),          // cyan
             ] {
                 cells[cell] = [b, g, r, 255];
             }
             for &(cell, b, g, r) in &[
-                (95usize, 255u8, 255u8, 255u8), // 白
-                (96, 0, 0, 255),                // 赤
-                (97, 0, 255, 0),                // 青
-                (98, 255, 0, 0),                // 緑  ← 現行の ↑ 推測
-                (99, 0, 255, 255),              // 黄
-                (100, 255, 0, 255),             // 紫
-                (101, 255, 255, 0),             // 水色
+                (95usize, 255u8, 255u8, 255u8), // white
+                (96, 0, 0, 255),                // red
+                (97, 0, 255, 0),                // blue
+                (98, 255, 0, 0),                // green  ← current ↑ guess
+                (99, 0, 255, 255),              // yellow
+                (100, 255, 0, 255),             // purple
+                (101, 255, 255, 0),             // cyan
             ] {
                 cells[cell] = [b, g, r, 255];
             }
-            println!("Enter 候補: cells 73-79 = 赤/青/緑/白/黄/紫/水色 (現行推測=75:緑)");
-            println!("↑ 候補:    cells 95-101 = 白/赤/青/緑/黄/紫/水色 (現行推測=98:緑)");
-            println!("→ Enter と ↑ に乗ってる色を教えてください");
+            println!("Enter candidates: cells 73-79 = red/blue/green/white/yellow/purple/cyan (current guess=75:green)");
+            println!("↑ candidates:     cells 95-101 = white/red/blue/green/yellow/purple/cyan (current guess=98:green)");
+            println!("→ Tell me which colors appear on Enter and ↑");
         }
-        // 74/75 と 97/98 の帰属を赤/青で確定
+        // Settle which keys 74/75 and 97/98 belong to using red/blue
         "split" => {
-            cells[74] = [0, 0, 255, 255]; // 赤
-            cells[75] = [255, 0, 0, 255]; // 青 (BGR 順!)
-            cells[97] = [0, 0, 255, 255]; // 赤
-            cells[98] = [255, 0, 0, 255]; // 青
-            println!("cell74=赤 cell75=青 / cell97=赤 cell98=青");
-            println!("→ ' が赤なら '=74・青なら75。↑が赤なら97・Delが青なら98");
+            cells[74] = [0, 0, 255, 255]; // red
+            cells[75] = [255, 0, 0, 255]; // blue (BGR order!)
+            cells[97] = [0, 0, 255, 255]; // red
+            cells[98] = [255, 0, 0, 255]; // blue
+            println!("cell74=red cell75=blue / cell97=red cell98=blue");
+            println!("→ If ' is red, '=74; if blue, 75. If ↑ is red, 97; if Del is blue, 98");
         }
-        // 修正検証 (matrix_col 正解): '=74+75赤, Enter=76緑, ↑=97黄, Del=98青
+        // Fix check (matrix_col correct): '=74+75 red, Enter=76 green, ↑=97 yellow, Del=98 blue
         "verify" => {
-            cells[74] = [0, 0, 255, 255]; // ' = 赤
-            cells[75] = [0, 0, 255, 255]; // ' 右端pad = 赤
-            cells[76] = [0, 255, 0, 255]; // Enter = 緑 (BGR 順!)
-            cells[97] = [0, 255, 255, 255]; // ↑ = 黄
-            cells[98] = [255, 0, 0, 255]; // Del = 青
-            println!("'=赤 Enter=緑 ↑=黄 Del=青 — この4キーだけ光れば修正OK");
+            cells[74] = [0, 0, 255, 255]; // ' = red
+            cells[75] = [0, 0, 255, 255]; // ' right-end pad = red
+            cells[76] = [0, 255, 0, 255]; // Enter = green (BGR order!)
+            cells[97] = [0, 255, 255, 255]; // ↑ = yellow
+            cells[98] = [255, 0, 0, 255]; // Del = blue
+            println!("'=red Enter=green ↑=yellow Del=blue — if only these 4 keys light up, the fix is OK");
         }
-        // 個別セル確認: probe10 single <n> で cell n だけ白点灯
+        // Single-cell check: probe10 single <n> lights only cell n in white
         "single" => {
             let n: usize = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(98);
             cells[n] = [255, 255, 255, 255];
-            println!("cell {n} のみ白点灯 — 30秒");
+            println!("Only cell {n} lit in white — 30 s");
         }
         _ => {}
     }
 
-    // 30 秒間フレーム維持
+    // Hold the frame for 30 seconds
     for _ in 0..300 {
         send_frame(&d, &cells);
         std::thread::sleep(std::time::Duration::from_millis(100));

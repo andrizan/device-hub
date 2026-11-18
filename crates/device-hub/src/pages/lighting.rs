@@ -1,4 +1,4 @@
-//! ライティング (領域ごとのエフェクト + キーごとの色)。
+//! Lighting (per-area effects + per-key colors).
 
 use crate::app::{Shell, Tab};
 use crate::pages::keyboard::Cap;
@@ -79,13 +79,13 @@ impl Shell {
                 .into_any_element()
             });
 
-            // エフェクト一覧。
+            // Effect list.
             let mut effects = div().flex().flex_wrap().gap(px(8.));
             for e in &area.effects {
                 let on = e.id == ls.effect;
                 let id = e.id;
-                // isCustom セルは公式同様モード切替でも保持されるオーバーレイ。
-                // 消すのはペイント側のクリアから明示的に行う。
+                // isCustom cells are an overlay that is kept across mode switches, as in the official app.
+                // Clearing is done explicitly from the paint side's clear.
                 let s2 = send(Rc::new(move |l| l.effect = id));
                 effects = effects.child(
                     div()
@@ -118,7 +118,7 @@ impl Shell {
 
             let mut body = ui::body().pt(px(6.));
             if area.switchable {
-                // 全体トグル: ゾーンがある機種では全ゾーンをまとめて開閉する。
+                // Master toggle: on models with zones, opens/closes all zones together.
                 let s2 = send(Rc::new(|l| {
                     l.on = !l.on;
                     for z in &mut l.zone_on {
@@ -126,13 +126,13 @@ impl Shell {
                     }
                 }));
                 body = body.child(ui::row_first(
-                    "点灯",
+                    "On",
                     None,
                     ui::toggle(format!("light-on-{aid}"), ls.on, cx, move |this, _, cx| {
                         s2(this, cx)
                     }),
                 ));
-                // DoubleLighting: 公式と同じ上/下ライトスイッチ (jo enum に分解して送る)。
+                // DoubleLighting: the same upper/lower light switches as the official app (split into the jo enum and sent).
                 for (zi, zname) in area.zones.iter().enumerate() {
                     let cur = ls.zone_on.get(zi).copied().unwrap_or(false);
                     let link = self.light_link;
@@ -141,7 +141,7 @@ impl Shell {
                             l.zone_on.resize(zi + 1, false);
                         }
                         l.zone_on[zi] = !l.zone_on[zi];
-                        // 連動 ON のときは両ゾーンを揃える (公式の link トグルと同じ)。
+                        // When link is ON, keep both zones the same (same as the official link toggle).
                         if link {
                             let v = l.zone_on[zi];
                             l.zone_on.fill(v);
@@ -149,7 +149,7 @@ impl Shell {
                         l.on = l.zone_on.iter().any(|&z| z);
                     }));
                     body = body.child(ui::row(
-                        &format!("{zname}スイッチ"),
+                        &format!("{zname} switch"),
                         None,
                         ui::toggle(
                             format!("light-zone-{aid}-{zi}"),
@@ -159,12 +159,12 @@ impl Shell {
                         ),
                     ));
                 }
-                // ライティング連動 (公式 link/link-unlink と同じ UI ローカルトグル)。
+                // Lighting link (a UI-local toggle, same as the official link/link-unlink).
                 if area.zones.len() > 1 {
                     let link = self.light_link;
                     body = body.child(ui::row(
-                        "ライティング連動",
-                        Some("ON のとき上/下スイッチを同時に動かします"),
+                        "Lighting link",
+                        Some("While ON, the upper/lower switches move together"),
                         ui::toggle(format!("light-link-{aid}"), link, cx, |this, _, _| {
                             this.light_link = !this.light_link;
                         }),
@@ -178,14 +178,14 @@ impl Shell {
                     .flex()
                     .flex_col()
                     .gap(px(10.))
-                    .child(ui::faint("エフェクト"))
+                    .child(ui::faint("Effect"))
                     .child(effects),
             );
             if eff.as_ref().is_some_and(|e| e.color) {
                 let cur = ls.color;
                 let base = ls.clone();
                 body = body.child(ui::row(
-                    "色",
+                    "Color",
                     None,
                     div()
                         .id("light-color")
@@ -199,7 +199,7 @@ impl Shell {
                             let base = base.clone();
                             overlay::pick_color(
                                 this,
-                                "ライティングの色",
+                                "Lighting color",
                                 cur,
                                 w,
                                 cx,
@@ -222,8 +222,8 @@ impl Shell {
                         })),
                 ));
             }
-            // パレット: 公式のカラー 8 ドット。クリックでスロット選択
-            // (そのスロットの色が現在色になる)。
+            // Palette: the official 8 color dots. Click to select a slot
+            // (that slot's color becomes the current color).
             if !ls.palette.is_empty() {
                 let mut dots = div().flex().items_center().gap(px(8.));
                 for (pi, pc) in ls.palette.iter().enumerate() {
@@ -233,7 +233,7 @@ impl Shell {
                         l.palette_sel = pi as u8;
                         l.color = c;
                     }));
-                    // スロット0はファームの「マルチカラー/虹」固定 (公式の more アイコン相当)。
+                    // Slot 0 is fixed to the firmware's "multicolor / rainbow" (equivalent to the official more icon).
                     let dot = if pi == 0 {
                         let mut strips = div()
                             .size(px(22.))
@@ -262,7 +262,7 @@ impl Shell {
                             .on_click(cx.listener(move |this, _, _, cx| s2(this, cx))),
                     );
                 }
-                body = body.child(ui::row("カラー", None, dots));
+                body = body.child(ui::row("Palette", None, dots));
             }
             {
                 let base = ls.clone();
@@ -293,7 +293,7 @@ impl Shell {
                     f.clone(),
                 );
                 body = body.child(ui::row(
-                    "明るさ",
+                    "Brightness",
                     None,
                     ui::slider_value_edit(
                         "light-br",
@@ -336,7 +336,7 @@ impl Shell {
                     f.clone(),
                 );
                 body = body.child(ui::row(
-                    "速度",
+                    "Speed",
                     None,
                     ui::slider_value_edit(
                         "light-sp",
@@ -353,7 +353,7 @@ impl Shell {
             if eff.as_ref().is_some_and(|e| e.direction) && !area.directions.is_empty() {
                 let base = ls.clone();
                 body = body.child(ui::row(
-                    "方向",
+                    "Direction",
                     None,
                     ui::segmented(
                         "light-dir",
@@ -375,8 +375,8 @@ impl Shell {
                     .w(px((area.directions.len() as f32 * 76.).min(380.))),
                 ));
             }
-            // 彩度 (公式 LightingSaturation): R/G/B 0-100 の 3 スライダー →
-            // [5,2,area,2,R,G,B] ColorCorrection。
+            // Saturation (official LightingSaturation): 3 sliders for R/G/B 0-100 →
+            // [5,2,area,2,R,G,B] ColorCorrection.
             if let Some(cc) = ls.color_correction {
                 body = body.child(
                     div()
@@ -386,7 +386,7 @@ impl Shell {
                         .flex()
                         .flex_col()
                         .gap(px(10.))
-                        .child(ui::faint("彩度")),
+                        .child(ui::faint("Saturation")),
                 );
                 for (ch_i, ch_name, ch_v) in [(0usize, "R", cc.r), (1, "G", cc.g), (2, "B", cc.b)] {
                     let base = ls.clone();
@@ -437,18 +437,18 @@ impl Shell {
             }
             col = col.child(ui::card_titled(&area.name, "lightbulb", area_tabs).child(body));
 
-            // ライティングプレビュー — 公式 HUB と同じ仕組み:
-            // ワーカーが [5,3] で読み戻した**実機の現在の点灯色**をそのまま出す
-            // (セッション live_rgb, ~6Hz 更新)。シミュレーションではないので
-            // 模様・動き・色は常に実機と一致する。取れない間 (非対応ドライバ/
-            // 初回読み出し前) だけローカル近似にフォールバックする。
+            // Lighting preview — same mechanism as the official HUB:
+            // shows the **device's current lit colors** that the worker read back with [5,3] as they are
+            // (session live_rgb, updated at ~6Hz). It is not a simulation, so
+            // pattern, motion and color always match the real device. Only while it cannot be obtained (unsupported driver /
+            // before the first read) does it fall back to a local approximation.
             if let Some(kc) = caps.keyboard.clone() {
                 let eff2 = eff.clone();
                 let live: Option<std::collections::BTreeMap<usize, Rgb>> = self
                     .device_id()
                     .and_then(|id| self.hub.session(&id).map(|s| s.live_rgb.clone()))
                     .filter(|m| !m.is_empty());
-                // 上ゾーン (per-key) が OFF なら描画対象が無いのでアニメーションも止める。
+                // If the upper zone (per-key) is OFF there is nothing to draw, so the animation stops too.
                 let keys_lit =
                     ls.on && !(area.zones.len() >= 2 && ls.zone_on.first() == Some(&false));
                 let animated = live.is_none()
@@ -463,7 +463,7 @@ impl Shell {
                 };
                 let eff_ref = eff.clone();
                 let colors: Vec<Option<Rgb>> = match &live {
-                    // 実機そのまま — 消灯セルはマップに無いので None。
+                    // The real device as is — unlit cells are not in the map, so None.
                     Some(m) => kc
                         .layout
                         .iter()
@@ -477,17 +477,17 @@ impl Shell {
                         .map(|(i, k)| preview_rgb(&ls, &area, eff_ref.as_ref(), k, i, t, spd))
                         .collect(),
                 };
-                // 「実機でプレビュー」ON なら DirectDrive フレームを ~30fps で流す
-                // (probe9: 実機は ~87fps 連続送信でも輻輳しない)。
-                // ライブライティング中はそちらが DirectDrive を使うので、プレビューは送らない。
+                // If "Preview on device" is ON, stream DirectDrive frames at ~30fps
+                // (probe9: the device does not congest even with ~87fps continuous sending).
+                // During live lighting, that feature uses DirectDrive, so the preview does not send.
                 let fx_here = self.fx_on.is_some() && self.fx_on == self.device_id();
                 let dd_on = !fx_here
                     && self
                         .device_id()
                         .and_then(|id| self.hub.session(&id))
                         .is_some_and(|s| s.dd_on);
-                // ライブ読み取りが効く機種では実機プレビューは不要 — 残っていたら
-                // 止めてファームの点灯 (＝ 上の表示と同じもの) に戻す。
+                // On models where live readback works, the on-device preview is unnecessary — if it was left on,
+                // stop it and return to the firmware's lighting (= the same thing as the display above).
                 if live.is_some() && dd_on {
                     if let Some(id) = self.device_id() {
                         self.hub.set_dd(&id, false);
@@ -517,28 +517,28 @@ impl Shell {
                 let view =
                     self.keyboard_view("lit-preview", &kc, caps_v, cx, Rc::new(|_, _, _, _| {}));
                 let mut prev_body = ui::body().pt(px(10.)).pb(px(14.)).gap(px(8.)).child(view);
-                // DirectDrive 対応エリアでは「実機でプレビュー」トグルを出す。
-                // カードはコンテンツ幅がウィンドウを超え得るので、ヘッダー右端ではなく
-                // 本文先頭 (常に見える左側) に置く。
-                // ON の間、上の colors を ~30fps で [5,5] フレームとして実機へ流す;
-                // OFF で DdStop を送りファーム側のアニメーションに戻す。
+                // On DirectDrive-capable areas, show the "Preview on device" toggle.
+                // The card's content width can exceed the window, so it goes not at the right end of the header but
+                // at the start of the body (the always-visible left side).
+                // While ON, the colors above are streamed to the device as [5,5] frames at ~30fps;
+                // when OFF, DdStop is sent to return to the firmware-side animation.
                 if area.direct_drive && fx_here {
                     prev_body = prev_body.child(
                         div()
                             .flex()
                             .items_center()
                             .gap(px(10.))
-                            .child(ui::button("fx-goto", "ライブライティング動作中", Some("zap"), Btn::Ghost, cx, |this, _, cx| {
+                            .child(ui::button("fx-goto", "Live lighting running", Some("zap"), Btn::Ghost, cx, |this, _, cx| {
                                 this.tab = Tab::Live;
                                 cx.notify();
                             }))
-                            .child(ui::faint("実機の LED はライブライティングが駆動しています (停止すると通常の点灯に戻ります)")),
+                            .child(ui::faint("The device LEDs are driven by live lighting (when it stops, normal lighting returns)")),
                     );
                 } else if area.direct_drive && live.is_none() {
                     let dd_label = if dd_on {
-                        "実機プレビュー停止"
+                        "Stop device preview"
                     } else {
-                        "実機でプレビュー"
+                        "Preview on device"
                     };
                     let dd_style = if dd_on { Btn::Primary } else { Btn::Ghost };
                     prev_body = prev_body.child(
@@ -561,32 +561,32 @@ impl Shell {
                                 },
                             ))
                             .child(ui::faint(
-                                "ON の間、上のイメージを実機の LED に直接流します",
+                                "While ON, the image above is streamed directly to the device LEDs",
                             )),
                     );
                 }
                 prev_body = prev_body.child(ui::faint(if live.is_some() {
-                    "実機の現在の点灯を読み取って表示しています"
+                    "Showing the device's current lighting as read back"
                 } else {
-                    "設定値をもとにしたイメージです (本体の実際の点灯とは近似です)"
+                    "An image based on the settings (an approximation of the device's actual lighting)"
                 }));
-                // isCustom セルはベースモードに関わらず点灯する — 残っているのに
-                // カスタムモードを選んでいない場合、編集経路を案内する。
+                // isCustom cells light regardless of the base mode — if some remain
+                // and no custom mode is selected, point to the editing path.
                 if !ls.per_key.is_empty() {
                     prev_body = prev_body.child(ui::faint(format!(
-                        "{} キーにカスタム色が設定されています (下の「キーごとの色」で編集・クリアできます)",
+                        "{} keys have custom colors set (edit or clear them in \"Per-key colors\" below)",
                         ls.per_key.len()
                     )));
                 }
-                // DirectDrive 対応エリアでは「実機でプレビュー」トグルを出す。
-                // ON の間、上の colors を ~150ms 間引きで [5,5] フレームとして実機へ流す;
-                // OFF で DdStop を送りファーム側のアニメーションに戻す。
-                col = col.child(ui::card_titled("プレビュー", "eye", None).child(prev_body));
+                // On DirectDrive-capable areas, show the "Preview on device" toggle.
+                // While ON, the colors above are streamed to the device as [5,5] frames throttled to ~150ms;
+                // when OFF, DdStop is sent to return to the firmware-side animation.
+                col = col.child(ui::card_titled("Preview", "eye", None).child(prev_body));
             }
 
-            // キーごとの色。
-            // キーごとのカスタム色はモードではなく常時使えるオーバーレイ
-            // (公式のカスタムカラーと同じく、どのモードでも編集できる)。
+            // Per-key colors.
+            // Per-key custom colors are an overlay that is always available, not a mode
+            // (editable in any mode, like the official custom color).
             if area.per_key {
                 if let Some(kc) = caps.keyboard.clone() {
                     let paint = self.paint;
@@ -640,7 +640,7 @@ impl Shell {
                                 .on_click(cx.listener(move |this, _, w, cx| {
                                     overlay::pick_color(
                                         this,
-                                        "塗る色",
+                                        "Paint color",
                                         paint,
                                         w,
                                         cx,
@@ -653,7 +653,7 @@ impl Shell {
                         )
                         .child(ui::button(
                             "paint-all",
-                            "全キー",
+                            "All keys",
                             Some("paint-bucket"),
                             Btn::Ghost,
                             cx,
@@ -671,7 +671,7 @@ impl Shell {
                         ))
                         .child(ui::button(
                             "paint-clear",
-                            "クリア",
+                            "Clear",
                             Some("eraser"),
                             Btn::Ghost,
                             cx,
@@ -688,14 +688,14 @@ impl Shell {
                             },
                         ));
                     col = col.child(
-                        ui::card_titled("キーごとの色", "brush", Some(tools.into_any_element()))
+                        ui::card_titled("Per-key colors", "brush", Some(tools.into_any_element()))
                             .child(
                                 ui::body()
                                     .pt(px(10.))
                                     .pb(px(14.))
                                     .gap(px(10.))
                                     .child(view)
-                                    .child(ui::faint("クリックで塗る · Shift+クリックで消す")),
+                                    .child(ui::faint("Click to paint · Shift+click to erase")),
                             ),
                     );
                 }
@@ -709,12 +709,12 @@ impl Shell {
     }
 }
 
-/// プレビュー用: 設定値 (effect/color/brightness/speed/direction/per_key) と時刻 t から
-/// キー i の色を近似計算する。デバイスから LED 状態は読み戻せないため、公式 HUB の
-/// 点灯イメージに相当するローカル再現。効果 id はドライバが並べたエフェクト順。
+/// For the preview: from the settings (effect/color/brightness/speed/direction/per_key) and time t,
+/// compute an approximate color for key i. Because the LED state cannot be read back from the device, this is a
+/// local reproduction of the official HUB's lighting image. The effect id is the effect order the driver lists.
 ///
-/// 色の有無・方向の有無は `LightEffect` の caps フラグに従う — 色を持つ効果は
-/// 選択色で、持たない効果は色相が回る。方向つき効果だけ direction で掃引が反転する。
+/// Whether an effect has a color or a direction follows the `LightEffect` caps flags — effects with a color use
+/// the selected color, effects without one cycle through hues. Only effects with a direction reverse their sweep by direction.
 fn preview_rgb(
     ls: &LightingState,
     area: &LightArea,
@@ -727,24 +727,24 @@ fn preview_rgb(
     if !ls.on {
         return None;
     }
-    // DoubleLighting: zone_on = [上=per-key, 下=underglow]。キーボードプレビューは
-    // per-key LED (=上ゾーン) を描くので、上ゾーンが OFF なら実機同様キーは消える。
+    // DoubleLighting: zone_on = [upper=per-key, lower=underglow]. The keyboard preview
+    // draws the per-key LEDs (= upper zone), so if the upper zone is OFF the keys go dark just like the real device.
     if area.zones.len() >= 2 && ls.zone_on.first().copied() == Some(false) {
         return None;
     }
-    // キーの擬似乱数 (虹の明滅・雨用、index で固定)。
+    // Pseudo-random value per key (for rainbow pulse / rain, fixed by index).
     let rnd = (((i as u32).wrapping_mul(2654435761) >> 8) % 1000) as f32 / 1000.;
-    // 方向つきエフェクトだけ direction を見る (0=Forward→右掃引 / 1=Backward→左掃引)。
+    // Only effects with a direction look at direction (0=Forward→sweep right / 1=Backward→sweep left).
     let dir_sign = if eff.is_some_and(|e| e.direction) && ls.direction == 1 {
         -1.0f32
     } else {
         1.0
     };
     let axis = k.x * dir_sign;
-    // 中心からの距離 (嵐・波形系用)。座標はキーキャップ単位。
+    // Distance from the center (for storm / waveform effects). Coordinates are in keycap units.
     let (dx, dy) = (k.x - 10.5, k.y - 3.);
     let dist = (dx * dx + dy * dy).sqrt();
-    let ph = t * (0.25 + spd * 2.0); // 位相速度
+    let ph = t * (0.25 + spd * 2.0); // phase speed
     let wave = |x: f32| (x * std::f32::consts::TAU).sin() * 0.5 + 0.5;
     let v = ls.brightness as f32 / area.brightness_max.max(1) as f32;
     let dim = |c: Rgb, f: f32| {
@@ -771,55 +771,55 @@ fn preview_rgb(
         };
         Rgb::new((r * 255.) as u8, (g * 255.) as u8, (bl * 255.) as u8)
     };
-    // 実機検証で分かった構造: 各モードは (色相パターン hp, 明度パターン bp) を持ち、
-    // sel=0 (ファーム虹スロット) では hp の虹で、色スロット選択時は選択色の色相で
-    // bp の明暗だけが出る (sel=1=赤で全モードが赤系になったのをカメラで確認)。
-    // 擬似押下点 (プレス系 17-19 のプレビュー用): 一定間隔で位置を変える。
+    // Structure found through device verification: each mode has a (hue pattern hp, brightness pattern bp),
+    // with sel=0 (firmware rainbow slot) it is the rainbow of hp, and when a color slot is selected it uses the selected color's hue
+    // so only the light/dark of bp shows (confirmed on camera that with sel=1=red all modes turn reddish).
+    // Pseudo press point (for the preview of press-type 17-19): changes position at a fixed interval.
     let seg = (ph * 1.6).floor() as u32;
     let px_i = (((seg.wrapping_mul(2654435761)) >> 8) % 19 + 1) as f32;
     let py_i = (((seg.wrapping_mul(2246822519)) >> 10) % 5) as f32;
-    let press_decay = 1. - (ph * 1.6).fract(); // 押下後に減衰
+    let press_decay = 1. - (ph * 1.6).fract(); // decays after the press
     let (hp, bp): (f32, f32) = match ls.effect {
-        // 固定色: 全面均一。sel0 は固定の横向き虹グラデ (動かない、勾配は
-        // 実機撮像の B→C→G→Y→M→B→C に合わせ約1.2周)。
+        // Static color: uniform across the whole board. sel0 is a fixed horizontal rainbow gradient (does not move, the gradient
+        // matches the camera capture of the real device B→C→G→Y→M→B→C, about 1.2 turns).
         0 => (0.72 - k.x * 0.068 + k.y * 0.01, 1.),
-        // 虹の横ながれ: 全虹グラデが左右にゆっくりスクロール (実機 ~2.6s/周)。
+        // Rainbow side-scroll: the whole rainbow gradient scrolls slowly left/right (real device ~2.6s/cycle).
         1 => (
             axis * 0.05 + ph * 0.3,
             0.75 + 0.25 * wave(axis * 0.18 - ph * 0.7),
         ),
-        // ゆっくり変色: 行ごとの色相バンドがゆっくり循環。
+        // Slow color change: per-row hue bands slowly cycle.
         2 => (
             k.y * 0.11 + ph * 0.15,
             0.7 + 0.3 * wave(ph * 0.2 + k.y * 0.3),
         ),
-        // すばやく変色: 中心対称の放射色相が回転。
+        // Fast color change: a center-symmetric radial hue rotates.
         3 => (ph * 0.3 - dist * 0.05, 0.8 + 0.2 * wave(ph * 1.3)),
-        // 虹の市松: 斜めの細かい虹チェッカーが流れる。
+        // Rainbow checker: a fine diagonal rainbow checker flows.
         4 => (
             axis * 0.07 + k.y * 0.08 + ph * 0.15,
             0.85 + 0.15 * wave(rnd * 4. + ph * 1.5),
         ),
-        // 虹のめぐり: 大きな滑らかな横グラデが色相循環。
+        // Rainbow cycle: a large smooth horizontal gradient cycles hue.
         5 => (axis * 0.028 + ph * 0.15, 0.8 + 0.2 * wave(ph * 0.8)),
-        // 虹の明滅: 行ごとの緩い色相勾配 + キーごとの瞬き。
+        // Rainbow pulse: gentle per-row hue gradient + per-key twinkle.
         6 => (
             k.y * 0.07 + ph * 0.15,
             0.45 + 0.55 * wave(ph * 2.2 + rnd * 6.),
         ),
-        // ほのかな窓: ほぼ均一の中を薄い窓がゆっくり横切る
-        // (実機は数秒かけて色相もゆっくり変わる)。
+        // Faint window: a faint window slowly crosses an almost uniform field
+        // (on the real device the hue also changes slowly over a few seconds).
         7 => {
             let pos = (axis * 0.05 - ph * 0.15).rem_euclid(1.);
             (ph * 0.05, if pos < 0.25 { 0.75 } else { 1. })
         }
-        // ゆるやか変形: ゆっくりした不規則な色相モーフ (パッチが染みのように変わる)。
+        // Gentle morph: slow irregular hue morph (patches change like stains).
         8 => (
             ph * 0.05 + (wave(axis * 0.11 + ph * 0.1) - wave(k.y * 0.2 - ph * 0.08)) * 0.1,
             0.55 + 0.45 * wave(dist * 0.3 + ph * 0.15),
         ),
-        // 色帯シフト: ほぼ均一フィールドに別色相の帯が周期的にずれて入る
-        // (実機は支配色が数秒ごとにゆっくり入れ替わる)。
+        // Color band shift: bands of a different hue periodically slide into an almost uniform field
+        // (on the real device the dominant color slowly swaps every few seconds).
         9 => {
             let zone = ((axis * 0.05 - ph * 0.1).rem_euclid(1.) - 0.5).abs() < 0.14;
             (
@@ -827,53 +827,53 @@ fn preview_rgb(
                 if zone { 1. } else { 0.85 },
             )
         }
-        // 虹のうねり: 斜めのマルチバンド虹波。
+        // Rainbow swell: a diagonal multi-band rainbow wave.
         10 => (
             (axis + k.y * 3.) * 0.05 - ph * 0.2,
             0.3 + 0.7 * wave(axis * 0.16 + k.y * 0.14 - ph * 0.5),
         ),
-        // 斜めの光帯: 色の塊が流れる (暗部と彩度の高い塊が混在)。
+        // Diagonal light band: color blobs flow (dark areas and highly saturated blobs mixed).
         11 => (
             axis * 0.04 + ph * 0.12 + wave(k.y * 0.2 + ph * 0.15) * 0.12,
             0.12 + 0.88 * wave(axis * 0.09 + k.y * 0.11 + ph * 0.25),
         ),
-        // コンフェッティ: キーごとにバラバラの色相で咲く紙吹雪状のパッチ。
+        // Confetti: confetti-like patches blooming in scattered hues per key.
         12 => (
             rnd * 0.9 + ph * 0.25,
             0.15 + 0.85 * wave(ph * 1.3 + rnd * 5.),
         ),
-        // 虹のモザイク: 細かい虹チェッカーが斜めに流れる。
+        // Rainbow mosaic: a fine rainbow checker flows diagonally.
         13 => (
             axis * 0.09 + k.y * 0.11 + ph * 0.15,
             0.65 + 0.35 * wave(rnd * 3. + ph * 1.1),
         ),
-        // 光の雨: 列ごとに色ドットが上から下へ落ちる。
+        // Light rain: per column, color dots fall from top to bottom.
         14 => {
             let col_rnd =
                 (((k.x * 37.) as u32).wrapping_mul(2654435761) >> 8) as f32 % 1000. / 1000.;
             let pos = (k.y * 0.14 - ph * (0.9 + col_rnd * 0.9) + col_rnd).rem_euclid(1.);
             (col_rnd * 0.9, if pos < 0.12 { 1. } else { 0.06 })
         }
-        // 跳ねる光: 5x3 程度の点灯ブロックが位置と色を跳んで移動。
+        // Bouncing light: a lit block of about 5x3 jumps in position and color.
         15 => {
             let jx = (((seg.wrapping_mul(2654435761)) >> 8) % 15) as f32;
             let jy = (((seg.wrapping_mul(40503)) >> 10) % 4) as f32;
             let inb = (k.x - jx).abs() < 2.5 && (k.y - jy).abs() < 1.8;
             (seg as f32 * 0.13, if inb { 1. } else { 0.05 })
         }
-        // カスタム: isCustom セルだけが描いた色で点灯、他は消灯 (末尾の overlay が描く)。
+        // Custom: only isCustom cells light in the painted color, the rest are off (drawn by the overlay at the end).
         16 => (0., 0.),
-        // 押下・まわり: 押したキー周辺のブロックが点灯 (擬似押下で再現)。
+        // Press: surround: the block around the pressed key lights (reproduced with a pseudo press).
         17 => {
             let lit = (k.x - px_i).abs() <= 1.5 && (k.y - py_i).abs() <= 1.5;
             (k.y * 0.1 + 0.15, if lit { press_decay } else { 0.04 })
         }
-        // 押下・行: 押したキーの行が点灯。
+        // Press: row: the row of the pressed key lights.
         18 => {
             let lit = (k.y - py_i).abs() <= 0.6;
             (k.y * 0.1 + 0.15, if lit { press_decay } else { 0.04 })
         }
-        // 押下・広域: 押したキー周囲の広範囲が点灯。
+        // Press: wide: a wide area around the pressed key lights.
         19 => {
             let lit = ((k.x - px_i).powi(2) + (k.y - py_i).powi(2)).sqrt() <= 4.2;
             (k.y * 0.1 + 0.15, if lit { press_decay } else { 0.04 })
@@ -885,7 +885,7 @@ fn preview_rgb(
     } else {
         dim(ls.color, bp)
     };
-    // isCustom セルはベースモードに関わらずカスタム色で点灯する (公式と同じオーバーレイ)。
+    // isCustom cells light in the custom color regardless of the base mode (the same overlay as the official one).
     Some(
         ls.per_key
             .get(&i)

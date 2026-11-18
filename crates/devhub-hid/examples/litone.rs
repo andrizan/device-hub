@@ -1,5 +1,5 @@
-//! 単一モードを指定秒数だけ維持する最小プローブ: `litone <mode> <sec>`
-//! 終了時は元の LightingState を復元する。
+//! Minimal probe that holds a single mode for the given number of seconds: `litone <mode> <sec>`
+//! Restores the original LightingState on exit.
 use devhub_core::{Change, DeviceKind};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 

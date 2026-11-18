@@ -1,6 +1,6 @@
-//! DirectDrive 検証: [5,5,area,chunk, ...15cell×4B(B,G,R,flag)] を連続送信。
-//! 応答不要 (SDK: sendDataNoResponse = sendReport のみ)。
-//! 上半分=赤, 下半分=青 を流して実機 LED が従うか見る (ユーザ目視確認用)。
+//! DirectDrive check: sends [5,5,area,chunk, ...15cell×4B(B,G,R,flag)] continuously.
+//! No response needed (SDK: sendDataNoResponse = sendReport only).
+//! Streams upper half=red, lower half=blue and checks whether the real LEDs follow (for visual confirmation by the user).
 
 fn open(api: &hidapi::HidApi) -> Option<hidapi::HidDevice> {
     let dev = api
@@ -21,7 +21,7 @@ fn main() {
         println!("no device");
         return;
     };
-    // 135 セル: 前半 68 セルを赤、後半を青 (B,G,R,flag)
+    // 135 cells: the first 68 cells red, the rest blue (B,G,R,flag)
     let mut cells = Vec::new();
     for i in 0..135u8 {
         let (b, g, r) = if i < 68 {
@@ -48,7 +48,7 @@ fn main() {
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
     println!("direct drive frames sent: {ok}");
-    // 5秒後に通常書き込みでファーム側モードに戻す (点灯状態の復帰確認用に読みだけ)
+    // After 5 seconds, return to the firmware-side mode with a normal write (read only, to confirm the lit state recovers)
     std::thread::sleep(std::time::Duration::from_secs(3));
     let mut r = [0u8; 65];
     let n = d.read_timeout(&mut r, 200).unwrap_or(0);

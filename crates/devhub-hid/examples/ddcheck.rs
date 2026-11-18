@@ -1,4 +1,4 @@
-//! caps.lighting の direct_drive フラグをダンプするだけの診断。
+//! Diagnostic that only dumps the direct_drive flag of caps.lighting.
 fn main() {
     let hub = match devhub_hid::connect() {
         Ok(h) => h,

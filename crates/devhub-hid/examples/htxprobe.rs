@@ -1,7 +1,7 @@
-//! HTX Ultra (33e4:5618, JM_056_3950) 実機プローブ。
-//! report-8/EEPROM 経路で主要アドレスを生ダンプし、モデル定数
-//! (DPI 配置 / LOD 符号 / SPDT @KeyOperation) を実機で確かめる。
-//! 読み取りのみ。書き込みはしない。
+//! HTX Ultra (33e4:5618, JM_056_3950) real-device probe.
+//! Raw-dumps the main addresses over the report-8/EEPROM path and confirms the model constants
+//! (DPI layout / LOD sign / SPDT @KeyOperation) on the real device.
+//! Read-only. No writes.
 
 use hidapi::HidApi;
 use std::sync::mpsc;
@@ -28,7 +28,7 @@ fn open(api: &HidApi, pid: u16) -> Option<hidapi::HidDevice> {
     Some(d)
 }
 
-/// 16B コマンド → 17B 応答。データは r[6..]。
+/// 16B command → 17B response. Data is r[6..].
 fn cmd(d: &hidapi::HidDevice, f: &[u8; 16]) -> Option<[u8; 17]> {
     let op = f[0];
     let mut w = [0u8; 17];
@@ -37,9 +37,9 @@ fn cmd(d: &hidapi::HidDevice, f: &[u8; 16]) -> Option<[u8; 17]> {
     let s: u32 = w[..16].iter().map(|&b| b as u32).sum();
     w[16] = 85u32.wrapping_sub(s) as u8;
 
-    // 受信スレッド代わりに直読み: 応答は op echo を拾う
+    // Read directly instead of using a receive thread: pick up the response by its op echo
     let (tx, rx) = mpsc::channel::<Vec<u8>>();
-    let _ = tx; // 単純化: 同スレッドで読む
+    let _ = tx; // Simplification: read on the same thread
     for _try in 0..3 {
         d.write(&w).ok()?;
         let deadline = Instant::now() + Duration::from_millis(400);
@@ -57,7 +57,7 @@ fn cmd(d: &hidapi::HidDevice, f: &[u8; 16]) -> Option<[u8; 17]> {
                 out.copy_from_slice(&buf[..17]);
                 return Some(out);
             }
-            // 自発通知 (op10 等) は読み捨てて続行
+            // Discard unsolicited notifications (op10 etc.) and continue
             let _ = rx.try_recv();
         }
     }
@@ -96,7 +96,7 @@ fn dump(d: &hidapi::HidDevice, name: &str, addr: u16, len: u16) {
     }
 }
 
-/// スカラ (v, 0x55-v) ペア書き込み。
+/// Scalar (v, 0x55-v) pair write.
 fn ee_set(d: &hidapi::HidDevice, addr: u16, val: u8) -> bool {
     let mut f = [0u8; 16];
     f[0] = 7;
@@ -111,7 +111,7 @@ fn ee_set(d: &hidapi::HidDevice, addr: u16, val: u8) -> bool {
 fn main() {
     let api = HidApi::new().unwrap();
     let args: Vec<String> = std::env::args().collect();
-    // 第1引数が数値なら PID (16進)。既定は 5618 (HTX Ultra 有線)。
+    // If the first argument is a number, it is the PID (hex). Default is 5618 (HTX Ultra wired).
     let mut argi = 1usize;
     let mut pid = 0x5618u16;
     if let Some(a) = args.get(1) {
@@ -131,7 +131,7 @@ fn main() {
     let mut drain = [0u8; 64];
     while d.read_timeout(&mut drain, 20).unwrap_or(0) > 0 {}
 
-    // 書き込みモード: `htxprobe [pid] write <addr> <val>` → ペア書き込みして読み戻し
+    // Write mode: `htxprobe [pid] write <addr> <val>` → pair-write and read back
     if args.len() == argi + 3 && args[argi] == "write" {
         let addr: u16 = args[argi + 1].parse().unwrap();
         let val: u8 = args[argi + 2].parse().unwrap();
@@ -148,7 +148,7 @@ fn main() {
         return;
     }
 
-    // ---- op レベル ----
+    // ---- op level ----
     let mut f = [0u8; 16];
     f[0] = 18; // FW
     if let Some(r) = cmd(&d, &f) {
@@ -186,7 +186,7 @@ fn main() {
         println!("op14 profile   : <timeout>");
     }
     let mut f = [0u8; 16];
-    f[0] = 1; // EID/donglePR nonce — 公式 getEID は r[4]=8 + nonce 4B
+    f[0] = 1; // EID/donglePR nonce — official getEID is r[4]=8 + nonce 4B
     f[4] = 8;
     f[5] = 0xAA;
     f[6] = 0xBB;

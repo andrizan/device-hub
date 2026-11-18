@@ -1,12 +1,12 @@
-//! TP55 PEQ E2E: 実機で 10 バンド読み取り → バンド書き換え往復 → 復元。
-//! 最後に no-op PeqAll (現在値をそのまま 10 フレーム書き込み) で
-//! 全バンド書き込み + 即時適用 + フラッシュ保存のシーケンスを検証する。
+//! TP55 PEQ E2E: on the real device, read 10 bands → band rewrite round trip → restore.
+//! Finally, with a no-op PeqAll (writes the current values as-is in 10 frames),
+//! verifies the sequence of writing all bands + immediate apply + flash save.
 
 use devhub_core::*;
 
 fn show(tag: &str, st: &DeviceState) {
     let Some(peq) = &st.peq else {
-        println!("{tag}: peq なし");
+        println!("{tag}: no peq");
         return;
     };
     for (i, b) in peq.iter().enumerate() {
@@ -34,7 +34,7 @@ fn main() {
         .into_iter()
         .find(|d| d.driver == DriverKind::Walkplay);
     let Some(info) = info else {
-        eprintln!("TP55 が見つかりません");
+        eprintln!("TP55 not found");
         return;
     };
     println!("== {}", info.name);
@@ -42,12 +42,12 @@ fn main() {
     let st = drv.read().expect("read");
     show("read", &st);
     let Some(orig) = st.peq.clone() else {
-        eprintln!("peq を読み取れませんでした");
+        eprintln!("Could not read peq");
         return;
     };
     let mut fails = 0u32;
 
-    // --- バンド 4 の書き換え往復 (中域。freq/gain/type を同時に変える) ---
+    // --- Band 4 rewrite round trip (mid range. Changes freq/gain/type at the same time) ---
     let mut t = orig[4];
     t.freq = if t.freq == 700 { 900 } else { 700 };
     t.gain = if (t.gain - 3.).abs() < 0.5 { -3. } else { 3. };
@@ -91,7 +91,7 @@ fn main() {
         }
     }
 
-    // --- 復元 ---
+    // --- Restore ---
     print!("b4 restore: ");
     match drv.apply(&Change::Peq {
         band: 4,
@@ -119,7 +119,7 @@ fn main() {
         }
     }
 
-    // --- no-op PeqAll: 現在値のまま 10 フレーム全書き込み (全シーケンス検証) ---
+    // --- no-op PeqAll: write all 10 frames with the current values (verifies the full sequence) ---
     print!("peqall noop: ");
     match drv.apply(&Change::PeqAll {
         bands: orig.clone(),
@@ -148,5 +148,5 @@ fn main() {
             }
         }
     }
-    println!("=> {fails} 件の不一致");
+    println!("=> {fails} mismatch(es)");
 }

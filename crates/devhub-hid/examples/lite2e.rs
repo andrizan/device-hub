@@ -1,6 +1,6 @@
-//! ライティング E2E: 実機で read → write → readback → restore を検証する。
-//! 公式 wire レイアウト (r[4]=open, r[5]=mode, r[6]=輝度, r[7]=速度, r[8]=方向,
-//! r[9]=パレット選択) が正しく効くかを確かめる。最後に元の状態へ戻す。
+//! Lighting E2E: verifies read → write → readback → restore on the real device.
+//! Official wire layout (r[4]=open, r[5]=mode, r[6]=brightness, r[7]=speed, r[8]=direction,
+//! r[9]=palette selection) takes effect correctly. Restores the original state at the end.
 
 use devhub_core::*;
 
@@ -25,7 +25,7 @@ fn main() {
             }
         };
         let caps = drv.caps();
-        // --- perf mode バイト (連続 RT) の往復 — キー 0 で検証して元に戻す ---
+        // --- perf mode byte (continuous RT) round trip — verified on key 0, then restored ---
         if caps.keyboard.as_ref().is_some_and(|k| k.perf.is_some()) {
             if let Some(kst) = drv.read().ok().and_then(|s| s.keyboard) {
                 if let Some(orig_p) = kst.perf.first().copied() {
@@ -46,7 +46,7 @@ fn main() {
                             .is_some_and(|b| {
                                 b.mode == TriggerMode::Rapid && b.continuous == tp.continuous
                             });
-                    // 非連続側 (mode=2) も往復
+                    // Round-trip the non-continuous side (mode=2) as well
                     tp.continuous = !tp.continuous;
                     let ok2 = drv
                         .apply(&Change::KeyPerf {
@@ -71,7 +71,7 @@ fn main() {
                             .and_then(|s| s.keyboard?.perf.first().copied())
                             .is_some_and(|b| b == orig_p);
                     println!(
-                        "RT+連続={} RT+区間={} 復元={}",
+                        "RT+continuous={} RT+non-continuous={} restore={}",
                         if ok1 { "OK" } else { "FAIL" },
                         if ok2 { "OK" } else { "FAIL" },
                         if ok3 { "OK" } else { "FAIL" },
@@ -79,7 +79,7 @@ fn main() {
                 }
             }
         }
-        // --- 高度キー TGL 往復 (wire: [6,2,row,col,TGL,kc,time]) ---
+        // --- Advanced-key TGL round trip (wire: [6,2,row,col,TGL,kc,time]) ---
         if caps
             .keyboard
             .as_ref()
@@ -105,7 +105,7 @@ fn main() {
                     .ok()
                     .and_then(|s| s.keyboard?.advanced.into_iter().find(|a| a.key == 0))
                     .is_some_and(|a| matches!(a.binding, Advanced::Tgl { delay_ms: 42, .. }));
-            // 元の binding (None なら解除) に戻す
+            // Restore the original binding (clear it if None)
             let restore_binding = orig_adv.map(|a| a.binding);
             let ok2 = drv
                 .apply(&Change::Advanced {
@@ -122,12 +122,12 @@ fn main() {
                     .unwrap_or(None)
                     == restore_binding;
             println!(
-                "書込+遅延42={} 復元={}",
+                "write+delay42={} restore={}",
                 if ok1 { "OK" } else { "FAIL" },
                 if ok2 { "OK" } else { "FAIL" },
             );
         }
-        // --- キーマップ単キー往復 ([3,2,layer,row,30×u16] / [3,4,layer,row,col,kc]) ---
+        // --- Keymap single-key round trip ([3,2,layer,row,30×u16] / [3,4,layer,row,col,kc]) ---
         if caps.keyboard.is_some() {
             print!("   keym : ");
             if let Some(km) = drv
@@ -136,7 +136,7 @@ fn main() {
                 .and_then(|s| s.keyboard?.keymap.into_iter().next())
             {
                 if let Some(&orig_code) = km.first() {
-                    // 同じ値で書き込み (no-op 検証) → 別値で往復 → 復元
+                    // Write the same value (no-op check) → round-trip with a different value → restore
                     let other = if matches!(orig_code, KeyAction::Code(0x04)) {
                         KeyAction::Code(0x05)
                     } else {
@@ -179,7 +179,7 @@ fn main() {
         };
         println!("== {} (area {area})", info.name);
         println!(
-            "   現状: on={} effect={} #{:06x} lum={} spd={} dir={} keys={}",
+            "   current: on={} effect={} #{:06x} lum={} spd={} dir={} keys={}",
             orig.on,
             orig.effect,
             orig.color.to_hex(),
@@ -190,10 +190,10 @@ fn main() {
         );
         let mut fails = 0u32;
 
-        // --- 1) ベース (effect/輝度/速度/方向/on) 往復 ---
+        // --- 1) Base (effect/brightness/speed/direction/on) round trip ---
         let mut t = orig.clone();
         t.on = !t.on;
-        // ゾーンがある機種は on が zone_on から合成される — トグルに合わせて全ゾーンを動かす。
+        // On models with zones, on is synthesized from zone_on — move all zones to match the toggle.
         if !t.zone_on.is_empty() {
             t.zone_on = vec![t.on; t.zone_on.len()];
         }
@@ -211,7 +211,7 @@ fn main() {
                 fails += 1;
             }
             Ok(_) => {
-                // save (flash 書き込み) が反映されるまで本体は古い値を返すことがある。
+                // The device may return old values until the save (flash write) takes effect.
                 std::thread::sleep(std::time::Duration::from_millis(80));
                 match drv.read().ok().and_then(|s| s.lighting.get(&area).cloned()) {
                     Some(b) => {
@@ -241,7 +241,7 @@ fn main() {
             }
         }
 
-        // --- 2) パレット色往復 ---
+        // --- 2) Palette color round trip ---
         print!("   color: ");
         let mut t = orig.clone();
         t.color = Rgb::new(0x12, 0x34, 0xab);
@@ -254,7 +254,7 @@ fn main() {
                 fails += 1;
             }
             Ok(_) => {
-                // save (flash 書き込み) が反映されるまで本体は古い値を返すことがある。
+                // The device may return old values until the save (flash write) takes effect.
                 std::thread::sleep(std::time::Duration::from_millis(80));
                 match drv.read().ok().and_then(|s| s.lighting.get(&area).cloned()) {
                     Some(b) => {
@@ -277,9 +277,9 @@ fn main() {
             }
         }
 
-        // --- 3) カスタム領域 (isCustom セルの絶対書き込み・クリア・復元) ---
+        // --- 3) Custom area (absolute write, clear and restore of isCustom cells) ---
         print!("   perkey: ");
-        // キー 0,1 に色を置く (per_key は area0 で常に絶対状態として書かれる)
+        // Put colors on keys 0 and 1 (per_key is always written as absolute state in area0)
         let mut t = orig.clone();
         t.per_key.clear();
         t.per_key.insert(0, Rgb::new(0xff, 0x00, 0x00));
@@ -293,13 +293,13 @@ fn main() {
                 fails += 1;
             }
             Ok(_) => {
-                // save (flash 書き込み) が反映されるまで本体は古い値を返すことがある。
+                // The device may return old values until the save (flash write) takes effect.
                 std::thread::sleep(std::time::Duration::from_millis(80));
                 match drv.read().ok().and_then(|s| s.lighting.get(&area).cloned()) {
                     Some(b) => {
                         let ok = b.per_key.get(&0) == Some(&Rgb::new(0xff, 0, 0))
                             && b.per_key.get(&1) == Some(&Rgb::new(0, 0xff, 0))
-                            && b.per_key.len() <= 4; // 0,1 は複数 LED セルを持つことがある
+                            && b.per_key.len() <= 4; // keys 0 and 1 may have multiple LED cells
                         println!(
                             "wrote 2 keys → read {} keys {}",
                             b.per_key.len(),
@@ -316,7 +316,7 @@ fn main() {
                 }
             }
         }
-        // クリア (per_key 空 + custom mode → 全セル isCustom=0)
+        // Clear (empty per_key + custom mode → isCustom=0 on all cells)
         print!("   clear:  ");
         let mut t = t.clone();
         t.per_key.clear();
@@ -329,7 +329,7 @@ fn main() {
                 fails += 1;
             }
             Ok(_) => {
-                // save (flash 書き込み) が反映されるまで本体は古い値を返すことがある。
+                // The device may return old values until the save (flash write) takes effect.
                 std::thread::sleep(std::time::Duration::from_millis(80));
                 match drv.read().ok().and_then(|s| s.lighting.get(&area).cloned()) {
                     Some(b) => {
@@ -354,7 +354,7 @@ fn main() {
             }
         }
 
-        // --- 4) ゾーン開閉往復 (DoubleLighting のみ: [上,下] → jo enum) ---
+        // --- 4) Zone on/off round trip (DoubleLighting only: [top,bottom] → jo enum) ---
         if !orig.zone_on.is_empty() {
             for (up, down) in [(false, true), (true, false)] {
                 print!("   zone:  ");
@@ -370,7 +370,7 @@ fn main() {
                         fails += 1;
                     }
                     Ok(_) => {
-                        // save (flash 書き込み) が反映されるまで本体は古い値を返すことがある。
+                        // The device may return old values until the save (flash write) takes effect.
                         std::thread::sleep(std::time::Duration::from_millis(80));
                         match drv.read().ok().and_then(|s| s.lighting.get(&area).cloned()) {
                             Some(b) => {
@@ -394,7 +394,7 @@ fn main() {
             }
         }
 
-        // --- 5) パレット選択往復 ---
+        // --- 5) Palette selection round trip ---
         if !orig.palette.is_empty() {
             print!("   pal:   ");
             let mut t = orig.clone();
@@ -409,7 +409,7 @@ fn main() {
                     fails += 1;
                 }
                 Ok(_) => {
-                    // save (flash 書き込み) が反映されるまで本体は古い値を返すことがある。
+                    // The device may return old values until the save (flash write) takes effect.
                     std::thread::sleep(std::time::Duration::from_millis(80));
                     match drv.read().ok().and_then(|s| s.lighting.get(&area).cloned()) {
                         Some(b) => {
@@ -434,7 +434,7 @@ fn main() {
             }
         }
 
-        // --- 6) 彩度 (ColorCorrection) 往復 ---
+        // --- 6) Saturation (ColorCorrection) round trip ---
         if orig.color_correction.is_some() {
             print!("   cc:    ");
             let mut t = orig.clone();
@@ -470,7 +470,7 @@ fn main() {
             }
         }
 
-        // --- 6.5) ブラックアウト切替 (有効→即解除。実行中 LED は一瞬全消しになる) ---
+        // --- 6.5) Blackout toggle (enable → release immediately. The running LEDs turn fully off for a moment) ---
         print!("   blackout: ");
         match drv.run_action("blackout", None) {
             Err(e) => {
@@ -486,7 +486,7 @@ fn main() {
             },
         }
 
-        // --- 7) 元に戻す (per_key 含む — area0 では常に絶対状態で書き戻される) ---
+        // --- 7) Restore (including per_key — always written back as absolute state in area0) ---
         print!("   restore: ");
         match drv.apply(&Change::Lighting {
             area,
@@ -497,7 +497,7 @@ fn main() {
                 fails += 1;
             }
             Ok(_) => {
-                // save (flash 書き込み) が反映されるまで本体は古い値を返すことがある。
+                // The device may return old values until the save (flash write) takes effect.
                 std::thread::sleep(std::time::Duration::from_millis(80));
                 match drv.read().ok().and_then(|s| s.lighting.get(&area).cloned()) {
                     Some(b) => {
@@ -511,7 +511,7 @@ fn main() {
                             && b.zone_on == orig.zone_on
                             && b.palette_sel == orig.palette_sel
                             && b.color_correction == orig.color_correction;
-                        println!("{}", if ok { "OK" } else { "MISMATCH (確認要)" });
+                        println!("{}", if ok { "OK" } else { "MISMATCH (needs review)" });
                         if !ok {
                             fails += 1;
                         }
@@ -523,6 +523,6 @@ fn main() {
                 }
             }
         }
-        println!("   => {fails} 件の不一致");
+        println!("   => {fails} mismatch(es)");
     }
 }

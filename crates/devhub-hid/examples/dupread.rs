@@ -1,8 +1,8 @@
-//! 同一 HID インターフェースの二重オープンで入力レポートの配送モデルを判定する。
-//! A から軸要求を送り、A/B 両方で読む:
-//! - B にも応答が届く → 全ハンドルへ扇出 (fan-out)
-//! - B に届かず A だけ → 共有キュー消費 (先着 1 ハンドル)
-//! 実行: cargo run -p devhub-hid --example dupread
+//! Determines the input-report delivery model by opening the same HID interface twice.
+//! Send an axis request from A and read on both A and B:
+//! - The response also reaches B → fan-out to all handles
+//! - It does not reach B, only A → shared queue consumption (first handle wins)
+//! Run: cargo run -p devhub-hid --example dupread
 
 fn main() -> devhub_core::backend::HubResult<()> {
     let api = hidapi::HidApi::new().expect("hidapi init");
@@ -35,14 +35,14 @@ fn main() -> devhub_core::backend::HubResult<()> {
     drain(&a, "A");
     drain(&b, "B");
 
-    // A から 1 コマンド (軸要求 route/row1) だけ送る。
+    // Send just one command (axis request route/row1) from A.
     let mut req = [0u8; 65];
     req[1..5].copy_from_slice(&[4, 3, 1, 1]);
     a.write(&req).expect("write A");
     println!("sent [4,3,1,1] on A only");
 
-    // ストリームが流れている間に通常コマンド ([1,2] device info) を打ち、
-    // ストリームが止まるか確認する。
+    // While the stream is flowing, send a normal command ([1,2] device info) and
+    // check whether the stream stops.
     std::thread::sleep(std::time::Duration::from_millis(500));
     let mut req2 = [0u8; 65];
     req2[1..3].copy_from_slice(&[1, 2]);

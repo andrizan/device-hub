@@ -1,5 +1,5 @@
-//! 解析プローブ #6: keyLayoutStyle の正しいデコード (3B/cell: row/4, col/4, ratio)
-//! + レイヤー 0-3 の内容差分 (fn1-3 が独立か確認)
+//! Analysis probe #6: correct decoding of keyLayoutStyle (3B/cell: row/4, col/4, ratio)
+//! + content diff of layers 0-3 (check whether fn1-3 are independent)
 
 fn open(api: &hidapi::HidApi) -> Option<hidapi::HidDevice> {
     let dev = api
@@ -41,7 +41,7 @@ fn cmd(grp: u8, sub: u8, args: &[u8]) -> Option<Vec<u8>> {
 }
 
 fn main() {
-    // === keyLayoutStyle: [3,5,row] → 21セル×3B {row: b0/4, col: b1/4, ratio: b2} ===
+    // === keyLayoutStyle: [3,5,row] → 21 cells×3B {row: b0/4, col: b1/4, ratio: b2} ===
     println!("== keyLayoutStyle decoded (3B/cell)");
     for row in 0..6u8 {
         match cmd(3, 5, &[row]) {
@@ -73,7 +73,7 @@ fn main() {
         }
     }
 
-    // === レイヤー 0-3 の全行読み取り → 差分判定 ===
+    // === Read all rows of layers 0-3 → judge the diff ===
     println!("== layer diff (first differing cell vs layer0)");
     let mut layers: Vec<Vec<u16>> = Vec::new();
     for layer in 0..4u8 {

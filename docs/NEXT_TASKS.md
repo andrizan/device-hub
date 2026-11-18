@@ -1,262 +1,262 @@
-# 次の作業指示書 v4 (2026-11-14)
+# Next task brief v4 (2026-11-14)
 
-> 対象: 実装担当のエージェント (**今回はフロントエンドも含めて全部**)。
-> 前提資料: `AGENTS.md` → `docs/FRONTEND.md` → `docs/BACKEND_BRIEF.md` → `docs/PROTOCOL_NOTES.md`。
-> 守ること (`AGENTS.md`): UI は caps だけで出し分ける / 契約 (`model.rs`) は追加のみ / `paint_backdrop` は
-> `glass.rs` 経由 / Web 版のタブを開いたまま実機を触らない。
+> Audience: the implementing agent (**this time everything, frontend included**).
+> Prerequisite reading: `AGENTS.md` → `docs/FRONTEND.md` → `docs/BACKEND_BRIEF.md` → `docs/PROTOCOL_NOTES.md`.
+> Rules (`AGENTS.md`): the UI branches on caps only / the contract (`model.rs`) is additive only / `paint_backdrop` goes through
+> `glass.rs` / do not touch a real device while the Web version's tab is open.
 
 ---
 
-## 0. いまの完成度 (コードと docs を読んだ評価)
+## 0. Current completeness (assessment from reading the code and docs)
 
-| 領域 | 完成度 | 根拠 |
+| Area | Completeness | Basis |
 |---|---|---|
-| フロントエンド (全画面・元に戻す・プリセット・検索・テスト・キャリブレーション) | 9 割 | 画面はそろっている。今回の要望 (§1〜§5) と §6 の改善が残り |
-| SU66 Max (xsyd) | 8〜9 割 | P0/P1 はほぼ実機検証済み (キーごと性能・RT・ポーリング・構成 4・高度キー・マクロ・デコライト・per-key 色・キャリブ・ストロークテスト)。高度キー/マクロ書き込みは実データでの検証待ち。互換モード・ライト連動・ファーム更新が未 |
-| HTS Plus Pro (mouse.fit) | 7 割 | 有線・無線とも DPI/ボタン/マクロ/主要設定は実機検証済み。高速モード・デバウンス DIY・誤操作防止・組み合わせキー・センサー詳細・本体/レシーバーライト・プロファイル・リセット・ボタン校正・ファーム更新が未 |
-| HTX Ultra | 未検証 | 機種表から登録しただけ |
-| ATK F1 Ultimate | 0 | VID/PID 未確定 (mouse.fit の機種表に無い) |
-| 本体側の変更の追従 (本体ボタンで DPI を変えた等) | 0 | Web 版はやっている (§6.1)。ここが無いと「上位互換」にならない |
+| Frontend (all screens, undo, presets, search, test, calibration) | 90% | The screens are all there. What's left is this round's requests (§1-§5) and the §6 improvements |
+| SU66 Max (xsyd) | 80-90% | P0/P1 are mostly verified on real hardware (per-key performance, RT, polling rate, 4 configurations, advanced keys, macros, decoration lighting, per-key colors, calibration, stroke test). Writing advanced keys / macros still awaits verification with real data. Compatibility mode, light linking and firmware update are not done |
+| HTS Plus Pro (mouse.fit) | 70% | Wired and wireless: DPI / buttons / macros / main settings are verified on real hardware. Not done: hyper mode, DIY debounce, accidental-press prevention, key combinations, sensor details, device/receiver lighting, profiles, reset, button calibration, firmware update |
+| HTX Ultra | Unverified | Only registered from the model table |
+| ATK F1 Ultimate | 0 | VID/PID not determined (not in mouse.fit's model table) |
+| Following changes made on the device itself (e.g. changing DPI with the device's own button) | 0 | The Web version does this (§6.1). Without it the app is not a "superset" |
 
-**毎日使う機能は Web 版の 8〜9 割に到達。Web 版の全機能という意味では 7〜8 割。**
-`docs/BACKEND_BRIEF.md` §2.2 (マウス) の「現状」列が古いので、作業の最初に実態へ更新すること。
+**Day-to-day features reach 80-90% of the Web version. In terms of all Web version features, about 70-80%.**
+The "Status" column of `docs/BACKEND_BRIEF.md` §2.2 (mice) is outdated, so update it to reality at the start of the work.
 
-## 作業の順番
+## Order of work
 
-1. §1 クリック感の削除 (小)
-2. §3 サイドバーのバッテリー (中)
-3. §2 磁気ボタンの押下深さのリアルタイム表示 (大・実機調査あり)
-4. §5 フォント (中)
-5. §4 ファームウェア更新の通知 (中)
-6. §6 改善 (本体側の変更の追従を最優先)
+1. §1 Remove the click feel (small)
+2. §3 Battery in the sidebar (medium)
+3. §2 Real-time display of magnetic button press depth (large, needs hardware investigation)
+4. §5 Fonts (medium)
+5. §4 Firmware update notification (medium)
+6. §6 Improvements (following changes made on the device itself first)
 
-各節の「完了条件」をすべて満たしたら、その節を done にして `AGENTS.md` の現状を更新する。
+When every "completion condition" of a section is met, mark that section done and update the current status in `AGENTS.md`.
 
 ---
 
-## 1. HTS Plus Pro の「クリック感」を消す
+## 1. Remove the "click feel" from the HTS Plus Pro
 
-ユーザー要望: **「左ボタン クリック感」「右ボタン クリック感」は要らない。**
+User request: **"Left button click feel" and "Right button click feel" are not needed.**
 
-- `crates/devhub-hid/src/mousefit8.rs` の caps から `ms_tactile_left` / `ms_tactile_right` の `SettingSpec` を外す
-  (803〜815 行付近)。読み取り (1011 行付近) と apply (1271 行付近) の対応も消してよい。
-- 同じ内容が `crates/devhub-core/src/demo.rs` (デモの `mag_vibration` / `mag_sound`) にもあるので、デモからも消す。
-- 他の磁気ボタン設定 (トリガー位置・クイックトリガー) は残す。
+- Remove the `SettingSpec`s `ms_tactile_left` / `ms_tactile_right` from the caps in `crates/devhub-hid/src/mousefit8.rs`
+  (around lines 803-815). The matching read (around line 1011) and apply (around line 1271) can be removed too.
+- The same content is also in `crates/devhub-core/src/demo.rs` (the demo's `mag_vibration` / `mag_sound`), so remove it from the demo too.
+- Keep the other magnetic button settings (trigger position, quick trigger).
 
-**完了条件**: 実機・デモとも「性能」タブの磁気スイッチのカードにクリック感 (振動・クリック音) の行が出ない。
+**Completion condition**: on both real hardware and the demo, the magnetic switch card in the Performance tab shows no click-feel (vibration / click sound) rows.
 
-## 2. 磁気ボタンの押下深さをリアルタイムで見る
+## 2. See magnetic button press depth in real time
 
-ユーザー要望: **マウスのボタンをどのくらい押しているか (押下深さ) をリアルタイムで見たい。**
+User request: **I want to see in real time how far I'm pressing the mouse buttons (press depth).**
 
-### 2.1 実機から取れるデータ (mouse.fit の JS から判明)
+### 2.1 Data available from the real device (found from mouse.fit's JS)
 
-[mouse.fit](https://www.mouse.fit/) の通知処理から確認した report-8 の形式。
-通知のオフセットは report ID を含むバッファの先頭から数える。
+The report-8 format confirmed from [mouse.fit](https://www.mouse.fit/)'s notification handling.
+Notification offsets are counted from the start of the buffer that includes the report ID.
 
-| 条件 | 内容 |
+| Condition | Content |
 | --- | --- |
-| オフセット 1 が 10 | 本体からの自発通知 |
-| オフセット 6 が 1 / 2 / 64 | DPI / ポーリング / バッテリーの変化 |
-| オフセット 6 が 0、4、8、16、32 | オフセット 14 が左、15 が右。下位 7 ビットが押下深さ（0〜100%） |
+| Offset 1 is 10 | Spontaneous notification from the device |
+| Offset 6 is 1 / 2 / 64 | DPI / polling rate / battery changed |
+| Offset 6 is 0, 4, 8, 16, 32 | Offset 14 is left, offset 15 is right. The low 7 bits are the press depth (0-100%) |
 
-公式 UI の作動点は 5% 刻みで、読み出したトリガー値に 1 を足した段階を表示する。
+The official UI's actuation points move in 5% steps, and the step it shows is the trigger value read from the device plus 1.
 
-feature-report 系にも同種の通知がある (`ka` ハンドラ、report id 4: `04 01/04` DPI、`04 03` バッテリー、
-`04 02` プロファイル、`04 06 00/01` 切断/接続、`04 07` LOD、`04 08` ポーリング、`04 0f` MotionSync、`04 18` センサー)。
+The feature-report family has similar notifications (the `ka` handler, report id 4: `04 01/04` DPI, `04 03` battery,
+`04 02` profile, `04 06 00/01` disconnect/connect, `04 07` LOD, `04 08` polling rate, `04 0f` MotionSync, `04 18` sensor).
 
-**まず実機で確かめること** (`crates/devhub-hid/examples/` に `btnprobe.rs` を作る):
-1. 何も送らずに input report を読み続け、左右クリックで op 10 の `r[14]/r[15]` が変わるか。
-2. 変わらなければ、`StartCalibr(46)` の後、または mouse.fit の磁気ボタン画面を開いたときに送っているコマンドの後で変わるか
-   (WebHID フック `docs/ADD_DEVICE.md §2.3` で mouse.fit の通信を記録すると確実)。
-3. 有線 (5219) とドングル (3854) の両方で。結果を `docs/PROTOCOL_NOTES.md` に書く。
+**First check on the real device** (create `btnprobe.rs` in `crates/devhub-hid/examples/`):
+1. Keep reading input reports without sending anything, and see whether `r[14]/r[15]` of op 10 change on left/right clicks.
+2. If they don't change, see whether they change after `StartCalibr(46)`, or after the command mouse.fit sends when its magnetic button screen is opened
+   (recording mouse.fit's traffic with the WebHID hook in `docs/ADD_DEVICE.md §2.3` is the reliable way).
+3. On both wired (5219) and dongle (3854). Write the results in `docs/PROTOCOL_NOTES.md`.
 
-### 2.2 契約の追加 (`crates/devhub-core`)
+### 2.2 Contract additions (`crates/devhub-core`)
 
 ```rust
 // model.rs
-/// 押下深さを返せるボタン 1 個分 (磁気スイッチなど)。
+/// One button that can report its press depth (magnetic switches etc.).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct ButtonDepth {
-    /// 0.0 (離している) 〜 1.0 (底まで)。
+    /// 0.0 (released) to 1.0 (fully pressed).
     pub depth: f32,
-    /// 作動点 0..1 (分かれば)。UI はこの位置に線を引く。
+    /// Actuation point 0..1 (if known). The UI draws a line at this position.
     pub trigger: Option<f32>,
-    /// デバイスが「押下」と判定しているか (分かれば)。
+    /// Whether the device considers the button "pressed" (if known).
     pub pressed: Option<bool>,
 }
 
-// MouseCaps に追加
-/// 押下深さを返せるボタンの slot 番号 (`buttons` の index)。空なら UI は出さない。
+// Add to MouseCaps
+/// Slot numbers of the buttons that can report press depth (indexes into `buttons`). If empty, the UI shows nothing.
 pub live_buttons: Vec<usize>,
 
-// backend.rs の DeviceDriver に追加 (既定は Unsupported)
-/// `MouseCaps::live_buttons` と同じ並びで、最新の押下深さ。UI がテスト画面で 60Hz で呼ぶ。
-/// 通知 (push) で届くデバイスは、受信スレッドが保存した最新値を返すだけにする (ここで HID を叩かない)。
+// Add to DeviceDriver in backend.rs (default is Unsupported)
+/// Latest press depths, in the same order as `MouseCaps::live_buttons`. The UI calls this at 60Hz on the Test screen.
+/// For devices that deliver data by notification (push), just return the latest value saved by the receive thread (do not hit HID here).
 fn live_buttons(&self) -> HubResult<Vec<ButtonDepth>> { Err(HubError::Unsupported("live_buttons")) }
 ```
 
-`MouseCaps` を struct リテラルで作っているドライバ・デモは `live_buttons: vec![]` を足す。
-デモ (`demo.rs` の磁気ボタン付き HTX Ultra) は sin 波で深さを返す。
+Drivers and demos that build `MouseCaps` as a struct literal need to add `live_buttons: vec![]`.
+The demo (the HTX Ultra with magnetic buttons in `demo.rs`) returns depths as a sine wave.
 
-### 2.3 バックエンド (`mousefit8.rs`)
+### 2.3 Backend (`mousefit8.rs`)
 
-- **受信スレッド**: コマンドの応答待ちと通知が同じ input report に混ざる。1 本の受信スレッドで全 input report を読み、
-  「応答 (op がコマンドと一致)」はチャネルでコマンド側へ、「通知 (op 10 / report 4)」は通知処理へ振り分ける。
-  今の `cmd()` が自分で read している作りを、この形に直す。
-- 通知で受けた L/R の深さを `Mutex<[ButtonDepth; 2]>` に保存し、`live_buttons()` はそれを返す。
-  `trigger` は `ms_trigger_left/right` の値 (5% 刻みの段階 → 0..1) から入れる。
-- 通知が届かない機種・状態では `live_buttons` を caps に宣言しない。
+- **Receive thread**: command responses and notifications are mixed in the same input report. Use a single receive thread that reads all input reports and
+  dispatches "responses (op matches the command)" to the command side over a channel and "notifications (op 10 / report 4)" to the notification handler.
+  Rework the current design where `cmd()` does its own read into this shape.
+- Store the L/R depths received by notification in a `Mutex<[ButtonDepth; 2]>`, and have `live_buttons()` return it.
+  Fill `trigger` from the values of `ms_trigger_left/right` (5% step stage → 0..1).
+- For models/states where notifications do not arrive, do not declare `live_buttons` in caps.
 
-### 2.4 フロントエンド
+### 2.4 Frontend
 
-- `store.rs`: いまのストロークテスト (`Job::Travel`) と同じ仕組みで、マウスでは `live_buttons()` を 60Hz (16ms) で読む。
-  テストタブを開いている間だけ ON、離れたら OFF (いまの `set_travel` と同じ扱い)。
-- `pages/test.rs` のマウスのテストに **「ボタンの押下深さ」カード** を追加:
-  - 左右 2 本の縦バー (0〜100%)。作動点に線、作動中はバーをアクセント色、未作動は灰色。
-  - 現在値 (%)・その操作での最大値・作動した回数。
-  - 直近 5 秒の深さの折れ線 (左右 2 本)。`canvas` + `PathBuilder` で描く。
-  - クリック回数の既存カードと並べる (同じ「テスト」タブ)。
-- 「性能」タブの磁気スイッチのカードにも、トリガー位置スライダーの横に小さなライブバー (左右) を出す
-  (動かしながら作動点を決められる。Web 版には無い使い方)。
+- `store.rs`: using the same mechanism as the current stroke test (`Job::Travel`), read `live_buttons()` at 60Hz (16ms) for mice.
+  ON only while the Test tab is open, OFF when leaving (same handling as the current `set_travel`).
+- Add a **"Button press depth" card** to the mouse's Test page in `pages/test.rs`:
+  - Two vertical bars, left and right (0-100%). A line at the actuation point; the bar uses the accent color while actuated and gray when not.
+  - Current value (%), maximum during this operation, and number of actuations.
+  - Line chart of depth over the last 5 seconds (two lines, left and right). Draw with `canvas` + `PathBuilder`.
+  - Place it alongside the existing click-count card (same Test tab).
+- In the magnetic switch card of the Performance tab, also show small live bars (left and right) next to the trigger position slider
+  (lets you set the actuation point while moving it, a use the Web version lacks).
 
-**完了条件**: HTS Plus Pro (有線・無線) で左右ボタンをゆっくり押すとバーが追従し、作動点を越えると色が変わる。
-離すと 0 に戻る。テストタブから離れると読み取りが止まる (CPU が下がる)。
+**Completion condition**: on the HTS Plus Pro (wired and wireless), pressing the left and right buttons slowly makes the bars follow, and the color changes past the actuation point.
+Releasing returns it to 0. Leaving the Test tab stops the reads (CPU goes down).
 
-## 3. バッテリーをサイドバーで見る
+## 3. See the battery in the sidebar
 
-ユーザー要望: **バッテリーのデータがあるデバイスは、左側の一覧で残量を見られるように。**
+User request: **Devices that have battery data should show the remaining charge in the list on the left.**
 
-### 3.1 今の問題 (コードを読んだ結果)
+### 3.1 Current problems (from reading the code)
 
-1. `HubBackend::scan` は `battery: None` を返し、`store.rs` の `Msg::Scanned` が 2 秒ごとに `self.devices = list` で
-   一覧を丸ごと置き換えるので、取れたバッテリー値が次の scan で消える。
-2. `Hub::poll_battery` は「開いていて ready かつ `info.battery.is_some()`」のセッションしか問い合わせない。
-   開いていないデバイスや、`info()` が battery を埋めないドライバでは一度も読まれない。
+1. `HubBackend::scan` returns `battery: None`, and `Msg::Scanned` in `store.rs` replaces the whole list with `self.devices = list` every 2 seconds,
+   so a battery value that was obtained disappears at the next scan.
+2. `Hub::poll_battery` only queries sessions that are open, ready and have `info.battery.is_some()`.
+   Devices that are not open, and drivers whose `info()` does not fill battery, are never read.
 
-### 3.2 直し方
+### 3.2 How to fix
 
-- **契約**: `Capabilities` に `pub battery: bool` を追加 (バッテリーを持つ機種で true)。
-  ドライバの struct リテラルは `..Capabilities::empty()` を使うか、項目を足す。
+- **Contract**: add `pub battery: bool` to `Capabilities` (true for models that have a battery).
+  Driver struct literals should use `..Capabilities::empty()` or add the field.
 - **store.rs**:
-  - `Msg::Scanned` で、前回の一覧とセッションにあった `battery` / `asleep` を同じ ID に引き継ぐ (None で上書きしない)。
-  - 起動時と挿抜時に、`supported` な全デバイスのセッションを**裏で開く** (画面は開かない)。caps に
-    `battery: true` があるものを 60 秒ごとに `battery()` で問い合わせる (今の 30 秒間隔の仕組みを流用)。
-  - ドライバが `HubEvent::Battery` を送ってきたら即反映 (mouse.fit は op 10 の `b == 64` / `04 03` で通知が来る — §2.3 の受信スレッドで拾う)。
-- **バックエンド**: `mousefit8.rs` は `battery: true` を caps に入れ、`battery()` が寝ているときは `Err` ではなく
-  最後に取れた値を返し、`DeviceInfo::asleep` を立てる。
-- **UI (サイドバー `app.rs::side_device`)**:
-  - デバイス名の下の行に、電池アイコン (残量で 4 段階) + `85%`。充電中は稲妻アイコンと「充電中」。
-  - 20% 以下は橙、10% 以下は赤。スリープ中は「スリープ中 · 最後 85%」と薄く。
-  - 値をまだ一度も取れていないデバイスには何も出さない (`—` も出さない)。
-  - ホームのデバイスカードも同じ表示にそろえる。
+  - In `Msg::Scanned`, carry the `battery` / `asleep` held in the previous list and the sessions over to the same ID (do not overwrite with None).
+  - At startup and on plug/unplug, **open in the background** the sessions of all `supported` devices (without opening a screen). Query those with
+    `battery: true` in caps via `battery()` every 60 seconds (reuse the existing 30-second interval mechanism).
+  - If the driver sends `HubEvent::Battery`, reflect it immediately (mouse.fit notifies via op 10 `b == 64` / `04 03` — pick it up in the §2.3 receive thread).
+- **Backend**: `mousefit8.rs` puts `battery: true` in caps, and when the device is asleep `battery()` returns the last obtained value instead of `Err`
+  and sets `DeviceInfo::asleep`.
+- **UI (sidebar `app.rs::side_device`)**:
+  - On the line under the device name, a battery icon (4 levels by charge) + `85%`. While charging, a lightning icon and "Charging".
+  - 20% or below is orange, 10% or below is red. While asleep, show "Asleep · last 85%" in a dimmer style.
+  - Show nothing for a device whose value has never been obtained (not even `—`).
+  - Make the Home device cards show the same.
 
-**完了条件**: アプリを起動しただけで (デバイス画面を開かなくても) HTS Plus Pro の残量がサイドバーに出て、
-2 秒ごとの scan で消えない。充電ケーブルを挿すと 60 秒以内 (通知があれば即時) に充電中表示になる。
+**Completion condition**: just launching the app (without opening the device screen) shows the HTS Plus Pro's charge in the sidebar,
+and it does not disappear on the 2-second scan. Plugging in a charging cable switches to the charging display within 60 seconds (immediately if there is a notification).
 
-## 4. 公式ファームウェアの更新通知
+## 4. Notification of official firmware updates
 
-ユーザー要望: **公式のファームウェア更新が出たら通知してほしい。** (自動で書き込むのではなく、知らせるだけ)
+User request: **Notify me when the official firmware has an update.** (Notify only; do not write it automatically.)
 
-### 4.1 公式の配布元 (調査済み)
+### 4.1 Official distribution sources (investigated)
 
-| 系統 | どこを見るか | 新しいかどうかの判定 |
+| Family | Where to look | How to decide whether it is new |
 |---|---|---|
-| mouse.fit (G-Wolves) | `https://www.mouse.fit/Config/<UIFolder>/FWLINK.txt` — 中身は zip の URL 1 行。2026-11-14 時点: HTS Plus Pro (`JM_052_3955`) → `https://www.mouse.fit/firmware/10-052-HTS_PLUS_Pro_8K/3955/HTS_PLUS_Pro_8K_3955JM.zip`、HTX Ultra (`GW_056`) → `https://www.mouse.fit/firmware/HTX_Ultra_54XG.zip`、(`JM_056_3955`) → `.../02-056-htxultra/3955/htxultra-3955JM.zip`、(`JM_056_3950`) → `.../02-056-htxultra/3950/htxultra-3950JM.zip` | zip のファイル名にバージョンが無い。**FWLINK.txt の URL が変わった**、または zip の **ETag / Last-Modified / Content-Length** が変わったら「新しいファームウェアが公開された」とみなす。加えて `env-models.json` の `DeviceFWFile_00` / `Receiver4K8KFWFile_00` (今は空) が入ったら、そこからバージョン (`DeviceNewFWVer`) を出して本体 FW と比べる |
-| xsyd / Sparklink (SU66 Max) | `GET https://api.sparklinkplayjoy.com/api/v1/getKeyboardFirmware` (SDK の `getFirmwarePack`)。引数は dshk の firmware 画面のチャンクで呼び出し元を探して確定する (`getFirmwarePack(` で grep。VID/PID/boardId 等のはず) | 応答のバージョンと `getDeviceInfo` の `appVersion` (`DeviceInfo::firmware`) を比べ、新しければ通知 |
+| mouse.fit (G-Wolves) | `https://www.mouse.fit/Config/<UIFolder>/FWLINK.txt` — the content is one line, the zip's URL. As of 2026-11-14: HTS Plus Pro (`JM_052_3955`) → `https://www.mouse.fit/firmware/10-052-HTS_PLUS_Pro_8K/3955/HTS_PLUS_Pro_8K_3955JM.zip`, HTX Ultra (`GW_056`) → `https://www.mouse.fit/firmware/HTX_Ultra_54XG.zip`, (`JM_056_3955`) → `.../02-056-htxultra/3955/htxultra-3955JM.zip`, (`JM_056_3950`) → `.../02-056-htxultra/3950/htxultra-3950JM.zip` | The zip file name has no version. Treat it as "new firmware published" when **the URL in FWLINK.txt changes**, or the zip's **ETag / Last-Modified / Content-Length** changes. In addition, once `DeviceFWFile_00` / `Receiver4K8KFWFile_00` of `env-models.json` (currently empty) are filled in, derive the version (`DeviceNewFWVer`) from them and compare it with the device's FW |
+| xsyd / Sparklink (SU66 Max) | `GET https://api.sparklinkplayjoy.com/api/v1/getKeyboardFirmware` (the SDK's `getFirmwarePack`). Pin down the arguments by finding the caller in the dshk firmware screen chunk (grep for `getFirmwarePack(`; probably VID/PID/boardId etc.) | Compare the version in the response with `appVersion` from `getDeviceInfo` (`DeviceInfo::firmware`), and notify if it is newer |
 
-UIFolder は `env-models.json` の機種行 (registry の model から引けるように、mousefit8.rs の機種表に持たせる)。
+UIFolder comes from the model row in `env-models.json` (keep it in the model table of mousefit8.rs so it can be looked up from the registry's model).
 
-### 4.2 実装
+### 4.2 Implementation
 
-- **契約**: `Capabilities` に `pub firmware_feed: Option<FirmwareFeed>` を追加。
+- **Contract**: add `pub firmware_feed: Option<FirmwareFeed>` to `Capabilities`.
   ```rust
   #[derive(Clone, Debug, PartialEq)]
   pub enum FirmwareFeed {
-      /// mouse.fit の FWLINK.txt (UIFolder 名)。
+      /// mouse.fit FWLINK.txt (UIFolder name).
       MouseFit { ui_folder: String },
-      /// Sparklink API (問い合わせに必要な値)。
+      /// Sparklink API (values needed for the query).
       Sparklink { vid: u16, pid: u16, board_id: Option<u32> },
   }
   ```
-- **新クレート `crates/devhub-update`** (GUI 依存なし・テストしやすく): `fn check(feed, current_fw, last_seen) -> Result<UpdateStatus>`。
-  HTTP は `ureq` (参照実装 と同じ `ureq = { version = "2", features = ["json", "native-tls"] }`)。
-  タイムアウト 5 秒。オフラインは黙って失敗。結果:
+- **New crate `crates/devhub-update`** (no GUI dependency, easy to test): `fn check(feed, current_fw, last_seen) -> Result<UpdateStatus>`.
+  HTTP uses `ureq` (the same `ureq = { version = "2", features = ["json", "native-tls"] }` as the reference implementation).
+  5-second timeout. Offline fails silently. Result:
   ```rust
   pub struct UpdateStatus { pub new_available: bool, pub version: Option<String>,
                             pub url: Option<String>, pub fingerprint: String, pub checked_at: u64 }
   ```
-- **状態の保存**: `%APPDATA%\DeviceHub\firmware.json` に「機種ごとの最後に見た fingerprint・通知済みか」。
-  **初回は基準として記録するだけで通知しない** (起動しただけで「更新あり」と出さない)。
-- **頻度**: 起動時に、前回から 24 時間以上たっていれば裏スレッドで確認。アプリ設定に
-  「ファームウェアの更新を確認する」(既定 ON) と「今すぐ確認」ボタン。
-- **通知の出し方**:
-  - トースト「HTS Plus Pro の新しいファームウェアが公開されています」。
-  - サイドバーのデバイス行に小さな点 (バッジ)。
-  - そのデバイスの「一般」タブ上部にカード: バージョン (分かれば)・確認日時・「公式ページを開く」
-    (既定ブラウザで URL を開く。`open::that` 等) と「この通知を消す」。
-  - Windows の通知センターにも出すオプション (`notify-rust`、参照実装 で使用実績あり)。既定 OFF。
-- ファームウェアの書き込み自体は `docs/BACKEND_BRIEF.md` の P3 のまま (ここではやらない)。
+- **Saving state**: in `%APPDATA%\DeviceHub\firmware.json`, "the last seen fingerprint per model and whether it was notified".
+  **The first time, only record it as a baseline and do not notify** (do not show "update available" just because the app launched).
+- **Frequency**: at startup, if 24 hours or more have passed since the last check, check on a background thread. In App settings, add
+  "Check for firmware updates" (default ON) and a "Check now" button.
+- **How to notify**:
+  - Toast "A new firmware for the HTS Plus Pro has been published".
+  - A small dot (badge) on the device row in the sidebar.
+  - A card at the top of that device's General tab: version (if known), check time, "Open official page"
+    (open the URL in the default browser, e.g. `open::that`) and "Dismiss this notification".
+  - An option to also show it in the Windows notification center (`notify-rust`, proven in the reference implementation). Default OFF.
+- Writing the firmware itself stays as P3 in `docs/BACKEND_BRIEF.md` (not done here).
 
-**完了条件**: firmware.json の fingerprint を手で書き換えて「今すぐ確認」→ 通知・バッジ・カードが出る。
-オフラインでもエラー表示が出ずに普段どおり動く。24 時間以内の再起動では問い合わせない。
+**Completion condition**: after editing the fingerprint in firmware.json by hand and pressing "Check now", the notification, badge and card appear.
+It runs as usual with no error shown even when offline. No query is made on a restart within 24 hours.
 
-## 5. フォントを変える
+## 5. Change the font
 
-ユーザー要望: **今のフォント (Yu Gothic UI) がダサいので変えたい。**
+User request: **The current font (Yu Gothic UI) is ugly, so I want to change it.**
 
-### 5.1 方針
+### 5.1 Approach
 
-- フォントを**同梱**し、アプリ設定で選べるようにする (プレビュー付き)。既定も変える。
-- 参照実装: 参照実装の `src/main.rs` の `BUNDLED_FONT_Z` / `bundled_font` / `register_ui_font`
-  (zlib 圧縮した TTF を exe に入れ、選んだ書体だけ展開して `cx.text_system().add_fonts` で登録)、
-  `src/ui.rs` の `FONTS` 一覧、圧縮ツール `tools/compress-fonts.py`。同じ仕組みをそのまま移植してよい
-  (`flate2` を依存に足す)。フォントファイルとライセンスも `assets/fonts-z/`・`licenses/` から流用できる。
-- 日本語の字形が無い欧文フォント (Geist 等) は、和文フォントへのフォールバックを必ず設定する
-  (参照実装 の `ui_font()` / `native_font_family()` の扱いを確認)。
+- **Bundle** fonts and let them be selected in App settings (with a preview). Change the default too.
+- Reference: in the reference implementation's `src/main.rs`, `BUNDLED_FONT_Z` / `bundled_font` / `register_ui_font`
+  (put zlib-compressed TTFs in the exe, expand only the selected typeface and register it with `cx.text_system().add_fonts`),
+  the `FONTS` list in `src/ui.rs`, and the compression tool `tools/compress-fonts.py`. The same mechanism can be ported as is
+  (add `flate2` as a dependency). The font files and licenses can also be reused from `assets/fonts-z/` and `licenses/`.
+- For Latin fonts that have no Japanese glyphs (Geist etc.), always set a fallback to a Japanese font
+  (check how `ui_font()` / `native_font_family()` in the reference implementation handle it).
 
-### 5.2 候補と既定
+### 5.2 Candidates and default
 
-| 表示名 | 中身 | 用途 |
+| Display name | Contents | Use |
 |---|---|---|
-| **モダン (既定)** | 英数字 **Geist** + 日本語 **Noto Sans JP** (または IBM Plex Sans JP) | Liquid Glass に合う細身のサンセリフ。Apple 系の見た目に一番近い |
-| 丸ゴシック | Geist + Zen Maru Gothic | 柔らかい |
-| M+ 丸ゴシック | M PLUS Rounded 1c | 丸く軽い |
-| UD ゴシック | BIZ UDPGothic (Windows 標準) | 読みやすさ重視 |
-| 游ゴシック UI | Yu Gothic UI (Windows 標準、今の既定) | 従来どおり |
-| メイリオ UI | Meiryo UI (Windows 標準) | |
+| **Modern (default)** | Latin/digits **Geist** + Japanese **Noto Sans JP** (or IBM Plex Sans JP) | A slim sans-serif that suits Liquid Glass. Closest to an Apple-like look |
+| Rounded | Geist + Zen Maru Gothic | Soft |
+| M+ Rounded | M PLUS Rounded 1c | Round and light |
+| UD Gothic | BIZ UDPGothic (standard on Windows) | Readability first |
+| Yu Gothic UI | Yu Gothic UI (standard on Windows, the current default) | As before |
+| Meiryo UI | Meiryo UI (standard on Windows) | |
 
-- Noto Sans JP / IBM Plex Sans JP は OFL。可変フォントか Regular/Medium/Bold の 3 ウェイトに絞り、圧縮して同梱
-  (exe の肥大を抑える。参照実装 は全書体で約 11MiB を常駐)。
-- 大きな数字 (DPI・バッテリー%・テストの数値) は Geist の等幅数字 (tabular) を使う (`ui::big_number`)。
-- `theme.rs` の `FONT` / `FONT_DISPLAY` を定数から「設定から決まる値」に変え、`prefs.rs` に `font: String` を追加。
-- アプリ設定の「見た目」カードに「フォント」行: ドロップダウン + 「あいう ABC 1600 DPI」のプレビュー。変更は即時反映。
+- Noto Sans JP / IBM Plex Sans JP are OFL. Limit them to a variable font or the three weights Regular/Medium/Bold, and bundle them compressed
+  (to keep the exe from bloating; the reference implementation keeps about 11MiB resident for all typefaces).
+- Large numbers (DPI, battery %, Test values) use Geist's tabular (monospaced) digits (`ui::big_number`).
+- In `theme.rs`, change `FONT` / `FONT_DISPLAY` from constants to "values determined by settings", and add `font: String` to `prefs.rs`.
+- In the "Appearance" card of App settings, add a "Font" row: dropdown + a preview of sample text (a few Japanese characters plus "ABC 1600 DPI"). Changes apply immediately.
 
-**完了条件**: 既定がモダン (Geist + Noto Sans JP) になり、日本語・英数字とも豆腐 (□) にならない。
-設定で切り替えると全画面に即反映され、再起動後も保持される。
+**Completion condition**: the default becomes Modern (Geist + Noto Sans JP), with no tofu (□) for Japanese or Latin text.
+Switching in settings applies to all screens immediately and persists across restarts.
 
 ---
 
-## 6. 改善案 (Web 版より便利にする)
+## 6. Improvements (make it more useful than the Web version)
 
-優先順。各項目の担当範囲はバックエンド (B) / フロント (F)。
+In priority order. Each item's scope is backend (B) / frontend (F).
 
-1. **本体側の変更に追従する (B+F・最優先)**: 本体の DPI ボタン・プロファイル切替・LOD/ポーリング変更・充電開始・
-   スリープ/復帰を通知 (op 10、report 4: §2.1 の一覧) から拾い、`HubEvent::StateChanged` / `Battery` を送る。
-   UI は該当部分を読み直し、DPI 画面の「使用中」ステージが即座に動く。今は本体ボタンで変えても画面が古いまま。
-2. **ゲーム連動プリセット (F)**: 前面のプロセス (例 `VALORANT-Win64-Shipping.exe`) を 2 秒ごとに見て、
-   紐づけたプリセットを自動適用 (一般タブで「このプリセットを使うアプリ」を登録)。ゲームを閉じたら元に戻す。
-   Web 版には無い。`windows` crate の `GetForegroundWindow` + `QueryFullProcessImageNameW`。
-3. **起動の軽さ (F)**: タスクトレイに入れて常駐する設定 (既定 OFF) と、「設定したら閉じる」運用のための
-   起動時間短縮 (初回の列挙と描画を 1 秒以内)。
-4. **HTX Ultra・ATK F1 の実機対応 (B)**: `docs/BACKEND_BRIEF.md` §2.2/§2.3。
-5. **マウスの残り機能 (B)**: 高速モード、デバウンス DIY 4 値、誤操作防止、組み合わせキー、センサー詳細、
-   本体/レシーバーのライト、オンボードプロファイル、リセット、磁気ボタン校正。
-6. **docs の整備 (B)**: `BACKEND_BRIEF.md` §2.2 の現状列を実態に更新、検証日を記入。
+1. **Follow changes made on the device itself (B+F, top priority)**: pick up the device's DPI button, profile switch, LOD/polling rate change, charging start and
+   sleep/wake from notifications (op 10, report 4: the list in §2.1) and send `HubEvent::StateChanged` / `Battery`.
+   The UI re-reads the affected part, and the "in use" stage on the DPI screen moves immediately. Today the screen stays stale even when the change is made with the device's own button.
+2. **Game-linked presets (F)**: watch the foreground process (e.g. `VALORANT-Win64-Shipping.exe`) every 2 seconds and
+   automatically apply the linked preset (register "apps that use this preset" in the General tab). Revert when the game is closed.
+   The Web version has no such thing. `GetForegroundWindow` + `QueryFullProcessImageNameW` from the `windows` crate.
+3. **Light startup (F)**: a setting (default OFF) to stay resident in the system tray, and faster startup for the "close after configuring" workflow
+   (first enumeration and rendering within 1 second).
+4. **Real-device support for the HTX Ultra and ATK F1 (B)**: `docs/BACKEND_BRIEF.md` §2.2/§2.3.
+5. **Remaining mouse features (B)**: hyper mode, 4 DIY debounce values, accidental-press prevention, key combinations, sensor details,
+   device/receiver lighting, onboard profiles, reset, magnetic button calibration.
+6. **Docs upkeep (B)**: update the status column of `BACKEND_BRIEF.md` §2.2 to reality and fill in the verification dates.
 
-## 7. 全体の完了条件
+## 7. Overall completion conditions
 
-- §1〜§5 の完了条件をすべて満たす (実機は HTS Plus Pro と SU66 Max、デモでも全画面が動く)。
-- `cargo clippy --workspace --all-targets` 警告 0、`cargo test` が通る。
-- `docs/FRONTEND.md` (新しい画面・部品)、`docs/PROTOCOL_NOTES.md` (op 10 / report 4 の通知・ファーム配布元)、
-  `AGENTS.md` (現状) を更新。
+- Meet all completion conditions of §1-§5 (real devices are the HTS Plus Pro and SU66 Max; all screens also work in the demo).
+- `cargo clippy --workspace --all-targets` has 0 warnings and `cargo test` passes.
+- Update `docs/FRONTEND.md` (new screens and components), `docs/PROTOCOL_NOTES.md` (op 10 / report 4 notifications and firmware distribution sources) and
+  `AGENTS.md` (current status).

@@ -1,15 +1,15 @@
-//! オーディオ: USB DAC のパラメトリック EQ (peq.szwalkplay.com の上位互換)。
+//! Audio: parametric EQ for USB DACs (a superset of peq.szwalkplay.com).
 //!
-//! - 応答グラフ: 合成カーブ + 選択バンド単体のカーブ。番号付きのハンドルを
-//!   **ドラッグで周波数/ゲインを同時に**動かし、ホイールで Q を変える。
-//!   ホバー中はカーソル位置の周波数と合成ゲインを表示。
-//! - バンド一覧 (公式の縦列表示に相当) → 選択バンドの詳細編集。
-//! - プリアンプ (EQ ボリューム) + クリップ警告 + 自動プリアンプ。
-//! - プリセット: 内蔵 (DEF/低音/V字/ボーカル/FPS 足音 …) + 保存したもの (prefs)。
-//!   AutoEQ / Equalizer APO 形式 (ParametricEQ.txt) の貼り付け・コピー。
+//! - Response graph: combined curve + the selected band's own curve. Numbered handles
+//!   are moved **by dragging, frequency and gain together**, and the wheel changes Q.
+//!   While hovering, the frequency at the cursor and the combined gain are shown.
+//! - Band list (equivalent to the official vertical list) → detail editor for the selected band.
+//! - Preamp (EQ volume) + clip warning + auto preamp.
+//! - Presets: built-in (DEF / Bass / V-shape / Vocal / FPS footsteps ...) + saved ones (prefs).
+//!   Paste / copy in AutoEQ / Equalizer APO format (ParametricEQ.txt).
 //!
-//! `Capabilities::peq` があるときだけ EQ UI を出す。残りの AUDIO 設定は
-//! generic のカード (eq_volume と eq_def は EQ カード側へ移している)。
+//! The EQ UI is shown only when `Capabilities::peq` is present. The rest of the AUDIO settings are shown in the
+//! generic cards (eq_volume and eq_def have been moved into the EQ card).
 
 use crate::app::{CbXY, PopItem, Shell, Tab};
 use crate::prefs::EqPreset;
@@ -22,28 +22,28 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 use std::rc::Rc;
 
-/// グラフの周波数レンジ (対数軸)。
+/// Frequency range of the graph (log axis).
 const F_LO: f64 = 20.;
 const F_HI: f64 = 20_000.;
-/// グラフの高さ。
+/// Height of the graph.
 const GRAPH_H: f32 = 236.;
-/// カーブのサンプル数。
+/// Number of curve samples.
 const N_PTS: usize = 180;
-/// EQ ボリューム (プリアンプ) の設定 id。
+/// Setting id of the EQ volume (preamp).
 const PREAMP_ID: &str = "eq_volume";
-/// 空きバンドに置く既定の周波数 (10 バンド・オクターブ間隔)。
+/// Default frequencies for empty bands (10 bands, octave spacing).
 const DEFAULT_FREQS: [u16; 10] = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
 
-/// freq (Hz) → 0..1 (対数)。
+/// freq (Hz) → 0..1 (log).
 fn fx(f: f64) -> f32 {
     ((f.clamp(F_LO, F_HI).ln() - F_LO.ln()) / (F_HI.ln() - F_LO.ln())) as f32
 }
-/// 0..1 (対数) → freq (Hz)。
+/// 0..1 (log) → freq (Hz).
 fn un_fx(t: f64) -> f64 {
     (F_LO.ln() + t.clamp(0., 1.) * (F_HI.ln() - F_LO.ln())).exp()
 }
 
-/// バンドごとの色 (グラフのハンドルと一覧で共通)。
+/// Per-band colors (shared by the graph handles and the list).
 fn band_color(i: usize) -> Hsla {
     const H: [f32; 10] = [0.58, 0.50, 0.40, 0.30, 0.15, 0.08, 0.0, 0.92, 0.80, 0.70];
     hsla(H[i % H.len()], 0.72, 0.64, 1.)
@@ -66,20 +66,20 @@ fn fmt_freq(f: u16) -> String {
 
 fn filter_name(f: PeqFilter) -> &'static str {
     match f {
-        PeqFilter::LowShelf => "ローシェルフ",
-        PeqFilter::Peak => "ピーキング",
-        PeqFilter::HighShelf => "ハイシェルフ",
-        PeqFilter::LowPass => "ローパス",
-        PeqFilter::HighPass => "ハイパス",
+        PeqFilter::LowShelf => "Low shelf",
+        PeqFilter::Peak => "Peaking",
+        PeqFilter::HighShelf => "High shelf",
+        PeqFilter::LowPass => "Low-pass",
+        PeqFilter::HighPass => "High-pass",
     }
 }
 
-/// ゲインを使わないフィルター (縦ドラッグを無視する)。
+/// Filters that do not use gain (vertical drag is ignored).
 fn gainless(f: PeqFilter) -> bool {
     matches!(f, PeqFilter::LowPass | PeqFilter::HighPass)
 }
 
-/// ドラッグ時の周波数の丸め (細かすぎる値を作らない)。
+/// Frequency rounding while dragging (avoids overly fine values).
 fn round_freq(f: f64) -> f64 {
     if f >= 1000. {
         (f / 10.).round() * 10.
@@ -88,7 +88,7 @@ fn round_freq(f: f64) -> f64 {
     }
 }
 
-/// 合成カーブの最大値 (dB)。クリップ判定・自動プリアンプ用。
+/// Maximum of the combined curve (dB). For clip detection and the auto preamp.
 fn peak_db(bands: &[PeqBand]) -> f64 {
     (0..=N_PTS)
         .map(|i| devhub_core::peq::response_db(bands, un_fx(i as f64 / N_PTS as f64)))
@@ -105,9 +105,9 @@ fn same_bands(a: &[PeqBand], b: &[PeqBand]) -> bool {
         })
 }
 
-// ---------------------------------------------------------------- プリセット
+// ---------------------------------------------------------------- Presets
 
-/// (フィルター, 周波数, Q, ゲイン) の列をバンド数に合わせて埋める。
+/// Fill a list of (filter, frequency, Q, gain) up to the band count.
 fn fill_bands(n: usize, list: &[(PeqFilter, u16, f32, f32)], pc: &PeqCaps) -> Vec<PeqBand> {
     let mut out: Vec<PeqBand> = list
         .iter()
@@ -123,7 +123,7 @@ fn fill_bands(n: usize, list: &[(PeqFilter, u16, f32, f32)], pc: &PeqCaps) -> Ve
             },
         })
         .collect();
-    // 空きバンドは既定の周波数のうち使われていないものを 0dB で置く。
+    // Empty bands get the default frequencies that are not yet used, at 0dB.
     let used: Vec<u16> = out.iter().map(|b| b.freq).collect();
     let mut spare = DEFAULT_FREQS
         .iter()
@@ -149,19 +149,19 @@ type PresetDef = (
     f32,
 );
 
-/// 内蔵プリセット: (名前, 説明, バンド列, プリアンプ)。
+/// Built-in presets: (name, description, band list, preamp).
 fn builtin_presets() -> Vec<PresetDef> {
     use PeqFilter::*;
     vec![
         (
-            "フラット",
-            "全バンド 0dB (既定の周波数)",
+            "Flat",
+            "All bands at 0dB (default frequencies)",
             DEFAULT_FREQS.iter().map(|&f| (Peak, f, 0.75, 0.)).collect(),
             0.,
         ),
         (
-            "DEF (公式)",
-            "公式アプリの DEF と同じ 8 バンド",
+            "DEF (official)",
+            "The same 8 bands as DEF in the official app",
             [50, 200, 500, 1000, 2500, 5000, 10000, 15000]
                 .iter()
                 .map(|&f| (Peak, f, 0.75, 0.))
@@ -169,14 +169,14 @@ fn builtin_presets() -> Vec<PresetDef> {
             0.,
         ),
         (
-            "低音ブースト",
-            "100Hz 以下を持ち上げる",
+            "Bass boost",
+            "Lifts everything below 100Hz",
             vec![(LowShelf, 105, 0.7, 6.), (Peak, 300, 1.0, -1.)],
             -6.,
         ),
         (
-            "V 字 (ドンシャリ)",
-            "低域と高域を上げ、中域を少し下げる",
+            "V-shape",
+            "Raises lows and highs, lowers mids slightly",
             vec![
                 (LowShelf, 100, 0.7, 4.),
                 (Peak, 1000, 0.8, -2.5),
@@ -185,8 +185,8 @@ fn builtin_presets() -> Vec<PresetDef> {
             -5.,
         ),
         (
-            "ボーカル",
-            "声の帯域を前に出す",
+            "Vocal",
+            "Brings the vocal range forward",
             vec![
                 (Peak, 200, 1.0, -2.),
                 (Peak, 1500, 1.0, 2.),
@@ -196,8 +196,8 @@ fn builtin_presets() -> Vec<PresetDef> {
             -3.,
         ),
         (
-            "FPS 足音",
-            "爆発音などの低域を抑え、足音の 2〜5kHz を強調",
+            "FPS footsteps",
+            "Reduces explosion-type lows, emphasizes footsteps at 2-5kHz",
             vec![
                 (LowShelf, 120, 0.7, -5.),
                 (Peak, 400, 1.0, -2.),
@@ -208,8 +208,8 @@ fn builtin_presets() -> Vec<PresetDef> {
             -4.,
         ),
         (
-            "ハーマン風",
-            "IEM 向けハーマンターゲットに近い傾き",
+            "Harman-style",
+            "Tilt close to the Harman target for IEMs",
             vec![
                 (LowShelf, 105, 0.7, 4.5),
                 (Peak, 3000, 1.4, 1.5),
@@ -218,18 +218,18 @@ fn builtin_presets() -> Vec<PresetDef> {
             -5.,
         ),
         (
-            "高域を抑える",
-            "刺さる高音を和らげる",
+            "Reduce treble",
+            "Softens harsh highs",
             vec![(HighShelf, 6000, 0.7, -3.), (Peak, 8000, 2.0, -2.)],
             0.,
         ),
     ]
 }
 
-// ---------------------------------------------------------------- AutoEQ (Equalizer APO) 形式
+// ---------------------------------------------------------------- AutoEQ (Equalizer APO) format
 
-/// `Preamp: -6.2 dB` / `Filter 1: ON PK Fc 105 Hz Gain -3.4 dB Q 0.70` を読む。
-/// 戻り値: (プリアンプ, フィルター列, 無視した行数)。
+/// Parses `Preamp: -6.2 dB` / `Filter 1: ON PK Fc 105 Hz Gain -3.4 dB Q 0.70`.
+/// Returns: (preamp, filter list, number of ignored lines).
 fn parse_apo(text: &str) -> (Option<f32>, Vec<(PeqFilter, u16, f32, f32)>, usize) {
     let mut preamp = None;
     let mut out = vec![];
@@ -313,7 +313,7 @@ fn to_apo(bands: &[PeqBand], preamp: Option<f32>) -> String {
     s
 }
 
-/// 選択バンドの現在値 (ドラッグ/ホイール中に古い値から計算しないため)。
+/// Current value of the selected band (so drag/wheel does not compute from a stale value).
 fn live_band(this: &Shell, i: usize) -> Option<PeqBand> {
     this.cur()
         .and_then(|s| s.state.as_ref())
@@ -342,7 +342,7 @@ impl Shell {
         body
     }
 
-    /// 現在のプリアンプ値と範囲 (eq_volume が無い機種は None)。
+    /// Current preamp value and range (None for models without eq_volume).
     fn preamp(caps: &Capabilities, state: &DeviceState) -> Option<(f32, f32, f32, f32)> {
         let sp = caps.setting(PREAMP_ID)?;
         let SettingKind::Slider { min, max, step, .. } = sp.kind.clone() else {
@@ -365,7 +365,7 @@ impl Shell {
         );
     }
 
-    /// プリセットを当てる (バンド + プリアンプ)。
+    /// Apply a preset (bands + preamp).
     fn apply_eq(&mut self, bands: Vec<PeqBand>, preamp: Option<f32>, cx: &mut Context<Self>) {
         let (caps, state) = match self.cur() {
             Some(s) => (s.caps.clone(), s.state.clone()),
@@ -384,7 +384,7 @@ impl Shell {
         }
     }
 
-    /// EQ カード全体。
+    /// The whole EQ card.
     fn peq_card(
         &mut self,
         caps: &Capabilities,
@@ -404,7 +404,7 @@ impl Shell {
             body = body.child(p);
         }
         ui::card_titled(
-            "パラメトリック EQ",
+            "Parametric EQ",
             "audio-lines",
             Some(trailing.into_any_element()),
         )
@@ -412,7 +412,7 @@ impl Shell {
         .into_any_element()
     }
 
-    // ------------------------------------------------------------ ツールバー (プリセット)
+    // ------------------------------------------------------------ Toolbar (presets)
 
     fn peq_toolbar(
         &mut self,
@@ -435,13 +435,13 @@ impl Shell {
             })
             .collect();
         let users: Vec<EqPreset> = self.prefs.eq_presets.clone();
-        // 今の EQ に一致するプリセット
+        // Preset matching the current EQ
         let cur_builtin = builtins.iter().position(|b| same_bands(&b.2, bands));
         let cur_user = users.iter().position(|u| same_bands(&u.bands, bands));
         let cur_label = match (cur_user, cur_builtin) {
             (Some(i), _) => users[i].name.clone(),
             (None, Some(i)) => builtins[i].0.clone(),
-            _ => "カスタム".to_string(),
+            _ => "Custom".to_string(),
         };
         let mut items: Vec<PopItem> = builtins
             .iter()
@@ -453,7 +453,7 @@ impl Shell {
             .collect();
         for (i, u) in users.iter().enumerate() {
             items.push(PopItem {
-                sub: Some("保存済み".into()),
+                sub: Some("Saved".into()),
                 icon: Some("bookmark"),
                 ..PopItem::new(u.name.clone(), cur_user == Some(i))
             });
@@ -468,7 +468,7 @@ impl Shell {
             cx,
             move |this, i, _, cx| {
                 if i < nb {
-                    // プリアンプはカーブのピークから自動 (クリップしない最大値)。
+                    // Preamp is automatic from the curve peak (the largest value that does not clip).
                     let (_, _, bands, _) = b2[i].clone();
                     let pre = -(peak_db(&bands).max(0.)).ceil() as f32;
                     this.apply_eq(bands, Some(pre), cx);
@@ -485,7 +485,7 @@ impl Shell {
         );
         let preamp_now = Self::preamp(caps, state).map(|p| p.0);
         let mut bar = div().flex().items_center().gap(px(6.)).child(pick);
-        // 保存
+        // Save
         {
             let cur = bands.to_vec();
             bar = bar.child(ui::icon_button(
@@ -495,7 +495,7 @@ impl Shell {
                 move |this, w, cx| {
                     let cur = cur.clone();
                     this.modal = Some(crate::app::Modal::Text {
-                        title: "EQ プリセットの名前".into(),
+                        title: "EQ preset name".into(),
                         on_ok: Rc::new(move |this, v, _, cx| {
                             let name = v.trim().to_string();
                             if name.is_empty() {
@@ -506,7 +506,7 @@ impl Shell {
                                 preamp: preamp_now,
                                 bands: cur.clone(),
                             };
-                            // 同名は上書き
+                            // Same name overwrites
                             if let Some(e) =
                                 this.prefs.eq_presets.iter_mut().find(|e| e.name == name)
                             {
@@ -515,17 +515,17 @@ impl Shell {
                                 this.prefs.eq_presets.push(p);
                             }
                             this.prefs.save();
-                            this.toast(format!("「{name}」を保存しました"), false, cx);
+                            this.toast(format!("Saved \"{name}\""), false, cx);
                             cx.notify();
                         }),
                     });
                     this.input("modal", "", "", w, cx);
-                    this.set_input("modal", "マイ EQ", w, cx);
+                    this.set_input("modal", "My EQ", w, cx);
                     cx.notify();
                 },
             ));
         }
-        // 削除 (保存したプリセットと一致しているとき)
+        // Delete (when it matches a saved preset)
         if let Some(i) = cur_user {
             let name = users[i].name.clone();
             bar = bar.child(ui::icon_button(
@@ -536,9 +536,9 @@ impl Shell {
                     let name = name.clone();
                     let n2 = name.clone();
                     this.confirm(
-                        "プリセットを削除",
-                        &format!("「{name}」を削除しますか? (デバイスの EQ は変わりません)"),
-                        "削除",
+                        "Delete preset",
+                        &format!("Delete \"{name}\"? (The device's EQ will not change)"),
+                        "Delete",
                         true,
                         Rc::new(move |this, _, cx| {
                             this.prefs.eq_presets.retain(|e| e.name != n2);
@@ -550,16 +550,16 @@ impl Shell {
                 },
             ));
         }
-        // AutoEQ 貼り付け
+        // Paste AutoEQ
         bar = bar.child(ui::button(
             "peq-paste",
-            "AutoEQ 貼り付け",
+            "Paste AutoEQ",
             Some("clipboard-paste"),
             Btn::Glass,
             cx,
             move |this, _, cx| this.peq_paste(cx),
         ));
-        // コピー
+        // Copy
         {
             let text = to_apo(bands, preamp_now);
             bar = bar.child(ui::icon_button(
@@ -568,17 +568,17 @@ impl Shell {
                 cx,
                 move |this, _, cx| {
                     cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
-                    this.toast("EQ を Equalizer APO 形式でコピーしました", false, cx);
+                    this.toast("Copied EQ in Equalizer APO format", false, cx);
                 },
             ));
         }
         bar
     }
 
-    /// クリップボードの AutoEQ / Equalizer APO テキストを当てる。
+    /// Apply AutoEQ / Equalizer APO text from the clipboard.
     fn peq_paste(&mut self, cx: &mut Context<Self>) {
         let Some(text) = cx.read_from_clipboard().and_then(|c| c.text()) else {
-            self.toast("クリップボードにテキストがありません", true, cx);
+            self.toast("No text on the clipboard", true, cx);
             return;
         };
         let Some(pc) = self
@@ -590,30 +590,26 @@ impl Shell {
         };
         let (preamp, list, skipped) = parse_apo(&text);
         if list.is_empty() {
-            self.toast(
-                "AutoEQ (ParametricEQ.txt) 形式の行が見つかりません",
-                true,
-                cx,
-            );
+            self.toast("No AutoEQ (ParametricEQ.txt) lines found", true, cx);
             return;
         }
         let n = pc.bands as usize;
         let over = list.len().saturating_sub(n);
         let bands = fill_bands(n, &list, &pc);
-        // プリアンプが無いテキストは、クリップしない値を自動で付ける。
+        // For text without a preamp, add a value that does not clip automatically.
         let pre = preamp.or_else(|| Some(-(peak_db(&bands).max(0.)).ceil() as f32));
         self.apply_eq(bands, pre, cx);
-        let mut msg = format!("{} バンドを読み込みました", list.len().min(n));
+        let mut msg = format!("Loaded {} bands", list.len().min(n));
         if over > 0 {
-            msg.push_str(&format!(" (バンド数を超えた {over} 個は無視)"));
+            msg.push_str(&format!(" ({over} over the band limit ignored)"));
         }
         if skipped > 0 {
-            msg.push_str(&format!(" · 未対応の行 {skipped}"));
+            msg.push_str(&format!(" · {skipped} unsupported lines"));
         }
         self.toast(msg, over > 0, cx);
     }
 
-    // ------------------------------------------------------------ グラフ
+    // ------------------------------------------------------------ Graph
 
     fn peq_graph(&mut self, pc: &PeqCaps, bands: &[PeqBand], cx: &mut Context<Self>) -> Div {
         let p = theme::pal();
@@ -656,7 +652,7 @@ impl Shell {
                 let (wd, h) = (f32::from(b.size.width), f32::from(b.size.height));
                 let y_at = |db: f32| px(h * (1. - ((db / spanf).clamp(-1., 1.) + 1.) * 0.5));
                 let x_i = |i: usize| px(wd * i as f32 / N_PTS as f32);
-                // 縦グリッド (1-2-5 系列)
+                // Vertical grid (1-2-5 series)
                 for f in [
                     30., 40., 50., 60., 70., 80., 90., 100., 200., 300., 400., 500., 600., 700.,
                     800., 900., 1000., 2000., 3000., 4000., 5000., 6000., 7000., 8000., 9000.,
@@ -680,7 +676,7 @@ impl Shell {
                         w.paint_path(path, if db == 0. { zero } else { grid });
                     }
                 }
-                // 選択バンド単体 (塗り + 線)
+                // Selected band alone (fill + line)
                 if !single.is_empty() {
                     let mut pf = PathBuilder::fill();
                     pf.move_to(b.origin + point(px(0.), y_at(0.)));
@@ -705,7 +701,7 @@ impl Shell {
                         w.paint_path(path, theme::alpha(sel_col, 0.7));
                     }
                 }
-                // 合成カーブ (薄い塗り + 太線)
+                // Combined curve (light fill + thick line)
                 let mut pf = PathBuilder::fill();
                 pf.move_to(b.origin + point(px(0.), y_at(0.)));
                 for (i, db) in total.iter().enumerate() {
@@ -733,7 +729,7 @@ impl Shell {
         .absolute()
         .inset_0();
 
-        // ハンドル (番号入りの丸)。div なので文字が描ける。
+        // Handles (numbered circles). They are divs, so text can be drawn.
         let mut plot = div()
             .id("peq-plot")
             .relative()
@@ -747,7 +743,7 @@ impl Shell {
             .cursor(CursorStyle::Crosshair)
             .child(cv)
             .child(motion::track("peq-graph"));
-        // 選択中は最後に描いて最前面へ
+        // Draw the selected one last so it is on top
         let mut order: Vec<usize> = (0..bands.len()).filter(|i| *i != sel).collect();
         if sel < bands.len() {
             order.push(sel);
@@ -784,7 +780,7 @@ impl Shell {
                     .child(format!("{}", i + 1)),
             );
         }
-        // ホバー中のカーソル読み取り
+        // Cursor readout while hovering
         if let Some(r) = motion::rect("peq-graph") {
             let [mx, my] = motion::pointer();
             if self.drag.is_none()
@@ -820,7 +816,7 @@ impl Shell {
                     );
             }
         }
-        // マウス: 最寄りのハンドルを掴んで 2D ドラッグ (差分で動かすのでクリックだけでは動かない)
+        // Mouse: grab the nearest handle and 2D-drag (moves by deltas, so a plain click does not move it)
         let bands_v: Vec<PeqBand> = bands.to_vec();
         let pc2 = pc.clone();
         plot = plot
@@ -836,7 +832,7 @@ impl Shell {
                     let (mx, my) = (f32::from(e.position.x), f32::from(e.position.y));
                     let tx0 = ((mx - r[0]) / r[2].max(1.)).clamp(0., 1.);
                     let ty0 = 1. - ((my - r[1]) / r[3].max(1.)).clamp(0., 1.);
-                    // ピクセル距離で最寄り (ゲインレス種別は 0dB 上にいるとみなす)
+                    // Nearest by pixel distance (gainless types are treated as sitting on 0dB)
                     let near = bands_v
                         .iter()
                         .enumerate()
@@ -849,7 +845,7 @@ impl Shell {
                             let bx = fx(b.freq as f64) * r[2];
                             let by = (1. - ((g / span).clamp(-1., 1.) + 1.) * 0.5) as f32 * r[3];
                             let (dx, dy) = (bx - (mx - r[0]), by - (my - r[1]));
-                            // 選択中のバンドを少し優先 (重なったとき)
+                            // Slightly favor the selected band (when they overlap)
                             let bias = if i == this.peq_sel { 0.6 } else { 1. };
                             (i, (dx * dx + dy * dy) * bias)
                         })
@@ -879,7 +875,7 @@ impl Shell {
                     cx.notify();
                 }),
             );
-        // ホイール: 選択バンドの Q
+        // Wheel: Q of the selected band
         {
             let (qmin, qmax) = (pc.q_min, pc.q_max);
             plot = plot.on_scroll(cx.listener(move |this, e: &ScrollEvent, _, cx| {
@@ -903,7 +899,7 @@ impl Shell {
             }));
         }
 
-        // 軸ラベル
+        // Axis labels
         let mut ylab = div().relative().w(px(30.)).h(px(GRAPH_H)).flex_none();
         for db in &db_lines {
             let ty = 1. - ((*db as f64 / span).clamp(-1., 1.) + 1.) * 0.5;
@@ -964,11 +960,11 @@ impl Shell {
                     .pt(px(2.))
                     .text_size(px(11.))
                     .text_color(p.faint)
-                    .child("ハンドルをドラッグで周波数とゲイン · ホイールで Q (帯域幅)"),
+                    .child("Drag a handle for frequency and gain · wheel for Q (bandwidth)"),
             )
     }
 
-    // ------------------------------------------------------------ プリアンプ
+    // ------------------------------------------------------------ Preamp
 
     fn peq_preamp_row(
         &mut self,
@@ -995,9 +991,9 @@ impl Shell {
             Rc::new(|this, nv, cx| this.set_preamp(nv, cx)),
         );
         let status = if headroom > 0.05 {
-            ui::chip(format!("クリップの可能性 +{headroom:.1}dB"), p.warn)
+            ui::chip(format!("Possible clipping +{headroom:.1}dB"), p.warn)
         } else {
-            ui::chip(format!("余裕 {:.1}dB", -headroom), p.ok)
+            ui::chip(format!("Headroom {:.1}dB", -headroom), p.ok)
         };
         let mut right = div()
             .flex()
@@ -1023,9 +1019,9 @@ impl Shell {
             right = right.child(ui::button(
                 "peq-auto-pre",
                 &if auto.abs() < 0.5 {
-                    "自動 (0dB)".to_string()
+                    "Auto (0dB)".to_string()
                 } else {
-                    format!("自動 ({auto:+.0}dB)")
+                    format!("Auto ({auto:+.0}dB)")
                 },
                 Some("wand-sparkles"),
                 Btn::Glass,
@@ -1034,13 +1030,13 @@ impl Shell {
             ));
         }
         Some(ui::row_first(
-            "プリアンプ (EQ ボリューム)",
-            Some("ブーストした分だけ下げると音割れしません"),
+            "Preamp (EQ volume)",
+            Some("Lower it by the amount you boost to avoid clipping"),
             right,
         ))
     }
 
-    // ------------------------------------------------------------ バンド一覧
+    // ------------------------------------------------------------ Band list
 
     fn peq_strip(&mut self, bands: &[PeqBand], cx: &mut Context<Self>) -> Div {
         let p = theme::pal();
@@ -1123,7 +1119,7 @@ impl Shell {
         strip
     }
 
-    // ------------------------------------------------------------ 選択バンドの編集
+    // ------------------------------------------------------------ Selected band editor
 
     fn peq_editor(
         &mut self,
@@ -1136,7 +1132,7 @@ impl Shell {
         let sel = self.peq_sel;
         let n = bands.len().max(1);
         let Some(band) = bands.get(sel).copied() else {
-            return div().child(ui::faint("バンドを読み取れません"));
+            return div().child(ui::faint("Cannot read the band"));
         };
         let send = Rc::new(
             move |this: &mut Shell, nb: PeqBand, cx: &mut Context<Shell>| {
@@ -1150,7 +1146,7 @@ impl Shell {
             },
         );
         let col = band_color(sel);
-        // 1 行目: バンド切替 + タイプ + リセット
+        // Row 1: band switch + type + reset
         let fl: Vec<String> = pc.filters.iter().map(|f| f.label().to_string()).collect();
         let cur = pc
             .filters
@@ -1184,7 +1180,7 @@ impl Shell {
                         div()
                             .text_size(px(14.))
                             .font_weight(FontWeight::SEMIBOLD)
-                            .child(format!("バンド {}", sel + 1)),
+                            .child(format!("Band {}", sel + 1)),
                     )
                     .child(ui::faint(filter_name(band.filter))),
             )
@@ -1222,7 +1218,7 @@ impl Shell {
                 },
             ));
 
-        // 2 行目: 周波数 / Q / ゲイン を 3 列で
+        // Row 2: frequency / Q / gain in 3 columns
         let field =
             |label: &str, hint: Option<&str>, input: Entity<InputState>, slider: Stateful<Div>| {
                 let mut lab = div().flex().flex_col().child(
@@ -1367,21 +1363,21 @@ impl Shell {
             },
         );
         let q_hint = if band.filter == PeqFilter::LowShelf {
-            "この機種のローシェルフは Q を使いません"
+            "This model's low shelf does not use Q"
         } else {
-            "大きいほど狭い帯域"
+            "Higher = narrower band"
         };
         let g_hint = if gainless(band.filter) {
-            Some("ローパス/ハイパスはゲインを使いません")
+            Some("Low-pass/high-pass do not use gain")
         } else {
             None
         };
         let f_q = field("Q", Some(q_hint), inp_q, sl_q);
-        let f_g = field("ゲイン", g_hint, inp_g, sl_g);
+        let f_g = field("Gain", g_hint, inp_g, sl_g);
         let row = div()
             .flex()
             .gap(px(10.))
-            .child(field("周波数", Some("20Hz〜20kHz"), inp_f, sl_f))
+            .child(field("Frequency", Some("20Hz-20kHz"), inp_f, sl_f))
             .child(if band.filter == PeqFilter::LowShelf {
                 f_q.opacity(0.55)
             } else {

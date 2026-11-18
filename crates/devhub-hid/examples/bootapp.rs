@@ -1,5 +1,5 @@
-//! ブートローダ滞留の復旧 — [8,4] BootToApp を送る。
-//! (grpsweep の [8,1] AppToBoot で実機がブートローダへ遷移した際の救出用)
+//! Recovery from being stuck in the bootloader — sends [8,4] BootToApp.
+//! (For rescue when the real device entered the bootloader via grpsweep's [8,1] AppToBoot)
 use hidapi::HidApi;
 use std::time::{Duration, Instant};
 

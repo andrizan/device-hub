@@ -1,4 +1,4 @@
-//! DD 送信直後にセルの isCustom フラグを読み戻す。
+//! Reads back the cell isCustom flag right after a DD send.
 use devhub_core::{DeviceKind, Rgb};
 use std::collections::BTreeMap;
 fn main() {

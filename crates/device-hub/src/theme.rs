@@ -1,7 +1,7 @@
-//! デザイントークン (Liquid Glass)。
+//! Design tokens (Liquid Glass).
 //!
-//! 色はすべてここから取る。明暗・アクセント・ガラスの有無はプロセス全体の
-//! 設定 (atomics) で、`pal()` が今の配色を返す。
+//! All colors are taken from here. Light/dark, accent and glass on/off are process-wide
+//! settings (atomics), and `pal()` returns the current palette.
 
 use gpui_kit::*;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
@@ -36,32 +36,32 @@ pub fn accent_index() -> u8 {
     ACCENT.load(Ordering::Relaxed)
 }
 
-/// アクセント候補 (名前, 色)。
+/// Accent candidates (name, color).
 pub const ACCENTS: &[(&str, u32)] = &[
-    ("アイス", 0x4cb4ff),
-    ("ミント", 0x34d6a8),
-    ("ライラック", 0xa98bff),
-    ("サンセット", 0xff8a5c),
-    ("ローズ", 0xff5c8a),
-    ("ゴールド", 0xf5c24c),
+    ("Ice", 0x4cb4ff),
+    ("Mint", 0x34d6a8),
+    ("Lilac", 0xa98bff),
+    ("Sunset", 0xff8a5c),
+    ("Rose", 0xff5c8a),
+    ("Gold", 0xf5c24c),
 ];
 
 static FONT_SEL: AtomicU8 = AtomicU8::new(0);
 
-/// フォント選択肢: (id, 表示名, 主ファミリ, 日本語フォールバック)。
-/// "Geist"/"IBM Plex Sans JP"/"Zen Maru Gothic" は fonts/ に同梱して
-/// `install_fonts` で登録する。残りはシステムフォント前提だが、
-/// 未インストールでもフォールバックで日本語が豆腐にならない。
+/// Font options: (id, display name, primary family, Japanese fallbacks).
+/// "Geist"/"IBM Plex Sans JP"/"Zen Maru Gothic" are bundled in fonts/ and registered
+/// with `install_fonts`. The rest assume system fonts, but
+/// even when not installed, the fallbacks keep Japanese text from turning into tofu.
 pub const FONT_OPTIONS: &[(&str, &str, &str, &[&str])] = &[
     (
         "modern",
-        "モダン (Geist + IBM Plex Sans JP)",
+        "Modern (Geist + IBM Plex Sans JP)",
         "Geist",
         &["IBM Plex Sans JP", "Yu Gothic UI"],
     ),
     (
         "rounded",
-        "ラウンド (Geist + Zen Maru Gothic)",
+        "Rounded (Geist + Zen Maru Gothic)",
         "Geist",
         &["Zen Maru Gothic", "IBM Plex Sans JP", "Yu Gothic UI"],
     ),
@@ -93,7 +93,7 @@ pub const FONT_OPTIONS: &[(&str, &str, &str, &[&str])] = &[
     ("meiryo", "Meiryo UI", "Meiryo UI", &["Yu Gothic UI"]),
 ];
 
-/// 選択中のフォント (prefs.font の index)。範囲外は 0 (modern)。
+/// Selected font (index of prefs.font). Out of range falls back to 0 (modern).
 pub fn set_font_id(id: &str) {
     let i = FONT_OPTIONS.iter().position(|o| o.0 == id).unwrap_or(0);
     FONT_SEL.store(i as u8, Ordering::Relaxed);
@@ -116,26 +116,26 @@ fn opt_font(i: usize) -> Font {
     f
 }
 
-/// UI 本文フォント (選択中のもの)。
+/// UI body font (the selected one).
 pub fn ui_font() -> Font {
     opt_font(font_index())
 }
 
-/// 見出し・大きな数字用。tnum (表形式数字) を有効化する。
+/// For headings and large numbers. Enables tnum (tabular figures).
 pub fn display_font() -> Font {
     let mut f = ui_font();
     f.features = FontFeatures(std::sync::Arc::new(vec![("tnum".into(), 1)]));
     f
 }
 
-/// Zen Maru を登録済みか (選択されるまで登録しない)。
+/// Whether Zen Maru is registered (not registered until selected).
 static FONTS_ZEN: AtomicBool = AtomicBool::new(false);
 
-/// 同梱フォントをテキストシステムへ登録。
-/// Geist + IBM Plex Sans JP は常時 (ほぼ全選択肢の本文/フォールバック)。
-/// Zen Maru Gothic (7.6MB) は rounded/zenmaru 選択時だけ登録する —
-/// 使わないのに DirectWrite 側にも常駐させないため。
-/// フォント選択の変更時にも呼ぶ (`set_font_id` の後)。
+/// Registers the bundled fonts with the text system.
+/// Geist + IBM Plex Sans JP are always registered (body/fallback for almost every option).
+/// Zen Maru Gothic (7.6MB) is registered only when rounded/zenmaru is selected —
+/// so it does not stay resident on the DirectWrite side when unused.
+/// Also called when the font selection changes (after `set_font_id`).
 pub fn install_fonts(cx: &App) {
     use std::borrow::Cow;
     let mut raw: Vec<&'static [u8]> = Vec::new();
@@ -158,30 +158,30 @@ pub fn install_fonts(cx: &App) {
     }
     let fonts: Vec<Cow<'static, [u8]>> = raw.into_iter().map(Cow::Borrowed).collect();
     if let Err(e) = cx.text_system().add_fonts(fonts) {
-        eprintln!("[devhub] フォントの登録に失敗: {e}");
+        eprintln!("[devhub] failed to register fonts: {e}");
     }
 }
 
-/// Geist/IBM Plex を登録済みか。
+/// Whether Geist/IBM Plex are registered.
 static FONTS_GEIST: AtomicBool = AtomicBool::new(false);
 
-/// 等幅 (生データ・コード表示用のシステムフォント)。
+/// Monospace (system font for raw data and code display).
 pub const FONT_MONO: &str = "Cascadia Mono";
 
 pub const SIDEBAR_W: f32 = 248.;
 pub const R_CARD: f32 = 22.;
 pub const R_CTRL: f32 = 12.;
 pub const GAP: f32 = 14.;
-/// ページの左右余白。
+/// Left/right page margin.
 pub const PAGE_PAD: f32 = 10.;
-/// ページ上部 (タイトルバーの下)。
+/// Top of the page (below the title bar).
 pub const PAGE_TOP: f32 = 36.;
-/// ページ下部の余白。
+/// Bottom page margin.
 pub const PAGE_BOT: f32 = 48.;
-/// ページ内のセクション間隔。
+/// Gap between sections inside a page.
 pub const PAGE_GAP: f32 = 18.;
 
-/// 16 進 RGB → Hsla (alpha 付き)。
+/// Hex RGB → Hsla (with alpha).
 pub fn hex(v: u32, a: f32) -> Hsla {
     let mut c: Hsla = rgb(v).into();
     c.a = a;
@@ -192,44 +192,44 @@ pub fn rgb_of(c: devhub_core::Rgb) -> Hsla {
     rgb(c.to_hex()).into()
 }
 
-/// 配色。
+/// Palette.
 #[derive(Clone, Copy)]
 pub struct Pal {
     pub light: bool,
-    /// 本文。
+    /// Body text.
     pub fg: Hsla,
-    /// 補助テキスト。
+    /// Secondary text.
     pub sub: Hsla,
-    /// さらに弱いテキスト (プレースホルダ・単位)。
+    /// Even fainter text (placeholders, units).
     pub faint: Hsla,
     pub accent: Hsla,
     pub accent_soft: Hsla,
-    /// アクセント上の文字。
+    /// Text on the accent.
     pub on_accent: Hsla,
     pub danger: Hsla,
     pub ok: Hsla,
     pub warn: Hsla,
-    /// ガラス面の塗り (上 → 下)。
+    /// Glass surface fill (top → bottom).
     pub glass_top: Hsla,
     pub glass_bot: Hsla,
-    /// ガラスを切ったときの不透明な面。
+    /// Opaque surface used when glass is turned off.
     pub solid: Hsla,
-    /// 細い縁。
+    /// Thin edge.
     pub edge: Hsla,
-    /// 上端の光。
+    /// Top-edge highlight.
     pub rim: Hsla,
-    /// 操作部の面 (カードの上に載るもの)。
+    /// Surface of controls (things placed on a card).
     pub ctrl: Hsla,
     pub ctrl_hover: Hsla,
-    /// トラック (スライダー・トグルのオフ)。
+    /// Track (slider, toggle off).
     pub track: Hsla,
-    /// 区切り線。
+    /// Divider line.
     pub hair: Hsla,
-    /// モーダルの背後。
+    /// Behind a modal.
     pub scrim: Hsla,
-    /// 影。
+    /// Shadow.
     pub shadow: Hsla,
-    /// キーキャップ。
+    /// Key cap.
     pub key: Hsla,
     pub key_edge: Hsla,
 }
@@ -293,7 +293,7 @@ pub fn pal() -> Pal {
     }
 }
 
-/// アクセントを少し明るく/暗くした派生色 (グラデーション用)。
+/// Derived color with the accent slightly brightened/darkened (for gradients).
 pub fn accent_grad() -> Background {
     let p = pal();
     let mut a2 = p.accent;
@@ -306,7 +306,7 @@ pub fn accent_grad() -> Background {
     )
 }
 
-/// 2 色の線形補間。
+/// Linear interpolation of two colors.
 pub fn mix(a: Hsla, b: Hsla, t: f32) -> Hsla {
     let a: Rgba = a.into();
     let b: Rgba = b.into();

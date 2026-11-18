@@ -5339,10 +5339,10 @@ impl Window {
         self.paint_image_impl(bounds, image_bounds, corner_radii, data, frame_index, grayscale, false)
     }
 
-    /// DEVHUB: `paint_image` と同じだが、拡大を**最近傍 (POINT) サンプラ**で行う。
+    /// DEVHUB: Same as `paint_image`, but the magnification is done with a **nearest-neighbor (POINT) sampler**.
     ///
-    /// 低解像度の絵 (ピクセル風景) を窓いっぱいに拡大するときに使う。線形サンプラだと
-    /// ドットの境目がにじむため、この面だけ POINT で描く。他の画像は従来どおり線形。
+    /// Used when a low-resolution picture (a pixel-art landscape) is magnified to fill the window. A linear sampler
+    /// blurs the dot edges, so only this surface is drawn with POINT. Other images stay linear as before.
     pub fn paint_image_nearest(
         &mut self,
         bounds: Bounds<Pixels>,
@@ -5444,8 +5444,8 @@ impl Window {
 
         self.next_frame.scene.insert_primitive(PolychromeSprite {
             order: 0,
-            // DEVHUB: `pad` は整列用でシェーダは読まない。ここを**最近傍サンプラの印**に使う
-            // (インスタンスの並びを変えずに済むので、他の画像とシェーダに影響しない)。
+            // DEVHUB: `pad` is for alignment and the shader does not read it. Here it is used as the **nearest-neighbor sampler marker**
+            // (the instance layout stays unchanged, so other images and the shader are not affected).
             pad: u32::from(nearest),
             grayscale: grayscale.into(),
             bounds: visible_bounds_snapped,

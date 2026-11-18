@@ -1,51 +1,48 @@
-//! 実行ファイルへアイコンを埋め込む (build script から `#[path]` で読み込む)。
+//! Embeds the icon into the executable (loaded from the build script via `#[path]`).
 //!
-//! GPUI 版の実行ファイルは、そのままだと `.rsrc` を持たない。すると
-//! エクスプローラー・タスクバー・Alt+Tab・スタートメニューのショートカットが
-//! すべて Windows の既定アイコンになる。窓のアイコンも同じ理由で欠ける
-//! (`gpui-pre-windows` の `load_icon` は自分自身のリソース ID 1 を `LoadImageW` で読むので、
-//! リソースが無いと `HICON::default()` に落ちて、タイトルバーとタスクバーが空になる)。
+//! The GPUI executable has no `.rsrc` as it is. Then
+//! Explorer, the taskbar, Alt+Tab and the Start menu shortcut
+//! all fall back to the default Windows icon. The window icon is missing for the same reason
+//! (`gpui-pre-windows`'s `load_icon` loads its own resource ID 1 with `LoadImageW`, so
+//! without the resource it falls back to `HICON::default()` and the title bar and taskbar stay empty).
 //!
-//! そこで `rc.exe` を呼んで `assets/icon.ico` を ID 1 のアイコンにした `.res` を作り、
-//! リンカへ渡す。Tauri 版 (`desktop/src-tauri/`) が埋めているのと同じ絵を使う。
+//! So we call `rc.exe` to build a `.res` that makes `assets/icon.ico` the icon with ID 1, and
+//! pass it to the linker. It uses the same artwork the Tauri version (`desktop/src-tauri/`) embeds.
 //!
-//! `rc.exe` は Windows SDK にしか無い。`RC` 環境変数 → `PATH` → SDK の既定の場所、の順に探し、
-//! 最後まで見つからなければ警告だけ出して続ける (アイコンは付かないがビルドは通る)。
+//! `rc.exe` only ships with the Windows SDK. It is searched for in this order: the `RC` environment variable, `PATH`, the SDK's default location.
+//! If it is not found, only a warning is printed and the build continues (no icon is attached, but the build still passes).
 
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// `icon` はパッケージ直下からの相対パス (例: `assets/icon.ico`)。
+/// `icon` is a path relative to the package root (e.g. `assets/icon.ico`).
 pub fn embed(icon: &str) {
     println!("cargo:rerun-if-changed={icon}");
     println!("cargo:rerun-if-env-changed=RC");
-    // Windows 以外に出すことは今のところ無いが、`rc.exe` も無いので素直に諦める。
+    // Nothing emits for non-Windows targets at the moment, and there is no `rc.exe` there either, so we simply give up.
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
         return;
     }
     let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     let source = manifest.join(icon);
     if !source.is_file() {
-        println!(
-            "cargo:warning=アイコンが見つかりません: {}",
-            source.display()
-        );
+        println!("cargo:warning=icon not found: {}", source.display());
         return;
     }
     let Some(rc) = find_rc() else {
-        println!("cargo:warning=rc.exe (Windows SDK) が見つかりません。実行ファイルにアイコンは付きません。");
+        println!("cargo:warning=rc.exe (Windows SDK) not found. The executable will have no icon.");
         return;
     };
     let out = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
-    // `.rc` は ASCII で書く。アイコンの在り処は `/i` (コマンドライン経由) で渡すので、
-    // 日本語を含むパス (この作業ディレクトリ) でも rc.exe の文字コードに左右されない。
+    // Write the `.rc` in ASCII. The icon location is passed with `/i` (via the command line), so
+    // paths that contain Japanese characters (this working directory) do not depend on rc.exe's character encoding.
     let script = out.join("app-icon.rc");
     let resource = out.join("app-icon.res");
     let name = source.file_name().expect("icon file name");
-    // バージョン情報 (VERSIONINFO) も同じ .rc で埋め込む。
-    // FileDescription がタスクマネージャー/ファイルプロパティの表示名になる。
+    // The version info (VERSIONINFO) is embedded through the same .rc.
+    // FileDescription becomes the display name in Task Manager and file properties.
     let version = env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.0.0".into());
     let mut vparts = version.split('.').filter_map(|p| p.parse::<u32>().ok());
     let fv = format!(
@@ -104,19 +101,19 @@ pub fn embed(icon: &str) {
         .status();
     match status {
         Ok(status) if status.success() => {
-            // リンカへの入力として渡す。`link.exe` は `.res` をそのまま飲み込む。
+            // Pass it to the linker as an input. `link.exe` accepts a `.res` as is.
             println!("cargo:rustc-link-arg-bins={}", resource.display());
         }
         Ok(status) => panic!(
-            "rc.exe が失敗しました (終了コード {:?}): {}",
+            "rc.exe failed (exit code {:?}): {}",
             status.code(),
             rc.display()
         ),
-        Err(error) => panic!("rc.exe を実行できません ({}): {error}", rc.display()),
+        Err(error) => panic!("cannot run rc.exe ({}): {error}", rc.display()),
     }
 }
 
-/// `RC` → `PATH` → Windows SDK の既定の場所 (`%ProgramFiles(x86)%\Windows Kits\10\bin\<版>\<arch>`)。
+/// `RC` → `PATH` → the Windows SDK default location (`%ProgramFiles(x86)%\Windows Kits\10\bin\<version>\<arch>`).
 fn find_rc() -> Option<PathBuf> {
     if let Some(explicit) = env::var_os("RC").map(PathBuf::from) {
         if explicit.is_file() {
@@ -131,7 +128,7 @@ fn find_rc() -> Option<PathBuf> {
             return Some(found);
         }
     }
-    // ビルド環境によっては `WindowsSdkVerBinPath` が直接刺さっている (VS の開発者プロンプト)。
+    // Depending on the build environment, `WindowsSdkVerBinPath` is set directly (VS developer prompt).
     if let Some(bin) = env::var_os("WindowsSdkVerBinPath").map(PathBuf::from) {
         for arch in arch_names() {
             let candidate = bin.join(arch).join("rc.exe");
@@ -154,7 +151,7 @@ fn find_rc() -> Option<PathBuf> {
             .map(|e| e.path())
             .filter(|p| p.is_dir())
             .collect();
-        // SDK は複数入っていることがある。版が新しいほうを採る (文字列比較だと 10.0.9 が 10.0.26 より後ろに来る)。
+        // Several SDKs may be installed. Pick the newest version (with string comparison 10.0.9 would sort after 10.0.26).
         versions.sort_by_key(|a| version_key(a));
         for version in versions.into_iter().rev() {
             for arch in arch_names() {
@@ -168,7 +165,7 @@ fn find_rc() -> Option<PathBuf> {
     None
 }
 
-/// 目標の CPU に対応する SDK の bin の名前。x64 を先に見る (x64 の rc.exe はどの目標でも使える)。
+/// SDK bin directory names for the target CPU. Look at x64 first (the x64 rc.exe works for any target).
 fn arch_names() -> &'static [&'static str] {
     match env::var("CARGO_CFG_TARGET_ARCH").as_deref() {
         Ok("aarch64") => &["arm64", "x64"],

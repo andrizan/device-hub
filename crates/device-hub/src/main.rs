@@ -1,18 +1,18 @@
-//! Device HUB エントリポイント。
+//! Device HUB entry point.
 //!
-//! 参照実装 (`src/main.rs`) と同じ構成:
+//! Same structure as the reference implementation (`src/main.rs`):
 //!   gpui_kit::application().with_assets(AllAssets) → gpui_kit::init →
-//!   TitleBar::window_options → gpui_kit::open_window → Shell。
+//!   TitleBar::window_options → gpui_kit::open_window → Shell.
 //!
-//! 環境変数:
-//!   DEVHUB_DEMO=1  常にデモデバイス
-//!   DEVHUB_FAST=1  GPU ガラスを切る (フォールバック確認)
+//! Environment variables:
+//!   DEVHUB_DEMO=1  always use the demo device
+//!   DEVHUB_FAST=1  turn off GPU glass (to check the fallback)
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-// mimalloc: Windows の既定ヒープは free 済み領域を OS に返さず、
-// 長時間稼働でワーキングセットが膨らむ。mimalloc は未使用領域を
-// 解放し、断片化も抑える (Zed も同じ構成)。
+// mimalloc: the default Windows heap does not return freed regions to the OS,
+// so the working set grows over long runs. mimalloc releases unused
+// regions and also limits fragmentation (Zed uses the same setup).
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
@@ -22,12 +22,12 @@ use gpui_kit::component::{Theme, ThemeMode, TitleBar};
 use gpui_kit::*;
 
 fn main() {
-    device_hub::rawinput::start(); // 実測ポーリングレート計測 (Raw Input)
+    device_hub::rawinput::start(); // measure the real polling rate (Raw Input)
     gpui_kit::application()
         .with_assets(gpui_kit::assets::AllAssets)
         .run(|cx| {
             gpui_kit::init(cx);
-            // フォント登録は選択の後 — 使う書体だけ載せて常駐メモリを削る。
+            // Register fonts after the selection — load only the typeface in use to cut resident memory.
             let prefs = Prefs::load();
             theme::set_font_id(&prefs.font);
             theme::install_fonts(cx);
@@ -51,10 +51,10 @@ fn main() {
                 cx,
             )));
             options.window_min_size = Some(size(px(1040.), px(640.)));
-            // 背面に回ったら描画を間引く (ゲームの邪魔をしない)。
+            // When sent to the background, throttle drawing (so as not to disturb the game).
             options.inactive_frame_interval = Some(std::time::Duration::from_millis(250));
             options.app_id = Some("devicehub".into());
-            // 窓キャプション — タスクマネージャーと Alt+Tab の表示名になる。
+            // Window caption — becomes the display name in Task Manager and Alt+Tab.
             if let Some(tb) = options.titlebar.as_mut() {
                 tb.title = Some("Device HUB".into());
             }

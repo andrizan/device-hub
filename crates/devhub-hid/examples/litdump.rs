@@ -1,4 +1,4 @@
-//! 照明状態ダンプ — read() 経由で LightingState + caps を出す。
+//! Lighting state dump — outputs LightingState + caps via read().
 fn main() {
     let hub = match devhub_hid::connect() {
         Ok(h) => h,

@@ -13,7 +13,7 @@ public class W {
 $p = Get-Process device-hub -ErrorAction Stop | Where-Object {$_.MainWindowHandle -ne 0} | Select-Object -First 1
 $h = $p.MainWindowHandle
 [W]::ShowWindow($h, 9) | Out-Null
-# 前面に出す (TOPMOST 化 → 撮影後に戻す)。SetForegroundWindow は背面からは効かない。
+# Bring to the front (make it TOPMOST, then restore after the capture). SetForegroundWindow does not work from the background.
 $SWP = 0x0040 -bor 0x0002 -bor 0x0001  # SHOWWINDOW|NOMOVE|NOSIZE
 [W]::SetWindowPos($h, [IntPtr](-1), 0, 0, 0, 0, $SWP) | Out-Null
 [W]::SetForegroundWindow($h) | Out-Null
@@ -27,5 +27,5 @@ $g.CopyFromScreen($r.Left, $r.Top, 0, 0, (New-Object System.Drawing.Size $w, $ht
 $g.Dispose()
 $bmp.Save($args[0], [System.Drawing.Imaging.ImageFormat]::Png)
 $bmp.Dispose()
-[W]::SetWindowPos($h, [IntPtr](-2), 0, 0, 0, 0, $SWP) | Out-Null  # NOTOPMOST に戻す
+[W]::SetWindowPos($h, [IntPtr](-2), 0, 0, 0, 0, $SWP) | Out-Null  # back to NOTOPMOST
 Write-Output "saved $w x $ht -> $($args[0])"

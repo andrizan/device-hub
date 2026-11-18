@@ -1,7 +1,7 @@
-//! SU66 ライティング・パラメータ掃引 — 実機に個別パラメータ変更を順に書き込み、
-//! 各ステップの開始時刻をミリ秒で標準出力する。連続撮影したカメラ映像と
-//! タイムスタンプで対応付けて、ゾーン/パレット/輝度/方向/速度/色補正の
-//! 実機挙動を分類する。終了時に元の LightingState を復元する。
+//! SU66 lighting-parameter sweep — writes individual parameter changes to the real device in order and
+//! prints each step's start time in milliseconds to stdout. By matching it against continuously filmed camera footage
+//! via timestamps, the real-device behavior of zone/palette/brightness/direction/speed/color correction
+//! is classified. Restores the original LightingState on exit.
 use devhub_core::{Change, DeviceKind, LightingState};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -59,7 +59,7 @@ fn main() {
     let mut s = base.clone();
     s.on = true;
     s.zone_on = vec![true, true];
-    // 各スロット本来の色を palette[sel] に合わせる (F4: sel 変更で slot が上書きされるのを回避)
+    // Match each slot's own color to palette[sel] (F4: avoids the slot being overwritten when sel changes)
     let keep_slot = |s: &mut LightingState| {
         let sel = s.palette_sel as usize;
         if let Some(c) = s.palette.get(sel).cloned() {
@@ -67,7 +67,7 @@ fn main() {
         }
     };
 
-    // ---- A. ゾーン検証 (effect=8 均一系, sel 維持) ----
+    // ---- A. Zone check (effect=8 uniform, sel kept) ----
     s.effect = 8;
     s.brightness = 80;
     s.speed = 80;
@@ -85,7 +85,7 @@ fn main() {
     }
     s.zone_on = vec![true, true];
 
-    // ---- B. パレット sel 0..7 (effect=8) ----
+    // ---- B. Palette sel 0..7 (effect=8) ----
     for sel in 0..8u8 {
         let mut p = s.clone();
         p.palette_sel = sel;
@@ -95,7 +95,7 @@ fn main() {
     s.palette_sel = 0;
     keep_slot(&mut s);
 
-    // ---- C. effect 0 の色応答 (sel 0 vs sel 5) ----
+    // ---- C. Color response of effect 0 (sel 0 vs sel 5) ----
     for sel in [0u8, 5] {
         let mut p = s.clone();
         p.effect = 0;
@@ -104,7 +104,7 @@ fn main() {
         step(&d, &format!("m0pal{sel}"), &p);
     }
 
-    // ---- D. 輝度掃引 (effect=8) ----
+    // ---- D. Brightness sweep (effect=8) ----
     for bri in [0u8, 20, 40, 60, 100] {
         let mut p = s.clone();
         p.brightness = bri;
@@ -112,7 +112,7 @@ fn main() {
     }
     s.brightness = 80;
 
-    // ---- E. 方向 (effect=11 sine) ----
+    // ---- E. Direction (effect=11 sine) ----
     for dir in [0u8, 1] {
         let mut p = s.clone();
         p.effect = 11;
@@ -121,7 +121,7 @@ fn main() {
     }
     s.direction = 0;
 
-    // ---- F. 速度 (effect=10 shift) ----
+    // ---- F. Speed (effect=10 shift) ----
     for spd in [5u8, 50, 100] {
         let mut p = s.clone();
         p.effect = 10;
@@ -130,7 +130,7 @@ fn main() {
     }
     s.speed = 80;
 
-    // ---- G. 色補正 (effect=8) ----
+    // ---- G. Color correction (effect=8) ----
     for (label, cc) in [
         ("cc_red", [100u8, 0, 0]),
         ("cc_grn", [0, 100, 0]),

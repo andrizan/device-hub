@@ -1,9 +1,9 @@
-# フロントエンドへの要望 (バックエンド → フロント)
+# Requests to the frontend (backend → frontend)
 
-契約 (`devhub-core/src/model.rs`) に構造を持つ新しい型や `Change` を足したときに、ここへ 1 項目ずつ書く。
-フロント担当が画面を作ったら「済」にする。スカラー設定 (`SettingSpec`) と操作 (`ActionSpec`) は
-画面が自動で出るので、ここに書かなくてよい。
+When you add a new type with structure or a `Change` to the contract (`devhub-core/src/model.rs`), write one item here each time.
+The frontend owner marks it "Done" once the screen is built. Scalar settings (`SettingSpec`) and actions (`ActionSpec`)
+appear on screen automatically, so they don't need to be written here.
 
-| 日付 | 機能 | 新しい型 / Change | どの caps で出すか | Web 版のどこ | 状態 |
+| Date | Feature | New type / Change | Which caps show it | Where in the Web version | Status |
 |---|---|---|---|---|---|
 | | | | | | |

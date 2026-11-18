@@ -1,10 +1,10 @@
-//! 実時間アニメーションと要素の位置の記録。
+//! Real-time animation and recording of element positions.
 //!
-//! - `spring(key, target)` … 臨界減衰ばねで target へ寄せた今の値を返す。
-//!   動いている間は `end_frame` が次フレームを要求する (止まれば描画も止まる =
-//!   アイドル時 CPU/GPU 0 — ゲーム中に裏で開いていても軽い)。
-//! - `track(id)` … 要素の矩形を毎フレーム記録する透明な canvas。
-//!   スライダーのドラッグ・ポップアップの位置合わせ・ホバー判定に使う。
+//! - `spring(key, target)` … returns the current value moved toward target by a critically damped spring.
+//!   While it is moving, `end_frame` requests the next frame (when it stops, drawing stops too =
+//!   0 CPU/GPU when idle — light even when open in the background during a game).
+//! - `track(id)` … a transparent canvas that records the element's rect every frame.
+//!   Used for slider drags, popup alignment and hover tests.
 
 use gpui_kit::*;
 use std::cell::RefCell;
@@ -34,7 +34,7 @@ thread_local! {
     static SYS: RefCell<Sys> = RefCell::new(Sys { dt: 1. / 60., ..Default::default() });
 }
 
-/// フレームの先頭で呼ぶ。経過時間を測る。
+/// Call at the start of a frame. Measures the elapsed time.
 pub fn begin_frame() {
     SYS.with(|s| {
         let mut s = s.borrow_mut();
@@ -54,13 +54,13 @@ pub fn begin_frame() {
     });
 }
 
-/// フレームの終わりで呼ぶ。ばねが動いていれば次のフレームを要求する。
+/// Call at the end of a frame. If a spring is moving, requests the next frame.
 pub fn end_frame(window: &mut Window) {
     let dirty = SYS.with(|s| {
         let mut s = s.borrow_mut();
         let d = s.dirty;
         if !d {
-            s.last = None; // 止まっている間の時間は数えない
+            s.last = None; // time while stopped is not counted
         }
         d
     });
@@ -69,7 +69,7 @@ pub fn end_frame(window: &mut Window) {
     }
 }
 
-/// 臨界減衰ばね。`speed` は大きいほど速い (12 ≒ 0.35s)。
+/// Critically damped spring. A larger `speed` is faster (12 ≈ 0.35s).
 pub fn spring_with(key: &str, target: f32, speed: f32) -> f32 {
     if !crate::theme::motion_on() {
         return target;
@@ -87,11 +87,11 @@ pub fn spring_with(key: &str, target: f32, speed: f32) -> f32 {
             return sp.value;
         }
         sp.frame = frame;
-        // 臨界減衰: x'' = -w^2 (x - t) - 2w x'
+        // Critical damping: x'' = -w^2 (x - t) - 2w x'
         let w = speed;
         let mut x = sp.value;
         let mut v = sp.vel;
-        // 半陰的オイラーを細かく刻んで安定させる。
+        // Stabilize with finely subdivided semi-implicit Euler.
         let steps = 4;
         let h = dt / steps as f32;
         for _ in 0..steps {
@@ -117,19 +117,19 @@ pub fn spring(key: &str, target: f32) -> f32 {
     spring_with(key, target, 16.)
 }
 
-/// 0/1 の状態をなめらかにした値。
+/// A value that smooths a 0/1 state.
 pub fn ease(key: &str, on: bool) -> f32 {
     spring_with(key, if on { 1. } else { 0. }, 18.)
 }
 
-/// 外部から「次のフレームも描け」と伝える (時間で変わる表示用)。
+/// Tell it from outside to "draw the next frame too" (for time-varying displays).
 pub fn keep_alive() {
     SYS.with(|s| s.borrow_mut().dirty = true);
 }
 
-// ------------------------------------------------------------------ 位置
+// ------------------------------------------------------------------ Position
 
-/// 要素の矩形を記録する透明な層 (親いっぱいに広がる)。
+/// A transparent layer that records an element's rect (fills its parent).
 pub fn track(id: impl Into<String>) -> impl IntoElement {
     let id: String = id.into();
     canvas(
@@ -154,7 +154,7 @@ pub fn track(id: impl Into<String>) -> impl IntoElement {
     .size_full()
 }
 
-/// 前のフレームで記録した矩形 [x, y, w, h]。
+/// Rect [x, y, w, h] recorded in the previous frame.
 pub fn rect(id: &str) -> Option<[f32; 4]> {
     SYS.with(|s| s.borrow().rects.get(id).copied())
 }
@@ -175,7 +175,7 @@ pub fn is_down() -> bool {
     SYS.with(|s| s.borrow().down)
 }
 
-/// カーソルがその要素の上にあるか (前フレームの矩形で判定)。
+/// Whether the cursor is over the element (judged with the previous frame's rect).
 pub fn hovered(id: &str) -> bool {
     let p = pointer();
     rect(id)

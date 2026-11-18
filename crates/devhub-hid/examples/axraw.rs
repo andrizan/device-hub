@@ -1,5 +1,5 @@
-//! 軸クエリ [4,3,kind,row] の生応答ダンプ — OBS の点滅調査。
-//! 応答の r[0..4] エコーと非0ペイロード範囲を表示する。
+//! Raw response dump for the axis query [4,3,kind,row] — investigating OBS flicker.
+//! Prints the r[0..4] echo of the response and the non-zero payload range.
 
 use devhub_hid::transport::{open, Channel};
 use std::time::{Duration, Instant};

@@ -1,17 +1,17 @@
-//! バックエンドとの契約 (v2)。
+//! The contract with the backend (v2).
 //!
-//! フロントエンド (device-hub) は **`HubBackend` / `DeviceDriver` だけ**を知る。
-//! HID・プロトコルの詳細はすべて実装側 (devhub-hid) に閉じる。
+//! The frontend (device-hub) knows **only `HubBackend` / `DeviceDriver`**.
+//! All HID and protocol details stay inside the implementation side (devhub-hid).
 //!
-//! # スレッドと呼ばれ方 (実装者向け)
+//! # Threading and how calls arrive (for implementers)
 //!
-//! - すべて**同期 API**。UI はデバイスごとの専用ワーカースレッドから呼ぶので、
-//!   HID の往復 (数 ms〜数百 ms) でブロックしてよい。UI スレッドからは呼ばれない。
-//! - 同じドライバのメソッドが**同時に**呼ばれることは無い (ワーカーが 1 本)。
-//!   ただし `HubBackend::scan` は別スレッド (ポーリング) から並行に呼ばれる。
-//! - `apply` はスライダーのドラッグ中に連続で来る。UI 側で同じ対象の古い変更は
-//!   捨ててから送る (`Change::same_target`) ので、ドライバ側の間引きは不要。
-//! - エラーは `HubError`。UI は Display 文字列をそのままトーストに出す。
+//! - Everything is a **synchronous API**. The UI calls it from a dedicated per-device worker thread,
+//!   so it may block on HID round trips (a few ms to several hundred ms). It is never called from the UI thread.
+//! - Methods of the same driver are never called **concurrently** (one worker).
+//!   However, `HubBackend::scan` is called in parallel from another (polling) thread.
+//! - `apply` arrives continuously while a slider is being dragged. The UI drops stale changes
+//!   to the same target before sending (`Change::same_target`), so drivers need no throttling.
+//! - Errors are `HubError`. The UI shows the Display string as-is in a toast.
 
 use crate::model::*;
 use std::collections::BTreeMap;
@@ -19,36 +19,36 @@ use std::fmt;
 use std::path::Path;
 use std::sync::Arc;
 
-// ------------------------------------------------------------------ エラー
+// ------------------------------------------------------------------ errors
 
 #[derive(Debug)]
 pub enum HubError {
-    /// デバイス ID が見つからない (抜かれた等)。
+    /// The device ID was not found (unplugged, etc.).
     NotFound(DeviceId),
-    /// この機能をデバイス/ドライバが持たない。
+    /// The device/driver does not have this feature.
     Unsupported(&'static str),
-    /// プロトコル未実装。
+    /// Protocol not implemented.
     NotImplemented(&'static str),
-    /// 通信エラー。
+    /// Communication error.
     Io(String),
-    /// 応答が壊れている/ACK が来ない等。
+    /// The response is corrupt, no ACK arrived, etc.
     Protocol(String),
-    /// 引数が caps の範囲外など。
+    /// An argument is outside the caps range, etc.
     Invalid(String),
-    /// デバイスが切断された / 無線がスリープ中。
+    /// The device was disconnected / the wireless device is asleep.
     Disconnected,
 }
 
 impl fmt::Display for HubError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            HubError::NotFound(id) => write!(f, "デバイスが見つかりません: {id}"),
-            HubError::Unsupported(what) => write!(f, "この機能には対応していません: {what}"),
-            HubError::NotImplemented(what) => write!(f, "未実装です: {what}"),
-            HubError::Io(e) => write!(f, "通信エラー: {e}"),
-            HubError::Protocol(e) => write!(f, "応答エラー: {e}"),
-            HubError::Invalid(e) => write!(f, "値が不正です: {e}"),
-            HubError::Disconnected => write!(f, "デバイスが切断されました"),
+            HubError::NotFound(id) => write!(f, "Device not found: {id}"),
+            HubError::Unsupported(what) => write!(f, "This feature is not supported: {what}"),
+            HubError::NotImplemented(what) => write!(f, "Not implemented: {what}"),
+            HubError::Io(e) => write!(f, "Communication error: {e}"),
+            HubError::Protocol(e) => write!(f, "Response error: {e}"),
+            HubError::Invalid(e) => write!(f, "Invalid value: {e}"),
+            HubError::Disconnected => write!(f, "The device was disconnected"),
         }
     }
 }
@@ -57,25 +57,25 @@ impl std::error::Error for HubError {}
 
 pub type HubResult<T> = Result<T, HubError>;
 
-// ------------------------------------------------------------------ イベント
+// ------------------------------------------------------------------ events
 
-/// バックエンドから UI への非同期通知 (任意)。
-/// 実装が能動的に検知できる場合だけ `HubBackend::watch` の callback から呼ぶ。
-/// 何も呼ばなくても UI は 2 秒ごとの `scan` と 30 秒ごとの `battery` で動く。
+/// Asynchronous notification from the backend to the UI (optional).
+/// Call it from the `HubBackend::watch` callback only when the implementation can detect this actively.
+/// Even if nothing is called, the UI keeps working with a `scan` every 2 seconds and a `battery` every 30 seconds.
 #[derive(Clone, Debug)]
 pub enum HubEvent {
-    /// 挿抜。UI は `scan` し直す。
+    /// Plug/unplug. The UI runs `scan` again.
     DevicesChanged,
-    /// デバイス側で設定が変わった (本体のボタンで DPI やプロファイルを変えた等)。
-    /// UI は `read` し直す。
+    /// A setting changed on the device side (DPI or profile changed with the device's own buttons, etc.).
+    /// The UI runs `read` again.
     StateChanged(DeviceId),
     Battery(DeviceId, Battery),
-    /// ドライバ内部で変わった `DeviceInfo` (休眠状態・裏で取れたバッテリー等)。
-    /// UI はセッションとデバイス一覧へ反映する。
+    /// A `DeviceInfo` that changed inside the driver (sleep state, a battery value obtained in the background, etc.).
+    /// The UI reflects it in the session and the device list.
     Info(DeviceId, Box<DeviceInfo>),
-    /// 時間のかかる操作 (ファーム更新・キャリブレーション・大量書き込み) の進み具合。
-    /// `fraction` は 0..1 (分からなければ None = 不定のスピナー)。`done` で表示を消す。
-    /// `run_action` の実行中にドライバから `watch` の callback 経由で送る。
+    /// Progress of a long operation (firmware update, calibration, bulk write).
+    /// `fraction` is 0..1 (None if unknown = indeterminate spinner). `done` removes the display.
+    /// Sent from the driver via the `watch` callback while `run_action` is running.
     Progress {
         id: DeviceId,
         label: String,
@@ -84,118 +84,118 @@ pub enum HubEvent {
     },
 }
 
-// ------------------------------------------------------------------ トレイト
+// ------------------------------------------------------------------ traits
 
-/// ハブ全体の入口。`devhub_hid::connect()` が作る。
+/// Entry point of the whole hub. Created by `devhub_hid::connect()`.
 pub trait HubBackend: Send + Sync {
-    /// いま見えているデバイスの一覧。未対応機も `supported=false` で返すと UI に出る。
-    /// UI が 2 秒ごとに呼ぶので軽く保つ (HID の列挙のみ。デバイスへの問い合わせはしない)。
+    /// List of devices currently visible. Returning unsupported devices with `supported=false` shows them in the UI.
+    /// The UI calls this every 2 seconds, so keep it light (HID enumeration only; do not query the device).
     fn scan(&self) -> HubResult<Vec<DeviceInfo>>;
 
-    /// デバイス 1 台のドライバ。同じ ID には同じインスタンスを返してよい。
+    /// The driver for one device. May return the same instance for the same ID.
     fn driver(&self, id: &DeviceId) -> HubResult<Arc<dyn DeviceDriver>>;
 
-    /// キャッシュ済みドライバを捨てる (Disconnected 後に呼ぶ)。
-    /// 同一パスへの抜き差しではデバイスパスが変わらないが中身のハンドルは
-    /// 死んでいるので、次回 `driver()` で開き直す必要がある。
+    /// Discard a cached driver (call after Disconnected).
+    /// Re-plugging into the same port keeps the device path unchanged, but the inner handle
+    /// is dead, so it must be reopened on the next `driver()`.
     fn invalidate(&self, _id: &DeviceId) {}
 
-    /// イベント通知の登録 (任意)。
+    /// Register for event notifications (optional).
     fn watch(&self, _cb: Box<dyn Fn(HubEvent) + Send + Sync>) {}
 
-    /// デモ用など、実機でないことを UI に示す。
+    /// Tells the UI this is not real hardware (for demos, etc.).
     fn is_demo(&self) -> bool {
         false
     }
 }
 
-/// デバイス 1 台との会話。
+/// A conversation with one device.
 pub trait DeviceDriver: Send + Sync {
-    /// 名札 (firmware 等を開いた後の情報で埋めて返す)。
+    /// The name tag (filled in with the information available after opening, e.g. firmware).
     fn info(&self) -> DeviceInfo;
 
-    /// 機能の宣言。**開いた時点で 1 回だけ**呼ばれ、UI はセッション中キャッシュする。
-    /// (プロファイル切替などで変わる場合は `HubEvent::StateChanged` を出せば読み直す。)
+    /// Declares the features. Called **only once, when opened**, and the UI caches it for the session.
+    /// (If it changes, e.g. on profile switch, emit `HubEvent::StateChanged` to have it reread.)
     fn caps(&self) -> Capabilities;
 
-    /// 全設定を読む。読めなかった汎用設定は map に入れなければ UI がその行を無効表示する。
+    /// Read all settings. Generic settings that could not be read must be left out of the map, so the UI shows that row disabled.
     fn read(&self) -> HubResult<DeviceState>;
 
-    /// 変更 1 件を即時適用する。成功 = デバイスが受理した (ACK が無いなら送信成功)。
-    /// 失敗時 UI はトーストを出し、`read` で読み直して表示を実機に合わせる。
+    /// Apply one change immediately. Success = the device accepted it (send success if there is no ACK).
+    /// On failure the UI shows a toast and runs `read` to bring the display back in line with the device.
     fn apply(&self, change: &Change) -> HubResult<()>;
 
-    /// `ActionSpec` の実行。`file` は `ActionSpec::file` が Some のとき選ばれたパス。
+    /// Run an `ActionSpec`. `file` is the chosen path when `ActionSpec::file` is Some.
     fn run_action(&self, id: &str, file: Option<&Path>) -> HubResult<ActionOutcome> {
         let _ = (id, file);
         Err(HubError::Unsupported("action"))
     }
 
-    /// 最新のバッテリー。
+    /// Latest battery.
     fn battery(&self) -> HubResult<Battery> {
         Err(HubError::Unsupported("battery"))
     }
 
-    /// 押下深さのリアルタイム値 (mm、layout index 順)。`PerfCaps::live_travel` のときだけ
-    /// UI が「ストロークテスト」中に 30Hz 程度で呼ぶ。
+    /// Real-time press depth (mm, in layout index order). The UI calls this at about 30Hz during the "stroke test",
+    /// and only when `PerfCaps::live_travel` is set.
     fn live_travel(&self) -> HubResult<Vec<f32>> {
         Err(HubError::Unsupported("live_travel"))
     }
 
-    /// ストローク計測の生データ (route mm + ADC + 状態、layout index 順)。
-    /// 対応ドライバでは UI が `live_travel` の代わりにこちらをポーリングして詳細表示する。
+    /// Raw stroke measurement data (route mm + ADC + state, in layout index order).
+    /// For drivers that support it, the UI polls this instead of `live_travel` to show details.
     fn live_axis(&self) -> HubResult<Vec<AxisSample>> {
         Err(HubError::Unsupported("live_axis"))
     }
 
-    /// `MouseCaps::live_buttons` と同じ並びで、最新の押下深さ。UI がテスト画面で
-    /// 60Hz で呼ぶ。通知 (push) で届くデバイスは受信スレッドが保存した最新値を
-    /// 返すだけにし、ここで HID を叩かないこと。
+    /// Latest press depth, in the same order as `MouseCaps::live_buttons`. The UI calls this at 60Hz
+    /// on the Test page. For devices that deliver data by notification (push), return only the latest value
+    /// stored by the receive thread, and do not hit HID here.
     fn live_buttons(&self) -> HubResult<Vec<ButtonDepth>> {
         Err(HubError::Unsupported("live_buttons"))
     }
 
-    /// 実測の input report レート (Hz)。デバイスが流してくる自発レポートを
-    /// 受信スレッドが数えたもので、設定値ではなく実測値。ストリームを持たない
-    /// デバイス/未実装なら None。UI は 0.5〜1 秒おきに呼ぶ。HID は叩かないこと。
+    /// Measured input report rate (Hz). The count of unsolicited reports the device streams,
+    /// counted by the receive thread: a measured value, not the configured one. None for devices
+    /// without a stream or if not implemented. The UI calls this every 0.5 to 1 second. Do not hit HID.
     fn live_report_hz(&self) -> Option<f32> {
         None
     }
 
-    /// キーごとの実設定 (layout 順、mm)。取得できないドライバは Unsupported を返す。
+    /// Actual per-key settings (layout order, mm). Drivers that cannot fetch them return Unsupported.
     fn live_key_perf(&self) -> HubResult<Vec<KeyPerf>> {
         Err(HubError::Unsupported("live_key_perf"))
     }
 
-    /// 磁気ボタンの高速作動設定 (live_buttons 順、0 は無効)。
+    /// Fast-actuation setting of the magnetic buttons (in live_buttons order, 0 = disabled).
     fn live_button_fast(&self) -> HubResult<Vec<Option<u8>>> {
         Err(HubError::Unsupported("live_button_fast"))
     }
 
-    /// キーごとの作動点 (mm、layout 順)。RT は First touch。
+    /// Per-key actuation point (mm, layout order). RT is First touch.
     fn live_actuation(&self) -> HubResult<Vec<f32>> {
         Err(HubError::Unsupported("live_actuation"))
     }
 
-    /// DirectDrive: per-LED のライブ書き込み (応答なし・永続しない、ファームの
-    /// アニメーションを一時的に上書きする)。`cells` はキー index → 色で、
-    /// LED セルへの展開はドライバ側。`LightArea::direct_drive` のときだけ UI が
-    /// フレームを流す (5fps 程度)。対応しないドライバは Unsupported。
+    /// DirectDrive: live per-LED write (no response, not persisted; temporarily overrides the firmware
+    /// animation). `cells` maps key index to color, and expanding to LED cells is up to the driver.
+    /// The UI streams frames (about 5fps) only when `LightArea::direct_drive` is set.
+    /// Drivers without support return Unsupported.
     fn direct_drive(&self, _area: u8, _cells: &BTreeMap<usize, Rgb>) -> HubResult<()> {
         Err(HubError::Unsupported("direct_drive"))
     }
 
-    /// DirectDrive を抜けてファーム側のアニメーションに戻す。
-    /// 対応ドライバは保存済みのライティング設定を再送して実機の点灯を復帰させる。
+    /// Leave DirectDrive and return to the firmware animation.
+    /// Supporting drivers resend the saved lighting settings to restore the device's lighting.
     fn direct_drive_stop(&self, _area: u8) -> HubResult<()> {
         Err(HubError::Unsupported("direct_drive"))
     }
 
-    /// ライブ点灯色の読み戻し — キー index → **いま実際に光っている色**
-    /// (ファームが描画したエフェクトの現在フレーム。ユーザーカスタム色も含む)。
-    /// 公式 HUB のプレビューと同じ仕組みで、UI はライティング画面表示中
-    /// ~6Hz で呼んで実機そのままの見た目を描く。シミュレーションではない。
-    /// 非対応ドライバは Unsupported — UI はローカル近似プレビューに切り替える。
+    /// Read back the live lighting colors: key index → **the color actually lit right now**
+    /// (the current frame of the effect rendered by the firmware, including user custom colors).
+    /// The same mechanism as the official HUB preview: while the Lighting page is shown, the UI calls this at
+    /// ~6Hz and draws exactly what the real device looks like. It is not a simulation.
+    /// Unsupported drivers return Unsupported; the UI then switches to a local approximate preview.
     fn live_lighting(&self, _area: u8) -> HubResult<BTreeMap<usize, Rgb>> {
         Err(HubError::Unsupported("live_lighting"))
     }

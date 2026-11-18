@@ -1,4 +1,4 @@
-//! デバイス無しで全テーマ × 全モードを PNG に焼く (デザイン確認用)。
+//! Render every theme × every mode to PNG without a device (for design review).
 //!   cargo run -p devhub-obs --example gallery  → obs-gallery-*.png
 use devhub_obs::config::{MouseStyle, OverlayCfg, Theme};
 use devhub_obs::render::{self, Mode, Vis};

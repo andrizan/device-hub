@@ -1,11 +1,11 @@
-//! XSYD プロトコル (hub.xsyd.top) — SU66 Max などホール効果キーボード。
+//! XSYD protocol (hub.xsyd.top) — Hall effect keyboards such as the SU66 Max.
 //!
-//! 実機解析済み (1ca6:3009, usage_page 0xFFB0 / usage 1):
-//! - report id なし 64B output report + 64B input report
-//! - フレーム: `[group][sub][args...]` → 応答 `[group][sub][data...]`
+//! Analyzed on a real device (1ca6:3009, usage_page 0xFFB0 / usage 1):
+//! - 64B output report + 64B input report, no report id
+//! - Frame: `[group][sub][args...]` → response `[group][sub][data...]`
 //! - group: Device=1, Global=2, LayoutAndKey=3, Performance=4, Lighting=5,
 //!   HigherKey=6, Macro=7, CustomCommand=10, Displayer=12, ThreeMode=13
-//! - 応答 sub==0xFF は「未対応コマンド」を意味する (実機確認済み)
+//! - A response with sub==0xFF means "unsupported command" (confirmed on a real device)
 
 use devhub_core::backend::{DeviceDriver, HubError, HubResult};
 use devhub_core::model::*;
@@ -32,7 +32,7 @@ mod sub {
     pub const SETTING: u8 = 2;
     pub const DEVICE_INFO: u8 = 2;
     pub const GET_BASIC_INFO: u8 = 1;
-    /// device feature 問い合わせ — 応答 r[2]=レイヤー数 (実機 2)。
+    /// device feature query — response r[2]=layer count (2 on the real device).
     pub const FEATURE: u8 = 3;
     pub const GET_KEY_LAYOUT: u8 = 1;
 }
@@ -40,7 +40,7 @@ mod sub {
 pub struct XsydDriver {
     info: DeviceInfo,
     dev: Mutex<HidDevice>,
-    /// device feature (1,3) 応答 r[2] のレイヤー数。問い合わせ失敗時 2。
+    /// Layer count from r[2] of the device feature (1,3) response. 2 if the query fails.
     layers: u8,
 }
 
@@ -63,7 +63,7 @@ pub fn open(info: DeviceInfo, path: &std::ffi::CString) -> HubResult<XsydDriver>
 }
 
 impl XsydDriver {
-    /// group/sub フレーム → 64B 応答。sub==0xFF (未対応) は Unsupported。
+    /// group/sub frame → 64B response. sub==0xFF (unsupported) becomes Unsupported.
     fn cmd(&self, group: u8, sub: u8, args: &[u8]) -> HubResult<[u8; 64]> {
         let dev = self.dev.lock().unwrap_or_else(|p| p.into_inner());
         let mut w = [0u8; 65];
@@ -94,8 +94,8 @@ impl XsydDriver {
     }
 }
 
-/// ファームウェア文字列: device_info 応答末尾の ASCII 塊を拾う
-/// (実機: "... 49142 .. 2026101216:41:03" — 末尾がビルド時刻)。
+/// Firmware string: picks the trailing ASCII chunk of the device_info response
+/// (real device: "... 49142 .. 2026101216:41:03" — the tail is the build time).
 fn parse_fw(r: &[u8; 64]) -> Option<String> {
     let tail: String = r[2..]
         .iter()
@@ -104,7 +104,7 @@ fn parse_fw(r: &[u8; 64]) -> Option<String> {
     tail.split_whitespace().last().map(|s| s.to_string())
 }
 
-/// u16 キーコード → 名前。XSYD は HID usage ベース (暫定: 0x04..=0x38 等を基本名に)。
+/// u16 key code → name. XSYD is HID usage based (provisional: 0x04..=0x38 etc. as base names).
 fn keycode_name(kc: u16) -> String {
     const NAMES: &[(u16, &str)] = &[
         (0x04, "A"), (0x05, "B"), (0x06, "C"), (0x07, "D"), (0x08, "E"), (0x09, "F"),
@@ -123,10 +123,10 @@ fn keycode_name(kc: u16) -> String {
         (0xE0, "LCtrl"), (0xE1, "LShift"), (0xE2, "LAlt"), (0xE3, "LWin"),
         (0xE4, "RCtrl"), (0xE5, "RShift"), (0xE6, "RAlt"), (0xE7, "RWin"),
         (0x65, "Menu"), (0x00, ""),
-        // メディア/消費者コード (実機 L1 dump から)
+        // Media / consumer codes (from the real-device L1 dump)
         (0x2192, "PrtSc"), (0x20B6, "Rewind"), (0x20CD, "Play/Pause"), (0x20B5, "Next"),
         (0x20E9, "Vol+"), (0x20EA, "Vol-"), (0x20E2, "Mute"),
-        // XSYD 独自キー (0xF1xx=Fn, 0xF2xx/F3xx=システム/RGB)
+        // XSYD-specific keys (0xF1xx=Fn, 0xF2xx/F3xx=system/RGB)
         (0xF101, "Fn"), (0xF200, "KB-Lock"), (0xF201, "RGB-Tog"), (0xF202, "RGB-Mod"),
         (0xF205, "Calibrate"), (0xF206, "Config-Sw"), (0xF207, "Profile"), (0xF208, "Reset"),
         (0xF209, "BT-Pair"), (0xF20A, "Sleep-Tog"),
@@ -203,7 +203,7 @@ impl DeviceDriver for XsydDriver {
             polling_hz: 1000,
         };
 
-        // Lighting: [5,1] → [4]=mode raw, [5]=effect, [6]=bright, [7]=speed (実機確認)
+        // Lighting: [5,1] → [4]=mode raw, [5]=effect, [6]=bright, [7]=speed (confirmed on the real device)
         if let Ok(r) = self.cmd(grp::LIGHTING, sub::READ, &[]) {
             cfg.lighting.brightness = r[6].min(100);
             cfg.lighting.speed = r[7].min(100);
@@ -219,10 +219,10 @@ impl DeviceDriver for XsydDriver {
             };
         }
 
-        // Layers: [3,1,layer,row] → [2]=layer [3]=row [4..64]=30×u16 キーコード
-        // ストリーム位置 = row*30+col。実機: row1..=5, col0..=14 (SU66MAX_LAYOUT.index)。
+        // Layers: [3,1,layer,row] → [2]=layer [3]=row [4..64]=30×u16 key codes
+        // Stream position = row*30+col. Real device: row1..=5, col0..=14 (SU66MAX_LAYOUT.index).
         for layer_id in 0..self.layers {
-            // 行を全部読んで stream[row*30+col] に格納
+            // Read every row and store it in stream[row*30+col]
             let mut stream = vec![0u16; 8 * 30];
             let mut got_any = false;
             for row in 0..8u8 {
@@ -246,7 +246,7 @@ impl DeviceDriver for XsydDriver {
                     let (row, col) = registry::su66max_matrix_pos(k.index);
                     let kc = stream.get(row as usize * 30 + col as usize).copied().unwrap_or(0);
                     match kc {
-                        0x0000 | 0x0001 => KeyAction::None, // 未割当/透明
+                        0x0000 | 0x0001 => KeyAction::None, // unassigned / transparent
                         _ => KeyAction::Standard(keycode_name(kc)),
                     }
                 })
@@ -267,7 +267,7 @@ impl DeviceDriver for XsydDriver {
     }
 
     fn apply_keyboard(&self, cfg: &KeyboardConfig) -> HubResult<()> {
-        // 照明のみ書き込み (実機で読み取り往路確認済み。書き込みは [5,2] + 生ヘッダ保持)
+        // Write lighting only (read direction confirmed on a real device. Writing is [5,2] + keeping the raw header)
         let cur = self.cmd(grp::LIGHTING, sub::READ, &[])?;
         let mode_raw = match cfg.lighting.mode {
             LightMode::Off => 0,
@@ -287,7 +287,7 @@ impl DeviceDriver for XsydDriver {
     }
 
     fn battery(&self) -> HubResult<Battery> {
-        // [13,1] → [2]=mode [3]=charge [4]=percent。SU66 は有線 → 未対応返しのはず
+        // [13,1] → [2]=mode [3]=charge [4]=percent. SU66 is wired → should come back as unsupported
         let r = self.cmd(grp::THREE_MODE, sub::GET_BASIC_INFO, &[])?;
         Ok(Battery {
             percent: Some(r[4]),

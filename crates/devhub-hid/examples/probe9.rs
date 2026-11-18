@@ -1,7 +1,7 @@
-//! 解析プローブ #9: DirectDrive の実スループット限界を計測 + FPS スイープ
-//! 1) 書き込みレート上限 (sleep なし連続送信)
-//! 2) バースト後にデバイスが生きてるか (ping)
-//! 3) 見た目比較用に複数 FPS で波アニメーション (要目視)
+//! Analysis probe #9: measure the real DirectDrive throughput limit + FPS sweep
+//! 1) Write rate limit (continuous sending without sleep)
+//! 2) Whether the device is still alive after the burst (ping)
+//! 3) Wave animation at several FPS values for visual comparison (needs visual check)
 
 fn open(api: &hidapi::HidApi) -> Option<hidapi::HidDevice> {
     let dev = api
@@ -55,11 +55,11 @@ fn cmd(d: &hidapi::HidDevice, grp: u8, sub: u8, args: &[u8]) -> Option<Vec<u8>> 
     }
 }
 
-/// 横方向に流れるレインボー波のフレーム (135 セル、位相 t)
+/// Frame of a rainbow wave flowing horizontally (135 cells, phase t)
 fn wave(t: f32) -> [[u8; 4]; 135] {
     let mut buf = [[0u8; 4]; 135];
     for i in 0..135 {
-        let x = (i % 21) as f32; // 21 列
+        let x = (i % 21) as f32; // 21 columns
         let phase = t + x * 0.35;
         let s = phase.sin();
         let c = phase.cos();
@@ -73,9 +73,9 @@ fn wave(t: f32) -> [[u8; 4]; 135] {
 
 fn main() {
     let api = hidapi::HidApi::new().unwrap();
-    let d = open(&api).expect("SU66 が見つからない (デバイスハブを閉じて)");
+    let d = open(&api).expect("SU66 not found (close Device HUB)");
 
-    // 1) スループット: 500 チャンク連続送信
+    // 1) Throughput: send 500 chunks continuously
     let cells = wave(0.0);
     let t0 = std::time::Instant::now();
     let mut ok = 0;
@@ -93,16 +93,16 @@ fn main() {
         dt.as_secs_f64() * 1e6 / (ok.max(1) as f64 * 9.0)
     );
 
-    // 2) バースト直後にデバイスは応答するか
+    // 2) Does the device respond right after the burst?
     match cmd(&d, 1, 1, &[]) {
         Some(r) => println!("[ping after burst] alive: {:02x} {:02x}", r[0], r[1]),
-        None => println!("[ping after burst] TIMEOUT — ファームが輻輳してる"),
+        None => println!("[ping after burst] TIMEOUT — the firmware is congested"),
     }
 
-    // 3) FPS スイープ — 各 2.5 秒、流れる虹波 (目視比較用)
+    // 3) FPS sweep — 2.5 seconds each, flowing rainbow wave (for visual comparison)
     for &fps in &[10u32, 25, 40, 60, 90] {
         let frame_us = 1_000_000 / fps as u64;
-        // 1 フレームの送信コストを差し引いて待つ
+        // Wait after subtracting the send cost of one frame
         let send_cost = dt / ok.max(1) as u32;
         let wait = std::time::Duration::from_micros(frame_us).saturating_sub(send_cost);
         println!(
@@ -121,11 +121,11 @@ fn main() {
         println!("   sent {n} frames → real {real_fps:.1} fps");
         match cmd(&d, 1, 1, &[]) {
             Some(_) => println!("   device alive after {fps}fps"),
-            None => println!("   device TIMEOUT at {fps}fps — 輻輳"),
+            None => println!("   device TIMEOUT at {fps}fps — congestion"),
         }
     }
 
-    // 4) ファーム駆動へ復帰
+    // 4) Return to firmware control
     if let Some(r) = cmd(&d, 5, 1, &[0, 0]) {
         let mut args = vec![0u8];
         args.extend_from_slice(&r[4..r.len().min(10)]);

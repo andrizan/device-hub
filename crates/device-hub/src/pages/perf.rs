@@ -1,15 +1,15 @@
-//! マウスの「性能」タブ — 作り直し版 (LAMZU / mouse.fit / ATK 共通、caps だけで描く)。
+//! The mouse "Performance" tab — rebuilt version (shared by LAMZU / mouse.fit / ATK, drawn from caps alone).
 //!
-//! レイアウト:
-//! 1. ヒーロー 3 枚: ポーリングレート (+ 実測) / LOD / デバウンス — id の慣習
-//!    (`polling*`, `lod`, `debounce`) で拾う。無い機種はその枠を出さない。
-//! 2. セクションごとのカード: トグルは「タイル」(アイコン + 名前 + 説明 + スイッチ)、
-//!    選択肢はセグメント (長い名前は折り返すチップ)、スライダーは大きめの行。
-//!    `angle_tune` には傾くマウスの絵を添える。
-//! 3. 速度連動 DPI (`MouseCaps::adaptive_dpi`) のカーブ編集カード。
+//! Layout:
+//! 1. Three hero cards: polling rate (+ measured) / LOD / debounce — picked up by the id convention
+//!    (`polling*`, `lod`, `debounce`). Models that lack one do not show that slot.
+//! 2. A card per section: toggles are "tiles" (icon + name + description + switch),
+//!    choices are segments (long names are wrapped chips), sliders are larger rows.
+//!    `angle_tune` gets a picture of a tilted mouse.
+//! 3. Curve editing card for speed-linked DPI (`MouseCaps::adaptive_dpi`).
 //!
-//! `SettingSpec::enabled_when` を満たさない設定は薄く表示し、理由を添えて操作させない
-//! (例: 20K FPS は競技モード ON のときだけ)。
+//! Settings that do not satisfy `SettingSpec::enabled_when` are shown dimmed with the reason and cannot be operated
+//! (e.g. 20K FPS only when competition mode is ON).
 
 use crate::app::{CbXY, Shell, Tab};
 use crate::pages::generic::{section_meta, visible, SECTIONS};
@@ -20,7 +20,7 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 use std::rc::Rc;
 
-/// `enabled_when` を満たすか。満たさないときは理由。
+/// Whether `enabled_when` is satisfied. If not, the reason.
 pub fn enabled(sp: &SettingSpec, st: &DeviceState) -> Result<(), String> {
     match &sp.enabled_when {
         None => Ok(()),
@@ -38,7 +38,7 @@ pub fn enabled(sp: &SettingSpec, st: &DeviceState) -> Result<(), String> {
     }
 }
 
-/// トグルのタイルに付けるアイコン (id の慣習。未知は汎用)。
+/// Icon for a toggle tile (id convention; unknown ones get a generic icon).
 fn tile_icon(id: &str) -> &'static str {
     match id {
         "motion_sync" => "activity",
@@ -59,7 +59,7 @@ fn is_hero(id: &str) -> bool {
 }
 
 impl Shell {
-    /// 設定 1 件を送る (確認ダイアログと enabled_when を守る)。
+    /// Sends one setting (respecting the confirmation dialog and enabled_when).
     pub fn send_setting(&mut self, sp: &SettingSpec, v: SettingValue, cx: &mut Context<Self>) {
         if let Some(st) = self.cur().and_then(|s| s.state.clone()) {
             if let Err(why) = enabled(sp, &st) {
@@ -74,9 +74,9 @@ impl Shell {
         if let Some(msg) = sp.confirm.clone() {
             let c2 = change.clone();
             self.confirm(
-                "確認",
+                "Confirm",
                 &msg,
-                "変更する",
+                "Change",
                 false,
                 Rc::new(move |this, _, cx| this.apply(c2.clone(), cx)),
                 cx,
@@ -93,7 +93,7 @@ impl Shell {
         let (Some(caps), Some(state)) = (s.caps.clone(), s.state.clone()) else {
             return div().into_any_element();
         };
-        // マウス以外 (キーボード等) は従来の自動カード。
+        // Non-mouse devices (keyboards etc.) use the conventional automatic cards.
         if caps.keyboard.is_some() || caps.mouse.is_none() {
             return self.page_performance_legacy(window, cx).into_any_element();
         }
@@ -107,7 +107,7 @@ impl Shell {
             .cloned()
             .collect();
 
-        // ---- 1. ヒーロー
+        // ---- 1. Hero
         let mut heroes: Vec<AnyElement> = vec![];
         if let Some(sp) = specs.iter().find(|s| s.id.starts_with("polling")) {
             heroes.push(self.hero_polling(sp, &state, cx));
@@ -119,7 +119,7 @@ impl Shell {
             heroes.push(self.hero_stepper(sp, &state, cx));
         }
 
-        // ---- 2. セクションカード
+        // ---- 2. Section cards
         let mut cards: Vec<AnyElement> = vec![];
         let mut order: Vec<String> = SECTIONS.iter().map(|s| s.0.to_string()).collect();
         for sp in &specs {
@@ -146,7 +146,7 @@ impl Shell {
             if !list.is_empty() || !actions.is_empty() {
                 cards.push(self.perf_section(&sec, &list, &actions, &state, window, cx));
             }
-            // 速度連動 DPI はセンサーの直後。
+            // Speed-linked DPI goes right after the sensor.
             if sec == section::SENSOR {
                 if let Some(c) = self.adaptive_card(&caps, &state, cx) {
                     cards.push(c);
@@ -161,7 +161,7 @@ impl Shell {
         col.child(ui::grid2(cards)).into_any_element()
     }
 
-    // ------------------------------------------------------------ ヒーロー
+    // ------------------------------------------------------------ Hero
 
     fn hero_shell(title: &str, icon: &str, body: impl IntoElement) -> Div {
         let p = theme::pal();
@@ -219,15 +219,15 @@ impl Shell {
         let labels: Vec<String> = options.iter().map(|o| o.label.clone()).collect();
         let sel = cur.and_then(|c| options.iter().position(|o| o.value == c));
         let (sp2, opts) = (sp.clone(), options.clone());
-        // 実測 (Raw Input)。
+        // Measured (Raw Input).
         let live = self.cur().and_then(|s| s.poll.clone()).map(|st| {
             let v = st.peak_hz.or(st.seg_hz).unwrap_or(st.hz);
             if !self.last_window_active {
-                "実測: 背面では OS が制限中".to_string()
+                "Measured: limited by the OS in the background".to_string()
             } else if v < 1. {
-                "実測: マウスを動かすと表示".to_string()
+                "Measured: move the mouse to see it".to_string()
             } else {
-                format!("実測ピーク {v:.0} Hz")
+                format!("Measured peak {v:.0} Hz")
             }
         });
         let body = div()
@@ -382,7 +382,7 @@ impl Shell {
         Self::hero_shell(&sp.label, "timer", body).into_any_element()
     }
 
-    // ------------------------------------------------------------ セクション
+    // ------------------------------------------------------------ Sections
 
     fn perf_section(
         &mut self,
@@ -413,7 +413,7 @@ impl Shell {
         ui::card_titled(title, icon, None).child(body).into_any_element()
     }
 
-    /// トグルのタイル。
+    /// Toggle tile.
     fn tile(&mut self, sp: &SettingSpec, st: &DeviceState, cx: &mut Context<Self>) -> AnyElement {
         let p = theme::pal();
         let on = st.settings.get(&sp.id).map(|v| v.as_bool());
@@ -477,7 +477,7 @@ impl Shell {
             .into_any_element()
     }
 
-    /// 選択肢・スライダーの行 (ラベル上・操作下の 2 段で、狭いカードでもはみ出さない)。
+    /// Row for choices/sliders (label on top, control below in two tiers, so it does not overflow even in a narrow card).
     fn perf_row(&mut self, sp: &SettingSpec, st: &DeviceState, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = theme::pal();
         let dis = enabled(sp, st).err();
@@ -509,7 +509,7 @@ impl Shell {
                 )
             });
         let control: AnyElement = match (&sp.kind, v) {
-            (_, None) => ui::faint("読み取れません").into_any_element(),
+            (_, None) => ui::faint("Unable to read").into_any_element(),
             (SettingKind::Choice { options }, Some(v)) => {
                 let cur = v.as_choice();
                 let mut chips = div().flex().flex_wrap().gap(px(6.));
@@ -557,7 +557,7 @@ impl Shell {
                 );
                 let mut r = div().flex().items_center().gap(px(12.));
                 if sp.id == "angle_tune" {
-                    // 傾くマウスの絵 (公式と同じく角度をそのまま回転で見せる)。
+                    // Picture of a tilted mouse (like the official app, the angle is shown directly as a rotation).
                     let rad = cur.to_radians();
                     r = r.child(
                         div()
@@ -616,7 +616,7 @@ impl Shell {
             .into_any_element()
     }
 
-    // ------------------------------------------------------------ 速度連動 DPI
+    // ------------------------------------------------------------ Speed-linked DPI
 
     fn adaptive_card(&mut self, caps: &Capabilities, st: &DeviceState, cx: &mut Context<Self>) -> Option<AnyElement> {
         let ac = caps.mouse.as_ref()?.adaptive_dpi.clone()?;
@@ -625,14 +625,14 @@ impl Shell {
         let send = |this: &mut Shell, c: AdaptiveCurve, cx: &mut Context<Shell>| {
             this.apply(Change::Adaptive(c), cx);
         };
-        // 有効/無効
+        // Enable/disable
         let c_on = curve.clone();
         let toggle = ui::toggle("ada-on", curve.enabled, cx, move |this, v, cx| {
             let mut c = c_on.clone();
             c.enabled = v;
             send(this, c, cx);
         });
-        // プリセット
+        // Presets
         let cur_preset = ac.presets.iter().position(|(_, pts)| *pts == curve.points);
         let mut presets = div().flex().flex_wrap().gap(px(6.));
         for (i, (name, pts)) in ac.presets.iter().enumerate() {
@@ -666,9 +666,9 @@ impl Shell {
                 .border_color(if cur_preset.is_none() { p.accent } else { p.hair })
                 .bg(if cur_preset.is_none() { p.accent_soft } else { theme::alpha(p.faint, 0.0) })
                 .text_color(if cur_preset.is_none() { p.fg } else { p.faint })
-                .child("カスタム"),
+                .child("Custom"),
         );
-        // 点の追加/削除
+        // Add/remove points
         let n = curve.points.len();
         let c_add = curve.clone();
         let c_del = curve.clone();
@@ -676,25 +676,25 @@ impl Shell {
         let pts_tools = div()
             .flex()
             .gap(px(6.))
-            .child(ui::button("ada-add", "点を追加", Some("plus"), Btn::Ghost, cx, move |this, _, cx| {
+            .child(ui::button("ada-add", "Add point", Some("plus"), Btn::Ghost, cx, move |this, _, cx| {
                 let mut c = c_add.clone();
                 if c.points.len() >= ac.max_points {
-                    this.toast(format!("点は最大 {} 個です", ac.max_points), true, cx);
+                    this.toast(format!("At most {} points are allowed", ac.max_points), true, cx);
                     return;
                 }
                 let last = c.points.last().copied().unwrap_or(AdaptivePoint { speed: 0, ratio: 1. });
                 let speed = (last.speed + 15).min(smax);
                 if speed <= last.speed {
-                    this.toast("右端に空きがありません", true, cx);
+                    this.toast("No room left at the right edge", true, cx);
                     return;
                 }
                 c.points.push(AdaptivePoint { speed, ratio: last.ratio });
                 send(this, c, cx);
             }))
-            .child(ui::button("ada-del", "点を削除", Some("minus"), Btn::Ghost, cx, move |this, _, cx| {
+            .child(ui::button("ada-del", "Remove point", Some("minus"), Btn::Ghost, cx, move |this, _, cx| {
                 let mut c = c_del.clone();
                 if c.points.len() <= ac.min_points {
-                    this.toast(format!("点は最低 {} 個必要です", ac.min_points), true, cx);
+                    this.toast(format!("At least {} points are required", ac.min_points), true, cx);
                     return;
                 }
                 c.points.pop();
@@ -712,11 +712,11 @@ impl Shell {
             .pt(px(6.))
             .gap(px(10.))
             .child(ui::row_first(
-                "有効",
-                Some("マウスの速度に応じて DPI を自動で変えます (倍率 1.0 = そのまま)"),
+                "Enabled",
+                Some("Automatically changes DPI according to mouse speed (multiplier 1.0 = unchanged)"),
                 toggle,
             ))
-            .child(div().flex().items_center().gap(px(8.)).child(ui::faint("プリセット")).child(presets))
+            .child(div().flex().items_center().gap(px(8.)).child(ui::faint("Presets")).child(presets))
             .child(div().when(!curve.enabled, |d| d.opacity(0.5)).child(graph))
             .child(
                 div()
@@ -726,11 +726,11 @@ impl Shell {
                     .gap(px(8.))
                     .child(pts_tools)
                     .child(div().flex_1().min_w(px(160.)).text_size(px(11.)).text_color(p.faint).child(format!(
-                        "{n} 点 · 点をドラッグして調整 · {pts_txt}"
+                        "{n} points · drag points to adjust · {pts_txt}"
                     ))),
             );
         Some(
-            ui::card_titled("AdaDPI (速度連動 DPI)", "chart-spline", None)
+            ui::card_titled("AdaDPI (speed-linked DPI)", "chart-spline", None)
                 .child(body)
                 .into_any_element(),
         )
@@ -772,7 +772,7 @@ impl Shell {
                 if pts.is_empty() {
                     return;
                 }
-                // 塗り + 線 (最後の点から右端までは水平に延長)。
+                // Fill + line (from the last point to the right edge it extends horizontally).
                 let mut pf = PathBuilder::fill();
                 pf.move_to(at(0., 0.));
                 pf.line_to(at(0., pts[0].1));
@@ -830,7 +830,7 @@ impl Shell {
                     .child(format!("{}", i + 1)),
             );
         }
-        // ドラッグ: 最寄りの点を掴んで (速度, 倍率) を動かす。速度は隣の点の間に制限。
+        // Drag: grab the nearest point and move (speed, multiplier). Speed is limited to between its neighbors.
         let base = curve.clone();
         let (min_pts, max_pts) = (ac.min_points, ac.max_points);
         let _ = (min_pts, max_pts);
@@ -881,7 +881,7 @@ impl Shell {
                 this.begin_drag_xy("ada-graph", f, e.position, cx);
             }),
         );
-        // 軸の目盛り
+        // Axis ticks
         let xlab = div()
             .flex()
             .justify_between()
@@ -898,11 +898,11 @@ impl Shell {
                     .justify_between()
                     .text_size(px(10.))
                     .text_color(p.faint)
-                    .child(format!("倍率 ×{rmax:.1}"))
-                    .child("─ 1.0 = 等倍"),
+                    .child(format!("Multiplier ×{rmax:.1}"))
+                    .child("─ 1.0 = no change"),
             )
             .child(plot)
             .child(xlab)
-            .child(div().text_size(px(10.)).text_color(p.faint).child("← 遅い     マウスの速度     速い →"))
+            .child(div().text_size(px(10.)).text_color(p.faint).child("← Slow     Mouse speed     Fast →"))
     }
 }

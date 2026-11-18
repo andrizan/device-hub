@@ -1,11 +1,11 @@
-//! UI ↔ バックエンドの橋。
+//! Bridge between the UI and the backend.
 //!
-//! - デバイスごとに**専用のワーカースレッド**を 1 本持つ。HID の往復は全部そこで行い、
-//!   UI スレッドは絶対にブロックしない。
-//! - 変更は**楽観的**: UI の状態を即座に書き換えてから `Change` をワーカーへ送る。
-//!   ワーカーは連続した変更のうち、後の値で完全に置き換わるものを間引く (ドラッグ対策)。
-//!   失敗したらトーストを出して `read` で実機の値に戻す。
-//! - 結果は futures の channel で UI へ戻る (アイドル時は一切起きない)。
+//! - Holds one **dedicated worker thread** per device. All HID round trips happen there, and
+//!   the UI thread is never blocked.
+//! - Changes are **optimistic**: the UI state is rewritten immediately, then the `Change` is sent to the worker.
+//!   The worker thins out consecutive changes that are fully replaced by a later value (drag handling).
+//!   On failure it shows a toast and restores the device's value with `read`.
+//! - Results come back to the UI over a futures channel (nothing runs at all when idle).
 
 use crate::rawinput;
 use devhub_core::*;
@@ -20,9 +20,9 @@ use std::time::Duration;
 pub const SCAN_EVERY: Duration = Duration::from_secs(2);
 pub const BATTERY_EVERY: Duration = Duration::from_secs(60);
 
-/// ワーカー → UI。
+/// Worker → UI.
 pub enum Msg {
-    /// 列挙結果。`gen` は発行時の世代 — それより古い結果は捨てる。
+    /// Enumeration result. `gen` is the generation at issue time — older results are discarded.
     Scanned {
         gen: u64,
         res: Result<Vec<DeviceInfo>, String>,
@@ -48,12 +48,12 @@ pub enum Msg {
         id: DeviceId,
         err: Option<String>,
     },
-    /// 構成切替ジョブの結果 (切替+全読み直しの成否)。
+    /// Result of a config switch job (whether switch + full re-read succeeded).
     ProfileSwitched {
         id: DeviceId,
         err: Option<String>,
     },
-    /// ライブ測定がデバイス側の失敗で止まった (UI の travel_on を戻す)。
+    /// Live measurement stopped due to a failure on the device side (reverts the UI's travel_on).
     TravelStopped {
         id: DeviceId,
     },
@@ -69,41 +69,41 @@ pub enum Msg {
     Travel {
         id: DeviceId,
         depths: Vec<f32>,
-        /// 生データ (`live_axis` 対応ドライバのみ、非対応では空)。
+        /// Raw data (only for drivers supporting `live_axis`; empty if unsupported).
         axis: Vec<devhub_core::AxisSample>,
     },
-    /// マウス磁気ボタンの押下深さ (`MouseCaps::live_buttons` と同じ並び)。
+    /// Press depth of the mouse's magnetic buttons (same order as `MouseCaps::live_buttons`).
     Buttons {
         id: DeviceId,
         buttons: Vec<ButtonDepth>,
     },
-    /// ファームウェア更新の確認結果 (失敗は Err で静かに捨てる)。
+    /// Result of a firmware update check (a failure is quietly dropped as Err).
     FwResult {
         id: DeviceId,
         res: Result<devhub_update::UpdateStatus, String>,
     },
-    /// 軸名の取得結果 (ベンダー軸 ID → 名称)。失敗は捨てる。
+    /// Result of fetching axis names (vendor axis ID → name). Failures are dropped.
     AxisNames {
         id: DeviceId,
         names: std::collections::BTreeMap<u16, String>,
     },
-    /// 実測レポートレート (Raw Input)。
+    /// Measured report rate (Raw Input).
     PollRate {
         id: DeviceId,
         stats: Option<rawinput::PollStats>,
     },
-    /// DirectDrive 送信結果。Err のとき UI は実機プレビューを止めてトーストを出す。
+    /// DirectDrive send result. On Err the UI stops the on-device preview and shows a toast.
     DirectDrive {
         id: DeviceId,
         err: Option<String>,
     },
-    /// 停止要求は通ったが、本体の点灯を復元できなかった。
+    /// The stop request went through, but the device's lighting could not be restored.
     DdStopFailed {
         id: DeviceId,
         err: String,
     },
-    /// ライブ点灯色の読み戻し結果 (キー index → 実際に光っている色)。
-    /// ライティング画面表示中だけワーカーが ~6Hz で送る。非対応では来ない。
+    /// Readback of live lit colors (key index → color actually lit).
+    /// While the Lighting screen is shown the worker sends this at ~6Hz. Does not arrive for unsupported devices.
     LiveLight {
         id: DeviceId,
         colors: std::collections::BTreeMap<usize, devhub_core::Rgb>,
@@ -115,7 +115,7 @@ enum Job {
     Open,
     Read,
     Apply(Change),
-    /// 構成 (オンボードプロファイル) 切替 — 切替後に全設定を読み直す。
+    /// Config (on-board profile) switch — re-reads all settings after the switch.
     Profile(u8),
     Action {
         id: String,
@@ -124,15 +124,15 @@ enum Job {
     },
     Battery,
     Travel(bool),
-    /// 実測レポートレートを 1 回取る。
+    /// Take a measured report rate once.
     PollRate,
-    /// DirectDrive フレーム 1 枚送信 (キー index → 色、ドライバが LED セルへ展開)。
+    /// Send one DirectDrive frame (key index → color; the driver expands it to LED cells).
     DirectDrive {
         cells: std::collections::BTreeMap<usize, devhub_core::Rgb>,
     },
-    /// DirectDrive を抜けてファーム側点灯に戻す。
+    /// Leave DirectDrive and return to firmware-side lighting.
     DdStop,
-    /// ライブ点灯色ポーリングの ON/OFF (ライティング画面表示中のみ ON)。
+    /// Live lit-color polling ON/OFF (ON only while the Lighting screen is shown).
     LiveLight(bool),
 }
 
@@ -143,52 +143,52 @@ pub enum Status {
     Failed(String),
 }
 
-/// 開いているデバイス 1 台。
+/// One open device.
 pub struct Session {
     pub id: DeviceId,
     pub info: DeviceInfo,
     pub caps: Option<Capabilities>,
     pub state: Option<DeviceState>,
     pub status: Status,
-    /// 書き込み待ちの変更数 (ヘッダの同期インジケーター)。
+    /// Number of changes waiting to be written (header sync indicator).
     pub pending: usize,
-    /// 構成切替+全読み直しの最中 — 構成内の編集は受け付けない。
+    /// In the middle of a config switch + full re-read — edits within a config are not accepted.
     pub switching_profile: bool,
-    /// 直近の構成切替が失敗した (app が拾って保留中の復元を破棄する)。
+    /// The latest config switch failed (the app picks this up and discards the pending restore).
     pub switch_failed: bool,
-    /// ワーカーへ投入したジョブの通し番号 (読み込み世代の判定に使う)。
+    /// Serial number of jobs submitted to the worker (used to judge the read generation).
     submit_seq: u64,
-    /// 最後に投げた読み込み (Read/Open/Profile) の時点の `submit_seq`。
-    /// これより後に投入した未確定の変更は `Msg::State` 着信時に重ねる。
+    /// `submit_seq` at the time of the last read (Read/Open/Profile) issued.
+    /// Unconfirmed changes submitted after this are layered on when `Msg::State` arrives.
     read_seq: u64,
-    /// ワーカーへ送った未確定の変更 (FIFO, `Applied` で先頭から確定していく)。
+    /// Unconfirmed changes sent to the worker (FIFO; confirmed from the front on `Applied`).
     pending_changes: VecDeque<(u64, Change)>,
-    /// 実行中の操作 (ラベル)。
+    /// Operation in progress (label).
     pub running: Option<String>,
-    /// ストロークテストの深さ (mm)。
+    /// Stroke test depth (mm).
     pub travel: Vec<f32>,
-    /// ストローク計測の生データ (ADC・状態)。非対応ドライバでは空。
+    /// Raw stroke measurement data (ADC, state). Empty for unsupported drivers.
     pub axis: Vec<devhub_core::AxisSample>,
-    /// このセッションで観測した最大深さ (mm)。バーの正規化に使う
-    /// (公称全ストロークより実測底が浅いため)。
+    /// Maximum depth observed in this session (mm). Used to normalize the bar
+    /// (because the measured bottom is shallower than the nominal full stroke).
     pub travel_max: f32,
     pub travel_on: bool,
-    /// ライティングの「実機でプレビュー」中か (DirectDrive フレームを流す)。
+    /// Whether Lighting's "Preview on device" is on (streaming DirectDrive frames).
     pub dd_on: bool,
-    /// ライティング画面を表示中 — ワーカーが [5,3] で実機の点灯色をポーリングする。
+    /// The Lighting screen is shown — the worker polls the device's lit colors with [5,3].
     live_lit: bool,
-    /// 最新のライブ点灯色 (キー index → 色)。空 = 未取得/非対応。
+    /// Latest live lit colors (key index → color). Empty = not fetched / unsupported.
     pub live_rgb: std::collections::BTreeMap<usize, devhub_core::Rgb>,
-    /// マウス磁気ボタンの押下深さ (`live_buttons`)。
+    /// Press depth of the mouse's magnetic buttons (`live_buttons`).
     pub buttons: Vec<ButtonDepth>,
-    /// 長い操作の進捗 (ラベル, 0..1)。
+    /// Progress of a long operation (label, 0..1).
     pub progress: Option<(String, Option<f32>)>,
-    /// バッテリー低下を通知済みか。
+    /// Whether the low-battery notification was already sent.
     pub low_battery_warned: bool,
-    /// ユーザー起点の読み込み — 完了したらトーストを出す (裏の prefetch では出さない)。
+    /// User-initiated read — show a toast when it completes (not for background prefetch).
     pub read_notify: bool,
-    /// 実測の input report レート。Raw Input で計測、UI が定期的に取得。
-    /// 平均 Hz・区間レート・ピーク・間隔統計・移動量上限を含む (docs/POLLING_RATE.md)。
+    /// Measured input report rate. Measured with Raw Input; the UI fetches it periodically.
+    /// Includes average Hz, interval rate, peak, interval statistics and the movement cap (docs/POLLING_RATE.md).
     pub poll: Option<rawinput::PollStats>,
     tx: Sender<Job>,
 }
@@ -204,31 +204,31 @@ pub struct Hub {
     pub demo: bool,
     pub devices: Vec<DeviceInfo>,
     pub sessions: HashMap<DeviceId, Session>,
-    /// 初回の scan が返ったか。
+    /// Whether the first scan returned.
     pub scanned: bool,
-    /// 列挙の世代 — 発行ごとに増え、古い結果は捨てる (バックエンド切替対策)。
+    /// Enumeration generation — increments with each issue; old results are discarded (backend switch handling).
     scan_gen: u64,
-    /// ファームウェア更新の最新の確認結果 (DeviceId ごと)。UI のバッジ/カード用。
+    /// Latest firmware update check result (per DeviceId). For the UI's badge/card.
     pub fw_status: HashMap<DeviceId, devhub_update::UpdateStatus>,
-    /// 永続した指紋・最終確認時刻・dismiss (`%APPDATA%\DeviceHub\firmware.json`)。
+    /// Persisted fingerprint, last check time and dismiss (`%APPDATA%\DeviceHub\firmware.json`).
     pub fw: crate::fwstate::FwState,
-    /// 自動確認するか (prefs)。false なら check_firmware は何もしない。
+    /// Whether to check automatically (prefs). If false, check_firmware does nothing.
     pub fw_enabled: bool,
-    /// Windows 通知にも出すか (prefs)。
+    /// Whether to also show a Windows notification (prefs).
     pub fw_native: bool,
-    /// 「今すぐ確認」で飛ばしたチェック — 結果を必ずトーストで報告する。
+    /// A check fired by "Check now" — the result is always reported with a toast.
     fw_pending: HashSet<DeviceId>,
     out: UnboundedSender<Msg>,
     scanning: Arc<AtomicBool>,
 }
 
-/// 実機バックエンドを開く。`DEVHUB_DEMO=1` か、実機が開けなければデモ。
+/// Open the real-device backend. Demo if `DEVHUB_DEMO=1` or the device cannot be opened.
 pub fn connect_backend() -> (Arc<dyn HubBackend>, bool) {
     let force_demo = std::env::var_os("DEVHUB_DEMO").is_some();
     if !force_demo {
         match devhub_hid::connect() {
             Ok(b) => return (b, false),
-            Err(e) => eprintln!("[devhub] HID を開けませんでした ({e}) — デモで起動します"),
+            Err(e) => eprintln!("[devhub] could not open HID ({e}) — starting in demo mode"),
         }
     }
     (Arc::new(devhub_core::demo::DemoHub::new()), true)
@@ -258,7 +258,7 @@ impl Hub {
         }
     }
 
-    /// 実機が 1 台も無いとき、デモに切り替える (設定画面のボタン)。
+    /// When there is no real device at all, switch to demo (button on the settings screen).
     pub fn switch_backend(&mut self, backend: Arc<dyn HubBackend>) {
         self.sessions.clear();
         self.devices.clear();
@@ -272,7 +272,7 @@ impl Hub {
         self.scan();
     }
 
-    /// 裏スレッドで列挙する (多重起動しない)。
+    /// Enumerate on a background thread (never started multiple times).
     pub fn scan(&mut self) {
         if self.scanning.swap(true, Ordering::AcqRel) {
             return;
@@ -297,8 +297,8 @@ impl Hub {
         self.sessions.get_mut(id)
     }
 
-    /// セッションを開く (既に開いていれば何もしない)。
-    /// `notify` = ユーザーが画面を見ている (読み込み完了をトーストで知らせる)。
+    /// Open a session (does nothing if already open).
+    /// `notify` = the user is looking at the screen (report read completion with a toast).
     pub fn open(&mut self, id: &DeviceId, notify: bool) {
         if let Some(s) = self.sessions.get_mut(id) {
             if notify && !s.ready() {
@@ -329,7 +329,7 @@ impl Hub {
                 status: if supported {
                     Status::Opening
                 } else {
-                    Status::Failed("このデバイスのドライバはまだ実装されていません".into())
+                    Status::Failed("No driver is implemented for this device yet".into())
                 },
                 pending: 0,
                 running: None,
@@ -355,17 +355,17 @@ impl Hub {
         );
     }
 
-    /// 変更を UI に即反映し、ワーカーへ送る。
+    /// Reflect the change in the UI immediately and send it to the worker.
     pub fn apply(&mut self, id: &DeviceId, change: Change) {
         let Some(s) = self.sessions.get_mut(id) else {
             return;
         };
-        // 構成切替+再読の最中は編集を受け付けない (UI 側でもガードする)。
+        // Edits are not accepted during a config switch + re-read (the UI guards this too).
         if s.switching_profile {
             return;
         }
         if let Change::Profile(p) = change {
-            // 構成切替は専用ジョブ — 切替と全読み直しが終わるまで状態を変えない。
+            // A config switch is a dedicated job — state does not change until the switch and full re-read finish.
             let ok = s
                 .caps
                 .as_ref()
@@ -377,7 +377,7 @@ impl Hub {
             s.switching_profile = true;
             s.switch_failed = false;
             if s.tx.send(Job::Profile(p)).is_ok() {
-                // 切替ジョブは内部で全読み直しする — ここまでの変更は読み直しに含まれる。
+                // The switch job re-reads everything internally — changes made so far are included in the re-read.
                 s.read_seq = s.submit_seq;
                 s.pending += 1;
             } else {
@@ -395,20 +395,20 @@ impl Hub {
         }
     }
 
-    /// ユーザーが「再読み込み」を押した — 完了トーストを出す。
+    /// The user pressed "Reload" — show a completion toast.
     pub fn reload(&mut self, id: &DeviceId) {
         self.reload_inner(id, true);
     }
 
-    /// 全セッションへ DirectDrive 停止を送る (アプリ終了時 — 実機が
-    /// 最後のフレームのまま固まらないように)。
+    /// Send DirectDrive stop to all sessions (at app exit — so the device does not
+    /// freeze on the last frame).
     pub fn dd_stop_all(&self) {
         for s in self.sessions.values() {
             let _ = s.tx.send(Job::DdStop);
         }
     }
 
-    /// 本体側の変更通知など裏の読み直し (`notify=false` = トーストなし)。
+    /// Background re-read, e.g. on a device-side change notification (`notify=false` = no toast).
     fn reload_inner(&mut self, id: &DeviceId, notify: bool) {
         if let Some(s) = self.sessions.get_mut(id) {
             s.read_notify = notify;
@@ -432,7 +432,7 @@ impl Hub {
         }
     }
 
-    /// 実測レポートレートを 1 回取る (UI の定期ポーリング用)。
+    /// Take a measured report rate once (for the UI's periodic polling).
     pub fn poll_rate(&self, id: &DeviceId) {
         if let Some(s) = self.sessions.get(id) {
             let _ = s.tx.send(Job::PollRate);
@@ -462,8 +462,8 @@ impl Hub {
         }
     }
 
-    /// ライティング「実機でプレビュー」の ON/OFF。OFF で DdStop を送って
-    /// ファーム側のアニメーションに戻す。
+    /// Lighting "Preview on device" ON/OFF. OFF sends DdStop and
+    /// returns to the firmware-side animation.
     pub fn set_dd(&mut self, id: &DeviceId, on: bool) {
         if let Some(s) = self.sessions.get_mut(id) {
             if s.dd_on != on {
@@ -475,12 +475,12 @@ impl Hub {
         }
     }
 
-    /// ライブ点灯色ポーリング: `id` のセッションだけ ON、他は全部 OFF。
-    /// `None` で全停止。ライティング画面を出ている間だけ UI が呼ぶ。
+    /// Live lit-color polling: ON only for the session `id`, OFF for all others.
+    /// `None` stops everything. The UI calls this only while the Lighting screen is shown.
     pub fn live_light(&mut self, id: Option<&DeviceId>) {
         for s in self.sessions.values_mut() {
-            // caps に live_readback があるエリアが無いデバイスには送らない
-            // (非対応ドライバは即 Unsupported を返すが、caps だけ見る原則に揃える)。
+            // Do not send to devices with no area that has live_readback in caps
+            // (an unsupported driver returns Unsupported immediately, but we keep to the look-only-at-caps principle).
             let supported = s
                 .caps
                 .as_ref()
@@ -496,8 +496,8 @@ impl Hub {
         }
     }
 
-    /// DirectDrive フレーム 1 枚をワーカーへ送る (dd_on 中のみ)。
-    /// ワーカーは連続したフレームを間引く。
+    /// Send one DirectDrive frame to the worker (only while dd_on).
+    /// The worker thins out consecutive frames.
     pub fn dd_frame(
         &self,
         id: &DeviceId,
@@ -510,7 +510,7 @@ impl Hub {
         }
     }
 
-    /// firmware.json のキー — 機種でまとめる (同じ機種が複数台でも 1 件)。
+    /// Key of firmware.json — grouped by model (one entry even for several units of the same model).
     fn fw_key(info: &DeviceInfo) -> String {
         if info.model.is_empty() {
             info.id.0.clone()
@@ -519,8 +519,8 @@ impl Hub {
         }
     }
 
-    /// 配布元を 1 台分確認する (HTTP は専用スレッド — UI/HID ワーカーは止めない)。
-    /// `force` = 「今すぐ確認」で 24h の間引きを飛ばす。確認を飛ばしたなら true。
+    /// Check the distribution source for one device (HTTP uses a dedicated thread — the UI/HID workers are not stopped).
+    /// `force` = skip the 24h throttle for "Check now". Returns true if a check was fired.
     pub fn check_firmware(&mut self, id: &DeviceId, force: bool) -> bool {
         if !self.fw_enabled {
             return false;
@@ -556,7 +556,7 @@ impl Hub {
         true
     }
 
-    /// 「今すぐ確認」— 開いている全セッションの feed を確認する。飛んだ件数。
+    /// "Check now" — check the feed of every open session. Returns the number of checks fired.
     pub fn check_all_firmware(&mut self, force: bool) -> usize {
         let ids: Vec<DeviceId> = self.sessions.keys().cloned().collect();
         ids.iter()
@@ -564,7 +564,7 @@ impl Hub {
             .count()
     }
 
-    /// 更新カード/バッジを閉じる (同じ指紋では再通知しない)。
+    /// Dismiss the update card/badge (the same fingerprint is not notified again).
     pub fn fw_dismiss(&mut self, id: &DeviceId) {
         let Some(st) = self.fw_status.get_mut(id) else {
             return;
@@ -578,22 +578,22 @@ impl Hub {
         }
     }
 
-    /// ワーカーからの結果を取り込む。戻り値: トーストに出す (文, エラーか)。
+    /// Take in results from the worker. Return value: what to show in a toast (text, is-error).
     pub fn handle(&mut self, msg: Msg) -> Option<(String, bool)> {
         match msg {
             Msg::Scanned { gen, .. } if gen != self.scan_gen => {
-                // バックエンド切替などで遅れて届いた古い列挙は捨てる。
+                // Discard stale enumerations that arrive late, e.g. after a backend switch.
                 None
             }
             Msg::Scanned {
                 res: Ok(mut list), ..
             } => {
                 self.scanned = true;
-                // 抜かれたデバイスのセッションを閉じる。
+                // Close the sessions of unplugged devices.
                 self.sessions
                     .retain(|id, _| list.iter().any(|d| d.id == *id));
                 for d in &mut list {
-                    // 前回の一覧/セッションのバッテリー値を引き継ぐ (scan は battery を持たない)。
+                    // Carry over the battery value from the previous list/session (scan has no battery).
                     if d.battery.is_none() {
                         d.battery = self
                             .devices
@@ -603,10 +603,10 @@ impl Hub {
                             .or_else(|| self.sessions.get(&d.id).and_then(|s| s.info.battery));
                     }
                     if let Some(s) = self.sessions.get_mut(&d.id) {
-                        // asleep は scan が知らない — セッション (ドライバ) の値を一覧へ。
-                        // 逆方向 (d→s) で上書きすると 2 秒ごとに asleep が消える。
+                        // asleep is unknown to scan — copy the session's (driver's) value to the list.
+                        // Overwriting in the reverse direction (d→s) would make asleep disappear every 2 seconds.
                         d.asleep = s.info.asleep;
-                        // ドングル内側機種の確定名も同様 (列挙は受信機名を返す)。
+                        // Same for the resolved name of the model inside a dongle (enumeration returns the receiver's name).
                         if s.info.model != d.model {
                             d.name = s.info.name.clone();
                             d.model = s.info.model.clone();
@@ -617,8 +617,8 @@ impl Hub {
                     }
                 }
                 self.devices = list;
-                // バッテリー/通知を得るため、対応デバイスのセッションを裏で開いておく
-                // (画面は開かない。open() は既開なら何もしない)。
+                // Open sessions of supported devices in the background to get battery/notifications
+                // (the screen is not opened. open() does nothing if already open).
                 let ids: Vec<DeviceId> = self
                     .devices
                     .iter()
@@ -634,14 +634,14 @@ impl Hub {
             }
             Msg::Scanned { res: Err(e), .. } => {
                 self.scanned = true;
-                Some((format!("デバイスの列挙に失敗: {e}"), true))
+                Some((format!("Failed to enumerate devices: {e}"), true))
             }
             Msg::Opened { id, info, caps } => {
                 if let Some(s) = self.sessions.get_mut(&id) {
                     if let Some(d) = self.devices.iter_mut().find(|d| d.id == id) {
                         d.asleep = info.asleep;
-                        // ドングル内側機種の確定で name/model が変わりうる
-                        // (EID 検出 — mousefit8::maybe_detect)。
+                        // name/model can change when the model inside a dongle is resolved
+                        // (EID detection — mousefit8::maybe_detect).
                         d.name = info.name.clone();
                         d.model = info.model.clone();
                         if info.battery.is_some() {
@@ -651,7 +651,7 @@ impl Hub {
                     s.info = info;
                     s.caps = Some(*caps);
                     send_read(s);
-                    // 軸名を裏で取る (ベンダー API、失敗しても何も変わらない)。
+                    // Fetch axis names in the background (vendor API; nothing changes if it fails).
                     if let (Some(bid), Some(pc)) = (
                         s.info.board_id,
                         s.caps
@@ -673,7 +673,7 @@ impl Hub {
                         }
                     }
                 }
-                // 開き終わったら更新を確認 (24h 以内なら中で跳ぶ)。
+                // Check for updates once opened (skipped internally if within 24h).
                 self.check_firmware(&id, false);
                 None
             }
@@ -694,7 +694,7 @@ impl Hub {
                         for (i, id2) in pc.switch_ids.iter().enumerate() {
                             if let Some(n) = names.get(id2) {
                                 if let Some(slot) = pc.switch_types.get_mut(i) {
-                                    *slot = format!("{n} (軸 {id2})");
+                                    *slot = format!("{n} (axis {id2})");
                                 }
                             }
                         }
@@ -710,8 +710,8 @@ impl Hub {
             }
             Msg::State { id, state } => {
                 if let Some(s) = self.sessions.get_mut(&id) {
-                    // 読み込みの発行より後に投入した未確定の変更を重ねる — 古い
-                    // 読み出しで楽観的な変更を巻き戻さない (それらはまだ実行中)。
+                    // Layer on the unconfirmed changes submitted after the read was issued — so a stale
+                    // read does not roll back optimistic changes (they are still running).
                     let mut st = *state;
                     for (seq, c) in &s.pending_changes {
                         if *seq > s.read_seq {
@@ -722,7 +722,7 @@ impl Hub {
                     s.status = Status::Ready;
                     if s.read_notify {
                         s.read_notify = false;
-                        return Some((format!("{} の設定を読み込みました", s.info.name), false));
+                        return Some((format!("Loaded settings for {}", s.info.name), false));
                     }
                 }
                 None
@@ -734,22 +734,25 @@ impl Hub {
                         s.status = Status::Failed(err.clone());
                     }
                 }
-                Some((format!("読み込みに失敗: {err}"), true))
+                Some((format!("Failed to load: {err}"), true))
             }
             Msg::DirectDrive { id, err } => {
                 let s = self.sessions.get_mut(&id)?;
                 if let Some(e) = err {
-                    // 失敗したら実機プレビューを止めて実機点灯をファームへ戻し、状態を読み直す。
+                    // On failure, stop the on-device preview, return the device lighting to firmware, and re-read the state.
                     s.dd_on = false;
                     let _ = s.tx.send(Job::DdStop);
                     send_read(s);
-                    return Some((format!("実機プレビューに失敗: {e}"), true));
+                    return Some((format!("On-device preview failed: {e}"), true));
                 }
                 None
             }
             Msg::DdStopFailed { id, err } => {
                 self.sessions.get(&id)?;
-                Some((format!("DirectDrive 停止後の点灯復元に失敗: {err}"), true))
+                Some((
+                    format!("Failed to restore lighting after stopping DirectDrive: {err}"),
+                    true,
+                ))
             }
             Msg::LiveLight { id, colors } => {
                 if let Some(s) = self.sessions.get_mut(&id) {
@@ -762,21 +765,21 @@ impl Hub {
             Msg::TravelStopped { id } => {
                 let s = self.sessions.get_mut(&id)?;
                 if !s.travel_on {
-                    return None; // ユーザーが既に止めた後の失敗
+                    return None; // failure after the user had already stopped it
                 }
                 s.travel_on = false;
                 s.travel.clear();
                 s.axis.clear();
-                Some(("ライブ測定がデバイス側で停止しました".into(), true))
+                Some(("Live measurement stopped on the device side".into(), true))
             }
             Msg::Applied { id, err } => {
                 let s = self.sessions.get_mut(&id)?;
                 s.pending = s.pending.saturating_sub(1);
                 s.pending_changes.pop_front();
                 if let Some(e) = err {
-                    // 実機の値へ戻す。
+                    // Return to the device's value.
                     send_read(s);
-                    return Some((format!("書き込みに失敗: {e}"), true));
+                    return Some((format!("Write failed: {e}"), true));
                 }
                 None
             }
@@ -785,12 +788,12 @@ impl Hub {
                 s.switching_profile = false;
                 s.pending = s.pending.saturating_sub(1);
                 if let Some(e) = err {
-                    // 切替か直後の読み直しに失敗 — どの構成の値か分からないので
-                    // 状態を捨てて読み直す (古い値を別構成へ書き戻さない)。
+                    // The switch or the re-read right after it failed — we do not know which config's values
+                    // these are, so discard the state and re-read (do not write old values back into another config).
                     s.state = None;
                     s.switch_failed = true;
                     send_read(s);
-                    return Some((format!("構成の切替に失敗: {e}"), true));
+                    return Some((format!("Failed to switch configuration: {e}"), true));
                 }
                 None
             }
@@ -803,8 +806,7 @@ impl Hub {
                             send_read(s);
                         }
                         Some((
-                            o.message
-                                .unwrap_or_else(|| format!("{label}: 完了しました")),
+                            o.message.unwrap_or_else(|| format!("{label}: completed")),
                             false,
                         ))
                     }
@@ -818,10 +820,7 @@ impl Hub {
                     if let Some(p) = battery.percent {
                         if p <= 15 && !battery.charging && !s.low_battery_warned {
                             s.low_battery_warned = true;
-                            warn = Some((
-                                format!("{} のバッテリー残量が {p}% です", s.info.name),
-                                true,
-                            ));
+                            warn = Some((format!("{} battery is at {p}%", s.info.name), true));
                         }
                         if p > 30 {
                             s.low_battery_warned = false;
@@ -862,14 +861,14 @@ impl Hub {
                 let mut st = match res {
                     Ok(st) => st,
                     Err(e) => {
-                        // 手動確認の失敗は報告、自動確認の失敗は静かに捨てる。
-                        return manual.then(|| (format!("ファームウェアの確認に失敗: {e}"), true));
+                        // Report a failure of a manual check; quietly drop a failure of an automatic check.
+                        return manual.then(|| (format!("Firmware check failed: {e}"), true));
                     }
                 };
                 let s = self.sessions.get(&id)?;
                 let key = Self::fw_key(&s.info);
                 let name = s.info.name.clone();
-                // 同じ指紋を以前 dismiss していれば今回も出さない。
+                // If the same fingerprint was dismissed before, do not show it this time either.
                 let dismissed =
                     self.fw.devices.get(&key).is_some_and(|e| {
                         e.dismissed == st.fingerprint && !st.fingerprint.is_empty()
@@ -883,18 +882,15 @@ impl Hub {
                 let fresh = st.new_available;
                 self.fw_status.insert(id, st);
                 if !fresh {
-                    return manual.then(|| (format!("{name} のファームウェアは最新です"), false));
+                    return manual.then(|| (format!("{name} firmware is up to date"), false));
                 }
                 if self.fw_native {
                     let _ = notify_rust::Notification::new()
                         .summary("Device HUB")
-                        .body(&format!("{name} の新しいファームウェアが公開されています"))
+                        .body(&format!("New firmware is available for {name}"))
                         .show();
                 }
-                Some((
-                    format!("{name} の新しいファームウェアが公開されています"),
-                    false,
-                ))
+                Some((format!("New firmware is available for {name}"), false))
             }
             Msg::Event(ev) => {
                 match ev {
@@ -909,13 +905,13 @@ impl Hub {
                         }
                     }
                     HubEvent::Info(id, info) => {
-                        // ドライバが掴んだ休眠/バッテリーの変化をセッションと一覧へ。
+                        // Changes in sleep/battery picked up by the driver go to the session and the list.
                         let mut woke = false;
-                        // EID 検出などで機種 (name/model) が確定・変更された → caps も変わる
-                        // ので Job::Open で info+caps を取り直す。
+                        // The model (name/model) was resolved/changed, e.g. by EID detection → caps change too,
+                        // so re-fetch info+caps with Job::Open.
                         let mut renamed = false;
                         if let Some(s) = self.sessions.get_mut(&id) {
-                            // 休眠→覚醒の遷移: 寝ている間に読まれた空の状態を読み直す。
+                            // Sleep → wake transition: re-read the empty state that was read while asleep.
                             woke = s.info.asleep && !info.asleep;
                             renamed = s.info.model != info.model || s.info.name != info.name;
                             s.info.asleep = info.asleep;
@@ -959,10 +955,10 @@ impl Hub {
     }
 }
 
-// ------------------------------------------------------------------ ワーカー
+// ------------------------------------------------------------------ Worker
 
-/// 読み込み/再オープンを要求する — 世代を記録するので、それ以降に投入した
-/// 未確定の変更は `Msg::State` 着信時に確定状態へ重ねる (巻き戻さない)。
+/// Request a read/reopen — records the generation, so unconfirmed changes submitted
+/// after it are layered onto the confirmed state when `Msg::State` arrives (no rollback).
 fn send_read(s: &mut Session) {
     s.read_seq = s.submit_seq;
     let _ = s.tx.send(Job::Read);
@@ -973,8 +969,8 @@ fn send_open(s: &mut Session) {
     let _ = s.tx.send(Job::Open);
 }
 
-/// 連続するジョブだけを間引く。途中の読み込み・操作や別の変更は先行する書き込みを
-/// 前提にすることがある。省いた Apply も UI の書き込み待ち件数には含まれる。
+/// Thin out only consecutive jobs. An intermediate read/operation or another change may
+/// depend on an earlier write. Skipped Applys are still counted in the UI's pending-write count.
 fn coalesce_jobs(jobs: impl IntoIterator<Item = Job>) -> (Vec<Job>, usize) {
     let mut kept = Vec::new();
     let mut skipped_applies = 0;
@@ -1007,14 +1003,14 @@ fn worker(
     let mut driver: Option<Arc<dyn DeviceDriver>> = None;
     let mut vidpid: Option<(u16, u16)> = None;
     let mut travel = false;
-    // ライブ点灯色ポーリング (ライティング画面表示中のみ)。~33ms 間隔 —
-    // 実測で 9 チャンクの往復は ~3.4ms (litpoll)。エフェクトの動きが滑らかに見える程度。
+    // Live lit-color polling (only while the Lighting screen is shown). ~33ms interval —
+    // measured: a 9-chunk round trip takes ~3.4ms (litpoll). Enough for effect motion to look smooth.
     let mut live_lit = false;
     let mut live_at = std::time::Instant::now();
     let send = |m: Msg| out.unbounded_send(m).is_ok();
     loop {
         let first = if travel || live_lit {
-            // travel 中は深さ優先の 33ms、点灯色ポーリングも同じ 33ms 周期。
+            // During travel, depth takes priority at 33ms; lit-color polling uses the same 33ms period.
             let wait = 33;
             match rx.recv_timeout(Duration::from_millis(wait)) {
                 Ok(j) => Some(j),
@@ -1063,7 +1059,7 @@ fn worker(
                     Some(Err(e)) => {
                         if matches!(e, devhub_core::backend::HubError::Disconnected) {
                             backend.invalidate(&id);
-                            driver = None; // 古いハンドルを捨て、再オープンで取り直す。
+                            driver = None; // Discard the stale handle and re-acquire it by reopening.
                         }
                         send(Msg::ReadFailed {
                             id: id.clone(),
@@ -1081,7 +1077,7 @@ fn worker(
                                 matches!(e, devhub_core::backend::HubError::Disconnected),
                             ),
                         },
-                        None => (Some("デバイスが開かれていません".into()), false),
+                        None => (Some("Device is not open".into()), false),
                     };
                     if dead {
                         backend.invalidate(&id);
@@ -1092,7 +1088,7 @@ fn worker(
                         err,
                     })
                 }
-                // 構成切替: 書き込みに成功したら全設定を読み直してから報告する。
+                // Config switch: on a successful write, re-read all settings before reporting.
                 Job::Profile(p) => {
                     let (err, dead) = match &driver {
                         Some(d) => match d.apply(&Change::Profile(p)) {
@@ -1114,7 +1110,7 @@ fn worker(
                                 matches!(e, devhub_core::backend::HubError::Disconnected),
                             ),
                         },
-                        None => (Some("デバイスが開かれていません".into()), false),
+                        None => (Some("Device is not open".into()), false),
                     };
                     if dead {
                         backend.invalidate(&id);
@@ -1138,7 +1134,7 @@ fn worker(
                                 matches!(e, devhub_core::backend::HubError::Disconnected),
                             ),
                         },
-                        None => (Err("デバイスが開かれていません".into()), false),
+                        None => (Err("Device is not open".into()), false),
                     };
                     if dead {
                         backend.invalidate(&id);
@@ -1158,7 +1154,7 @@ fn worker(
                     _ => true,
                 },
                 Job::PollRate => {
-                    // Raw Input の到達レート (プロセス内計測 — ドライバ不要)。
+                    // Raw Input arrival rate (measured in-process — no driver needed).
                     send(Msg::PollRate {
                         id: id.clone(),
                         stats: vidpid.and_then(|(v, p)| rawinput::stats(v, p)),
@@ -1171,7 +1167,7 @@ fn worker(
                 Job::DirectDrive { cells } => {
                     let err = match &driver {
                         Some(d) => d.direct_drive(0, &cells).err().map(|e| e.to_string()),
-                        None => Some("デバイスが開かれていません".into()),
+                        None => Some("Device is not open".into()),
                     };
                     send(Msg::DirectDrive {
                         id: id.clone(),
@@ -1182,7 +1178,7 @@ fn worker(
                     let result = driver.as_ref().map(|d| d.direct_drive_stop(0));
                     match result {
                         Some(Err(e)) if !matches!(e, HubError::Unsupported(_)) => {
-                            // 終了時は UI が先に閉じている可能性がある。
+                            // At exit the UI may already have closed.
                             send(Msg::DdStopFailed {
                                 id: id.clone(),
                                 err: e.to_string(),
@@ -1193,7 +1189,7 @@ fn worker(
                 }
                 Job::LiveLight(on) => {
                     live_lit = on;
-                    // 即座に 1 回読めるよう過去時刻にしておく。
+                    // Set a past time so it can be read once immediately.
                     live_at = std::time::Instant::now()
                         .checked_sub(Duration::from_millis(33))
                         .unwrap_or_else(std::time::Instant::now);
@@ -1204,8 +1200,8 @@ fn worker(
                 return;
             }
         }
-        // 点灯色ポーリング — 非対応ドライバは即 Unsupported を返すので
-        // 失敗しても次の tick でまた試すだけ (HID は叩かれない)。
+        // Lit-color polling — an unsupported driver returns Unsupported immediately, so
+        // even on failure we just retry on the next tick (HID is not touched).
         if live_lit && live_at.elapsed() >= Duration::from_millis(33) {
             live_at = std::time::Instant::now();
             if let Some(d) = &driver {
@@ -1221,8 +1217,8 @@ fn worker(
         }
         if travel {
             if let Some(d) = &driver {
-                // マウス磁気ボタン → live_buttons。キーボードは live_axis
-                // (生データ) 優先、非対応なら live_travel。
+                // Mouse magnetic buttons → live_buttons. Keyboards prefer live_axis
+                // (raw data), falling back to live_travel if unsupported.
                 if let Ok(buttons) = d.live_buttons() {
                     if !send(Msg::Buttons {
                         id: id.clone(),
@@ -1256,9 +1252,9 @@ fn worker(
     }
 }
 
-// ------------------------------------------------------------------ 楽観的な反映
+// ------------------------------------------------------------------ Optimistic application
 
-/// `Change` を UI 側の状態へ反映する (ドライバの書き込みと同じ意味)。
+/// Reflect a `Change` into the UI-side state (same meaning as the driver's write).
 pub fn apply_local(s: &mut DeviceState, change: &Change) {
     match change.clone() {
         Change::Setting { id, value } => {
@@ -1312,7 +1308,7 @@ pub fn apply_local(s: &mut DeviceState, change: &Change) {
             }
         }
         Change::KeyMapReset { .. } => {
-            // 既定値は UI が知らない。ワーカーの後に読み直す (Applied 後に Read を送る)。
+            // The UI does not know the default value. Re-read after the worker (send Read after Applied).
         }
         Change::KeyPerf { keys, perf } => {
             if let Some(k) = s.keyboard.as_mut() {
@@ -1357,10 +1353,10 @@ pub fn apply_local(s: &mut DeviceState, change: &Change) {
     }
 }
 
-// ------------------------------------------------------------------ 差分
+// ------------------------------------------------------------------ Diff
 
-/// `cur` を `target` に揃えるための Change 列 (caps の範囲内だけ)。
-/// 元に戻す / やり直し、プリセットの適用、ファイルからの読み込みで共用する。
+/// Change list to bring `cur` to `target` (only within caps' range).
+/// Shared by undo / redo, preset application and loading from a file.
 pub fn diff_changes(caps: &Capabilities, cur: &DeviceState, target: &DeviceState) -> Vec<Change> {
     let mut out: Vec<Change> = vec![];
     for (id, v) in &target.settings {
@@ -1414,7 +1410,7 @@ pub fn diff_changes(caps: &Capabilities, cur: &DeviceState, target: &DeviceState
                 }
             }
         }
-        // 同じ設定のキーはまとめて 1 件にする (書き込み回数を減らす)。
+        // Merge keys of the same setting into one entry (to reduce the number of writes).
         let mut groups: Vec<(KeyPerf, Vec<usize>)> = vec![];
         for (i, pf) in t.perf.iter().enumerate().take(kc.layout.len()) {
             if c.perf.get(i) != Some(pf) {
@@ -1480,8 +1476,8 @@ pub fn diff_changes(caps: &Capabilities, cur: &DeviceState, target: &DeviceState
             out.push(Change::Adaptive(t.clone()));
         }
     }
-    // 構成の切替自体はここでは出さない — `Job::Profile` で切替+再読をひとまとめにする。
-    // (切替前の差分を切替後の構成へ書かないため)。名前だけは通常の書き込みで戻せる。
+    // The config switch itself is not emitted here — `Job::Profile` bundles switch + re-read.
+    // (so a diff from before the switch is not written into the config after it). Only the name can be restored by a normal write.
     if caps.profiles.as_ref().is_some_and(|pc| pc.renamable) {
         for (i, n) in target.profile.names.iter().enumerate() {
             if cur.profile.names.get(i) != Some(n) {
@@ -1495,9 +1491,9 @@ pub fn diff_changes(caps: &Capabilities, cur: &DeviceState, target: &DeviceState
     out
 }
 
-/// 現在の `DeviceState` 全体を `Change` 列にする (プロファイルの「今の状態を記録」)。
-/// キーマップ・ボタン・マクロ・高度キーは含まない — 全書き換えは書き込み数が
-/// 多く EEPROM も摩耗するので、スカラー設定・DPI・性能・ライティング・EQ に絞る。
+/// The whole current `DeviceState` as a `Change` list (the profile's "record current state").
+/// Keymaps, buttons, macros and advanced keys are not included — a full rewrite means many writes and
+/// wears the EEPROM, so this is limited to scalar settings, DPI, performance, lighting and EQ.
 pub fn snapshot_changes(caps: &Capabilities, st: &DeviceState) -> Vec<Change> {
     let mut out = vec![];
     for (id, v) in &st.settings {
@@ -1517,7 +1513,7 @@ pub fn snapshot_changes(caps: &Capabilities, st: &DeviceState) -> Vec<Change> {
         }
     }
     if let (Some(k), Some(kc)) = (&st.keyboard, &caps.keyboard) {
-        // 同じ設定のキーはまとめて 1 件にする (diff_changes と同じく)。
+        // Merge keys of the same setting into one entry (as in diff_changes).
         let mut groups: Vec<(devhub_core::KeyPerf, Vec<usize>)> = vec![];
         for (i, pf) in k.perf.iter().enumerate().take(kc.layout.len()) {
             match groups.iter_mut().find(|g| g.0 == *pf) {
@@ -1551,23 +1547,23 @@ pub fn snapshot_changes(caps: &Capabilities, st: &DeviceState) -> Vec<Change> {
     out
 }
 
-/// 読み込んだ `DeviceState` (プリセット/エクスポート JSON) がこのデバイスに適用できるか。
-/// `Err` = 別機種向けなどで適用不可。`Ok(Some(msg))` = 警告付きで適用できる。
+/// Whether a loaded `DeviceState` (preset/export JSON) can be applied to this device.
+/// `Err` = cannot apply, e.g. it is for another model. `Ok(Some(msg))` = can apply with a warning.
 pub fn state_compatible(caps: &Capabilities, st: &DeviceState) -> Result<Option<String>, String> {
     if st.keyboard.is_some() && caps.keyboard.is_none() {
-        return Err("キーボード向けの設定ファイルです".into());
+        return Err("This is a settings file for keyboards".into());
     }
     if st.mouse.is_some() && caps.mouse.is_none() {
-        return Err("マウス向けの設定ファイルです".into());
+        return Err("This is a settings file for mice".into());
     }
     if let Some(bands) = &st.peq {
         match &caps.peq {
             Some(pc) if bands.len() == pc.bands as usize => {}
-            Some(_) => return Err("EQ のバンド数が合いません".into()),
-            None => return Err("EQ 対応デバイスの設定ファイルです".into()),
+            Some(_) => return Err("The EQ band count does not match".into()),
+            None => return Err("This is a settings file for EQ-capable devices".into()),
         }
     }
-    // そのままでは使えない項目を数える (diff_changes が実際に落とす分)。
+    // Count items that cannot be used as is (what diff_changes actually drops).
     let mut ignored = 0usize;
     for id in st.settings.keys() {
         if caps.setting(id).is_none() {
@@ -1586,7 +1582,9 @@ pub fn state_compatible(caps: &Capabilities, st: &DeviceState) -> Result<Option<
         }
     }
     if ignored > 0 {
-        Ok(Some(format!("{ignored} 件の未対応設定は無視されます")))
+        Ok(Some(format!(
+            "{ignored} unsupported settings will be ignored"
+        )))
     } else {
         Ok(None)
     }
@@ -1661,7 +1659,7 @@ mod worker_queue_tests {
 
     #[test]
     fn profile_switch_job_is_never_coalesced_into_writes() {
-        // 構成切替は専用ジョブ — 直前・直後の書き込みと間引きで混ざらない。
+        // A config switch is a dedicated job — it is not mixed up with the writes just before or after it by thinning.
         let stage = |i| Job::Apply(Change::ActiveStage(i));
         let (jobs, skipped) = coalesce_jobs([stage(0), Job::Profile(2), stage(1)]);
         assert_eq!(skipped, 0);
@@ -1691,7 +1689,7 @@ mod worker_queue_tests {
 
     #[test]
     fn demo_keeps_settings_separate_per_profile() {
-        // 構成ごとに中身が分かれる (実機と同じ) — P1 への undo が P2 を壊さないための前提。
+        // Contents are separated per config (as on a real device) — a precondition so that undo to P1 does not break P2.
         let (driver, _, _) = demo_kb();
         driver
             .apply(&Change::KeyMap {
@@ -1706,14 +1704,14 @@ mod worker_queue_tests {
         assert_ne!(
             p1.keyboard.as_ref().unwrap().keymap[0][0],
             KeyAction::Code(0x1234),
-            "構成 1 に構成 0 の変更が漏れている"
+            "Changes from config 0 leaked into config 1"
         );
         driver.apply(&Change::Profile(0)).unwrap();
         let p0 = driver.read().unwrap();
         assert_eq!(
             p0.keyboard.as_ref().unwrap().keymap[0][0],
             KeyAction::Code(0x1234),
-            "構成 0 の変更が失われた"
+            "Changes of config 0 were lost"
         );
     }
 
@@ -1748,7 +1746,7 @@ mod worker_queue_tests {
             |h| h.session(&id).is_some_and(|s| s.ready())
         ));
 
-        // 構成切替を送る → 切替+再読が終わるまで editing 不可・state は旧構成のまま。
+        // Send a config switch → no editing until switch + re-read finish, and state stays the old config.
         hub.apply(&id, Change::Profile(1));
         assert!(hub.session(&id).unwrap().switching_profile);
         assert_eq!(
@@ -1772,7 +1770,7 @@ mod worker_queue_tests {
         assert_eq!(
             hub.session(&id).unwrap().pending,
             pending,
-            "切替中の編集がワーカーへ流れた"
+            "An edit during the switch reached the worker"
         );
         assert!(drain_until(
             &mut hub,
@@ -1817,7 +1815,7 @@ mod worker_queue_tests {
         let changes = diff_changes(&caps, &cur, &target);
         assert!(
             changes.iter().all(|c| !matches!(c, Change::Profile(_))),
-            "構成切替が差分として出た — 切替前の差分を切替後の構成へ書いてしまう"
+            "The config switch appeared as a diff — a pre-switch diff would be written into the post-switch config"
         );
         assert_eq!(
             changes
@@ -1825,13 +1823,13 @@ mod worker_queue_tests {
                 .filter(|c| matches!(c, Change::ProfileName { .. }))
                 .count(),
             4,
-            "プロファイル名の差分が出ていない"
+            "The profile-name diff did not appear"
         );
     }
 
     #[test]
     fn state_replays_writes_issued_after_the_read_started() {
-        // 読み込みの発行より後に投入した変更は、古い State 着信で巻き戻されない。
+        // Changes submitted after the read was issued are not rolled back by the arrival of an old State.
         let backend: Arc<dyn HubBackend> = Arc::new(devhub_core::demo::DemoHub::new());
         let (tx, mut rx) = futures::channel::mpsc::unbounded::<Msg>();
         let mut hub = Hub::new(backend, tx);
@@ -1860,7 +1858,7 @@ mod worker_queue_tests {
             |h| h.session(&id).is_some_and(|s| s.ready())
         ));
 
-        // 変更前の状態 (読み込みがこの値を返したとする)。
+        // State before the change (assume the read returned this value).
         let stale = hub.backend.driver(&id).unwrap().read().unwrap();
         hub.apply(
             &id,
@@ -1869,7 +1867,7 @@ mod worker_queue_tests {
                 name: "RENAMED".into(),
             },
         );
-        // 古い読み出しが届いても、確定待ちの変更は維持される。
+        // Even if a stale read arrives, changes awaiting confirmation are kept.
         hub.handle(Msg::State {
             id: id.clone(),
             state: Box::new(stale),
@@ -1884,7 +1882,7 @@ mod worker_queue_tests {
                 .names[0],
             "RENAMED"
         );
-        // 確定したあとに届く新しい読み出しはそのまま反映される。
+        // A newer read arriving after confirmation is reflected as is.
         drain_until(&mut hub, &mut rx, Duration::from_secs(5), |h| {
             h.session(&id).is_some_and(|s| s.pending_changes.is_empty())
         });
@@ -1893,18 +1891,18 @@ mod worker_queue_tests {
     #[test]
     fn state_compatible_rejects_other_devices_and_flags_unknown_keys() {
         let (_, caps, st) = demo_kb();
-        // キーボードの状態をマウス caps へ → 適用不可。
+        // Keyboard state into mouse caps → cannot apply.
         let mouse_caps = devhub_core::demo::mouse_caps(false, false);
         assert!(state_compatible(&mouse_caps, &st).is_err());
-        // 同じ caps → そのまま使える。
+        // Same caps → usable as is.
         assert_eq!(state_compatible(&caps, &st).unwrap(), None);
-        // 不明な設定 id は警告 (無視される) として数える。
+        // Unknown setting ids are counted as warnings (ignored).
         let mut extra = st.clone();
         extra
             .settings
             .insert("nonexistent".into(), SettingValue::Bool(true));
         assert!(matches!(state_compatible(&caps, &extra), Ok(Some(_))));
-        // EQ 非対応デバイスへ EQ データ → 適用不可。
+        // EQ data to a device without EQ support → cannot apply.
         let mut peq = st.clone();
         peq.peq = Some(vec![PeqBand {
             freq: 1000,

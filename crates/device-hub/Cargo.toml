@@ -3,7 +3,7 @@ name = "device-hub"
 version = "0.2.6"
 edition.workspace = true
 license.workspace = true
-description = "Device HUB — ブラウザ無しでマウス/キーボードを設定する GPUI フロントエンド (Liquid Glass)"
+description = "Device HUB — a GPUI frontend for configuring mice and keyboards without a browser (Liquid Glass)"
 
 [dependencies]
 devhub-core = { path = "../devhub-core" }
@@ -40,6 +40,6 @@ windows = { version = "0.62", features = [
 ] }
 
 [lints.clippy]
-# GPUI のビューコードに本質的な複雑さ (参照実装と同じ運用)。
+# GPUI view code is inherently complex (same practice as the reference implementation).
 type_complexity = "allow"
 too_many_arguments = "allow"

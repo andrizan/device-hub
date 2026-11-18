@@ -1,6 +1,6 @@
-//! 実行ファイルにアイコンを埋め込む (`.rsrc` が無いとエクスプローラーもタスクバーも既定の絵になる)。
-//! `gpui-pre-windows` の `load_icon` は自分自身のリソース ID 1 を読むので、窓のアイコンも
-//! これで同時に付く。中身は `build-support/icon.rs` (参照実装と同じもの)。
+//! Embeds the icon into the executable (without a `.rsrc`, Explorer and the taskbar both show the default picture).
+//! `gpui-pre-windows`'s `load_icon` reads its own resource ID 1, so the window icon is
+//! attached at the same time. The content lives in `build-support/icon.rs` (same as the reference implementation).
 
 #[path = "build-support/icon.rs"]
 mod icon;
@@ -8,8 +8,8 @@ mod icon;
 fn main() {
     println!("cargo:rerun-if-changed=build-support/icon.rs");
     icon::embed("assets/icon.ico");
-    // GPUI の大きなビュー関数はデバッグビルドで既定の 1MB スタックを溢れ得る
-    // (参照実装で設定ページの `stack overflow` 実績あり)。メインスレッド予約を広げる。
+    // GPUI's large view functions can overflow the default 1MB stack in debug builds
+    // (a `stack overflow` was seen on the settings page in the reference implementation). Enlarge the main thread reservation.
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         println!("cargo:rustc-link-arg-bin=device-hub=/STACK:16777216");
     }

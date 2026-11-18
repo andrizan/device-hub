@@ -1,8 +1,8 @@
-//! SU66 Max のコマンド空間を安全に網羅するプローブ (堅牢版)。
-//! 読み取り系のみ。書き込み系 (group2 sub1=ResetFactory, sub2=SaveParam,
-//! 各 group の sub2=SET 系, 5,2/5,4/5,5, 13 系のペアリング等) は除外。
-//! 切断されても自動で reopen して続行する (group1 の未知 sub で実機が
-//! 再起動することを確認済み)。
+//! Probe that safely sweeps the SU66 Max command space (robust version).
+//! Read-only commands only. Write-type ones (group2 sub1=ResetFactory, sub2=SaveParam,
+//! sub2=SET variants of each group, 5,2/5,4/5,5, group-13 pairing, etc.) are excluded.
+//! Automatically reopens and continues after a disconnect (confirmed that the real device
+//! reboots on unknown subs of group1).
 use hidapi::HidApi;
 use std::time::{Duration, Instant};
 
@@ -22,7 +22,7 @@ fn open(api: &HidApi) -> Option<hidapi::HidDevice> {
     None
 }
 
-/// 応答があれば 64B を返す。失敗/切断で None。
+/// Returns 64B if there is a response. None on failure/disconnect.
 fn cmd(dev: &hidapi::HidDevice, args: &[u8]) -> Option<[u8; 64]> {
     let mut w = [0u8; 65];
     w[1] = args[0];
@@ -70,7 +70,7 @@ fn hexdump(r: &[u8; 64]) -> String {
 
 fn probe(api: &HidApi, dev: &mut Option<hidapi::HidDevice>, args: &[u8]) -> bool {
     if !ensure(api, dev) {
-        println!("{:>2} {:>3} NODEV (reopen 失敗)", args[0], args[1]);
+        println!("{:>2} {:>3} NODEV (reopen failed)", args[0], args[1]);
         return false;
     }
     let r = cmd(dev.as_ref().unwrap(), args);
@@ -80,12 +80,12 @@ fn probe(api: &HidApi, dev: &mut Option<hidapi::HidDevice>, args: &[u8]) -> bool
             println!("{:>2} {:>3} {:<6} {}", args[0], args[1], tag, hexdump(&r));
         }
         None => {
-            // timeout か切断かを切り分ける — 軽い読み取りを試す
+            // Tell a timeout from a disconnect — try a light read
             let alive = cmd(dev.as_ref().unwrap(), &[1, 1]).is_some();
             if alive {
                 println!("{:>2} {:>3} TIMEOUT", args[0], args[1]);
             } else {
-                println!("{:>2} {:>3} DISCONN (実機再起動?)", args[0], args[1]);
+                println!("{:>2} {:>3} DISCONN (device rebooted?)", args[0], args[1]);
                 *dev = None;
                 ensure(api, dev);
             }
@@ -98,20 +98,20 @@ fn main() {
     let api = HidApi::new().unwrap();
     let mut dev = open(&api);
 
-    println!("== A: 未知グループの存在確認 ([g,1]) ==");
+    println!("== A: check whether unknown groups exist ([g,1]) ==");
     for g in [0u8, 8, 9, 11, 12, 14, 15, 16, 17, 18, 19, 20] {
         probe(&api, &mut dev, &[g, 1]);
     }
 
-    println!("== B: group1 DEVICE 未知 sub (切断注意) ==");
+    println!("== B: group1 DEVICE unknown subs (may disconnect) ==");
     for s in [0u8, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15] {
         if !probe(&api, &mut dev, &[1, s]) {
             break;
         }
     }
 
-    println!("== C: group2 GLOBAL 未知 sub (arg0=0 = read/list 規約) ==");
-    // 1=ResetFactory, 2=SaveParam は除外。
+    println!("== C: group2 GLOBAL unknown subs (arg0=0 = read/list convention) ==");
+    // 1=ResetFactory and 2=SaveParam are excluded.
     for s in [
         0u8, 9, 10, 11, 15, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 30,
     ] {
@@ -120,21 +120,21 @@ fn main() {
         }
     }
 
-    println!("== D: group3 LAYOUT_KEY 未知 sub ==");
+    println!("== D: group3 LAYOUT_KEY unknown subs ==");
     for s in [0u8, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16] {
         if !probe(&api, &mut dev, &[3, s, 0]) {
             break;
         }
     }
 
-    println!("== E: group4 PERFORMANCE 未知 sub ==");
+    println!("== E: group4 PERFORMANCE unknown subs ==");
     for s in [0u8, 4, 5, 6, 7, 8, 9, 10, 11, 12] {
         if !probe(&api, &mut dev, &[4, s, 0]) {
             break;
         }
     }
 
-    println!("== F: group5 LIGHTING 未知 sub ==");
+    println!("== F: group5 LIGHTING unknown subs ==");
     for s in [0u8, 7, 8, 9, 10, 11, 12] {
         if !probe(&api, &mut dev, &[5, s, 0]) {
             break;
@@ -143,21 +143,21 @@ fn main() {
     probe(&api, &mut dev, &[5, 6, 0]);
     probe(&api, &mut dev, &[5, 6, 1]);
 
-    println!("== G: group6 HIGHER_KEY 未知 sub ==");
+    println!("== G: group6 HIGHER_KEY unknown subs ==");
     for s in [0u8, 3, 4, 5, 6, 7, 8, 9, 10] {
         if !probe(&api, &mut dev, &[6, s, 0, 0]) {
             break;
         }
     }
 
-    println!("== H: group7 MACRO 未知 sub ==");
+    println!("== H: group7 MACRO unknown subs ==");
     for s in [0u8, 5, 6, 7, 8, 9, 10] {
         if !probe(&api, &mut dev, &[7, s, 0]) {
             break;
         }
     }
 
-    println!("== I: group10 CUSTOM 未知 sub ==");
+    println!("== I: group10 CUSTOM unknown subs ==");
     for s in [0u8, 3, 5, 7, 9, 11, 13, 15] {
         if !probe(&api, &mut dev, &[10, s, 0]) {
             break;
@@ -171,11 +171,11 @@ fn main() {
         }
     }
 
-    println!("== K: group13 THREE_MODE 既知読み ==");
+    println!("== K: group13 THREE_MODE known reads ==");
     probe(&api, &mut dev, &[13, 1]);
-    println!("(13 の他 sub はペアリング操作の可能性があるため除外)");
+    println!("(other subs of 13 are excluded as they may be pairing operations)");
 
-    println!("== L: group5 エリア2以降の存在確認 ==");
+    println!("== L: check whether group5 area 2 onward exist ==");
     for a in 0u8..=5 {
         let r = cmd(dev.as_ref().unwrap(), &[5, 1, a, 0]);
         println!(

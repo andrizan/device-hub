@@ -1,6 +1,6 @@
-//! 軸ストリーム解除コマンドの探索 — 武装後に各候補を送り、
-//! 直後 800ms の軸フレーム数で解除できたか判定する。
-//! 実行: cargo run -p devhub-hid --example disarmcmd
+//! Search for an axis-stream disarm command — after arming, send each candidate and
+//! judge whether it disarmed by the number of axis frames in the following 800ms.
+//! Run: cargo run -p devhub-hid --example disarmcmd
 
 fn axis_frames(dev: &hidapi::HidDevice, ms: u64) -> u32 {
     let mut buf = [0u8; 65];
@@ -32,7 +32,7 @@ fn main() -> devhub_core::backend::HubResult<()> {
     let mut buf = [0u8; 65];
     while dev.read_timeout(&mut buf, 0).unwrap_or(0) > 0 {}
 
-    // 武装。
+    // Arm.
     buf[1..5].copy_from_slice(&[4, 3, 1, 1]);
     dev.write(&buf).expect("arm");
     std::thread::sleep(std::time::Duration::from_millis(300));
@@ -50,7 +50,7 @@ fn main() -> devhub_core::backend::HubResult<()> {
         ("[0,0,0,0] zeros", &[0, 0, 0, 0]),
     ];
     for (name, body) in candidates {
-        // 再武装 (前の候補で止まっていた場合に備えて)。
+        // Re-arm (in case the previous candidate stopped the stream).
         buf[1..5].copy_from_slice(&[4, 3, 1, 1]);
         dev.write(&buf).ok();
         std::thread::sleep(std::time::Duration::from_millis(200));

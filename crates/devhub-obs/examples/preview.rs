@@ -1,10 +1,10 @@
-//! OBS 無しで描画を確認する: 実機を ~5 秒ポーリングし、
-//! キーを押しながら `obs-preview.png` に焼く。
+//! Check the rendering without OBS: poll the real device for ~5 seconds,
+//! and bake it into `obs-preview.png` while keys are pressed.
 //!   cargo run -p devhub-obs --example preview
 
 fn main() {
     let poller = devhub_obs::live::Poller::start();
-    println!("5 秒間ポーリングします — キーやボタンを押してください");
+    println!("Polling for 5 seconds - press keys or buttons");
     std::thread::sleep(std::time::Duration::from_secs(5));
     let font = devhub_obs::render::font();
     let live = poller.shared.lock().unwrap().clone();

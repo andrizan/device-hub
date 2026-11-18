@@ -1,16 +1,16 @@
-//! mouse.fit プロトコル — HTS+ Pro / HTX Ultra / ATK F1 Ultimate 等。
+//! mouse.fit protocol — HTS+ Pro / HTX Ultra / ATK F1 Ultimate, etc.
 //!
-//! 実機解析済み (G-Wolves Receiver RS, 33e4:3854, usage_page 0xFF02 / usage 2):
-//! - output report id 8 (16B コマンド + 1B チェックサム)
-//! - input report id 8 で応答 (17B: [id][op echo][status][dev][data@5+][cksum])
-//! - チェックサム: 全 17B (id 含む) の和 ≡ 85 (0x55)
-//! - コマンド op: 4=バッテリー, 18=FW バージョン, 29=FW(dev 別), 8=EEPROM読,
-//!   7=EEPROM書
-//! - EEPROM アドレス (mouse.fit bundle から解析):
+//! Analyzed on real hardware (G-Wolves Receiver RS, 33e4:3854, usage_page 0xFF02 / usage 2):
+//! - output report id 8 (16B command + 1B checksum)
+//! - replies on input report id 8 (17B: [id][op echo][status][dev][data@5+][cksum])
+//! - checksum: sum of all 17B (including id) ≡ 85 (0x55)
+//! - command ops: 4=battery, 18=FW version, 29=FW (per dev), 8=EEPROM read,
+//!   7=EEPROM write
+//! - EEPROM addresses (analyzed from the mouse.fit bundle):
 //!   ReportRate=0, maxDpiStage=2, CurrentDPI=4, KeyOperation=8, LOD=10,
 //!   DPIValue=12 (4B×stage), DebounceTime=169, MotionSync=171, SleepTime=173,
 //!   Angle=175, Ripple=177
-//! - マウスがスリープ中はデータ部が全 0 で返る (ドングルのみ応答)
+//! - while the mouse is asleep the data part comes back all 0 (only the dongle responds)
 
 use devhub_core::backend::{DeviceDriver, HubError, HubResult};
 use devhub_core::model::*;
@@ -21,7 +21,7 @@ use std::time::{Duration, Instant};
 pub const READY: bool = true;
 
 const REPORT_ID: u8 = 8;
-/// EEPROM アドレス表 (JS bundle 由来)。未使用項目は将来の実装用に残す。
+/// EEPROM address table (from the JS bundle). Unused entries are kept for future implementation.
 #[allow(dead_code)]
 mod ee {
     pub const REPORT_RATE: u16 = 0;
@@ -47,7 +47,7 @@ const OP_EEPROM_WRITE: u8 = 7;
 const OP_EEPROM_READ: u8 = 8;
 const OP_FIRMWARE: u8 = 18;
 
-/// EEPROM 値単位の (v, 0x55-v) ペアの先頭バイトを取る。
+/// Takes the first byte of a per-EEPROM-value (v, 0x55-v) pair.
 fn pair_val(chunk: &[u8]) -> Option<u8> {
     chunk.first().copied()
 }
@@ -72,14 +72,14 @@ pub fn open(info: DeviceInfo, path: &std::ffi::CString) -> HubResult<MousefitDri
 }
 
 impl MousefitDriver {
-    /// 16B コマンドフレームを report id 8 で送り、17B 応答を返す。
-    /// 応答は op echo + チェックサム (sum17 ≡ 85) を検証。
+    /// Sends a 16B command frame on report id 8 and returns the 17B response.
+    /// Verifies the response's op echo + checksum (sum17 ≡ 85).
     fn cmd(&self, frame: &[u8; 16]) -> HubResult<[u8; 17]> {
         let dev = self.dev.lock().unwrap_or_else(|p| p.into_inner());
         let mut w = [0u8; 17];
         w[0] = REPORT_ID;
         w[1..17].copy_from_slice(frame);
-        // チェックサム: id+data 全体で sum ≡ 85 になるよう最終Bを調整
+        // Checksum: adjust the last byte so that the sum over id+data ≡ 85
         // JS: t[15] = (85 - sum(t[0..15])) - reportID
         let sum: u32 = w[..16].iter().map(|&b| b as u32).sum();
         w[16] = (85u32.wrapping_sub(sum)) as u8;
@@ -96,7 +96,7 @@ impl MousefitDriver {
                     out.copy_from_slice(&buf[..17]);
                     let s: u32 = out.iter().map(|&b| b as u32).sum();
                     if s % 256 != 85 {
-                        // チェックサム不一致でもデータは返す (FW 差分に備え)
+                        // Return the data even on a checksum mismatch (to allow for FW differences)
                     }
                     return Ok(out);
                 }
@@ -107,8 +107,8 @@ impl MousefitDriver {
         Err(HubError::Protocol("mousefit: response timeout".into()))
     }
 
-    /// EEPROM 読み出し: cmd [8,0,addrHi,addrLo,len] → resp [id][op][0][addrHi][addrLo][len][data…]
-    /// (JS: Get_Device_Eeprom_Buffer — data は payload index 5 = buf[6] から)
+    /// EEPROM read: cmd [8,0,addrHi,addrLo,len] → resp [id][op][0][addrHi][addrLo][len][data…]
+    /// (JS: Get_Device_Eeprom_Buffer — data starts at payload index 5 = buf[6])
     fn ee_read(&self, addr: u16, len: u8) -> HubResult<Vec<u8>> {
         let mut f = [0u8; 16];
         f[0] = OP_EEPROM_READ;
@@ -119,8 +119,8 @@ impl MousefitDriver {
         Ok(r[6..6 + (len as usize).min(11)].to_vec())
     }
 
-    /// EEPROM 配列書き込み: 10B チャンクで cmd [7,0,addrHi,addrLo,len,data…]
-    /// (JS: Set_Device_Eeprom_Array — スカラは [v, 85-v] の 2B として書く)
+    /// EEPROM array write: in 10B chunks, cmd [7,0,addrHi,addrLo,len,data…]
+    /// (JS: Set_Device_Eeprom_Array — scalars are written as a 2B [v, 85-v])
     fn ee_write(&self, addr: u16, data: &[u8]) -> HubResult<()> {
         for (i, chunk) in data.chunks(10).enumerate() {
             let a = addr + (i * 10) as u16;
@@ -135,12 +135,12 @@ impl MousefitDriver {
         Ok(())
     }
 
-    /// スカラ値書き込み: [v, 85-v] の 2B ペア (JS: Set_Device_Eeprom_Value(.., v, 2))。
+    /// Scalar write: a 2B [v, 85-v] pair (JS: Set_Device_Eeprom_Value(.., v, 2)).
     fn ee_write_val(&self, addr: u16, val: u8) -> HubResult<()> {
         self.ee_write(addr, &[val, 85u8.wrapping_sub(val)])
     }
 
-    /// スカラ読み出し: 2B ペアの先頭 (r[6])。
+    /// Scalar read: first byte of the 2B pair (r[6]).
     fn ee_u8(&self, addr: u16) -> u8 {
         self.ee_read(addr, 2)
             .ok()
@@ -148,13 +148,13 @@ impl MousefitDriver {
             .unwrap_or(0)
     }
 
-    /// 4B ブロックの CRC (JS: get_Crc — 末尾を除く和を 85 から引く)。
+    /// CRC of a 4B block (JS: get_Crc — 85 minus the sum excluding the last byte).
     fn crc4(b: &[u8]) -> u8 {
         85u8.wrapping_sub(b[..3].iter().map(|&x| x as u32).sum::<u32>() as u8)
     }
 
-    /// DPI ステージ 1 個分 (4B): [x, y, flags, crc]
-    /// dx = (x + ((flags>>2 & 3)<<8) + 1) * step, flags&1 で 2 倍 (JS 準拠)
+    /// One DPI stage (4B): [x, y, flags, crc]
+    /// dx = (x + ((flags>>2 & 3)<<8) + 1) * step, doubled when flags&1 (as in the JS)
     fn parse_stage(b: &[u8]) -> (u32, u32) {
         let (x, y, fl) = (b[0] as u32, b[1] as u32, b[2] as u32);
         let mut dx = (x + (((fl >> 2) & 3) << 8) + 1) * 50;
@@ -168,11 +168,11 @@ impl MousefitDriver {
         (dx, dy)
     }
 
-    /// DPI ステージを 4B にエンコード (JS: Set_MS_DPIValue_XY, sensor 3950 系)。
+    /// Encodes a DPI stage into 4B (JS: Set_MS_DPIValue_XY, sensor 3950 family).
     fn encode_stage(dx: u32, dy: u32) -> [u8; 4] {
         let (mut l, mut s) = (dx / 50, dy / 50);
         let (mut c, mut d) = (0u8, 0u8);
-        // 上位ビットに収まらないときは倍率ビットを立てる
+        // When it does not fit in the upper bits, set the multiplier bit
         if l > 1024 {
             l /= 2;
             c |= 1;
@@ -192,8 +192,8 @@ impl MousefitDriver {
     }
 }
 
-/// KeyFunction の type/param → ButtonAction (JS Ya 列挙)。
-/// param は MouseKey のとき「押すボタン番号」、Macro/DPISwitch は index。
+/// KeyFunction type/param → ButtonAction (JS Ya enum).
+/// param is the "button number to press" for MouseKey, and an index for Macro/DPISwitch.
 fn button_action(ty: u8, param: u16) -> ButtonAction {
     match ty {
         0 => ButtonAction::Disabled,
@@ -219,7 +219,7 @@ fn button_action(ty: u8, param: u16) -> ButtonAction {
     }
 }
 
-/// EEPROM 読み取り失敗時のスロット既定。
+/// Slot default when the EEPROM read fails.
 fn default_slot_action(slot: &str) -> ButtonAction {
     ButtonAction::Mouse(match slot {
         "Left" => MouseFn::Left,
@@ -234,7 +234,7 @@ fn default_slot_action(slot: &str) -> ButtonAction {
 impl DeviceDriver for MousefitDriver {
     fn info(&self) -> DeviceInfo {
         let mut info = self.info.clone();
-        // FW バージョン: cmd[0]=18 → resp[5].[6] (hex)
+        // FW version: cmd[0]=18 → resp[5].[6] (hex)
         let mut f = [0u8; 16];
         f[0] = OP_FIRMWARE;
         if let Ok(r) = self.cmd(&f) {
@@ -289,15 +289,15 @@ impl DeviceDriver for MousefitDriver {
             profile: 0,
         };
 
-        // ポーリング: eeprom[0] → index into POLL_RATES
+        // Polling: eeprom[0] → index into POLL_RATES
         let pr = self.ee_u8(ee::REPORT_RATE) as usize;
         cfg.polling_wired = POLL_RATES.get(pr).copied().unwrap_or(1000);
 
-        // DPI ステージ数/現在
+        // DPI stage count / current
         let n_stages = (self.ee_u8(ee::MAX_DPI_STAGE) as usize).clamp(1, 8);
         cfg.active_stage = self.ee_u8(ee::CURRENT_DPI) as usize;
 
-        // ステージ 4B × n + 色 4B × n (生ブロック; スカラの (v,85-v) ペアとは別形式)
+        // Stages 4B × n + colors 4B × n (raw blocks; a different format from the scalar (v,85-v) pairs)
         for i in 0..n_stages {
             let b = self.ee_read(ee::DPI_VALUE + (i * 4) as u16, 4).unwrap_or_default();
             if b.len() < 4 {
@@ -336,8 +336,8 @@ impl DeviceDriver for MousefitDriver {
         cfg.ripple_control = self.ee_u8(ee::RIPPLE) != 0;
         cfg.sleep_min = self.ee_u8(ee::SLEEP);
 
-        // ボタン: KeyFunction@96 + 4B/スロット [type,paramHi,paramLo,crc]
-        // Ya 型: 0=Disable,1=MouseKey,2=DPISwitch,4=FireKey,5=ShortcutKey,
+        // Buttons: KeyFunction@96 + 4B/slot [type,paramHi,paramLo,crc]
+        // Ya types: 0=Disable,1=MouseKey,2=DPISwitch,4=FireKey,5=ShortcutKey,
         //         6=Macro,7=ReportRateSwitch,10=DPILock,11=UpDownRoll
         const SLOTS: [&str; 6] = ["Left", "Right", "Middle", "Forward", "Back", "DPI"];
         for (i, slot) in SLOTS.iter().enumerate() {
@@ -360,16 +360,16 @@ impl DeviceDriver for MousefitDriver {
     }
 
     fn apply_mouse(&self, cfg: &MouseConfig) -> HubResult<()> {
-        // ポーリング
+        // Polling
         if let Some(idx) = POLL_RATES.iter().position(|&r| r == cfg.polling_wired) {
             self.ee_write_val(ee::REPORT_RATE, idx as u8)?;
         }
-        // ステージ数 → アクティブ (JS: setDPIStageNum — stage 数を先に、次に active)
+        // Stage count → active (JS: setDPIStageNum — stage count first, then active)
         let n = cfg.stages.len().clamp(1, 8) as u8;
         self.ee_write_val(ee::MAX_DPI_STAGE, n)?;
         let active = (cfg.active_stage as u8).min(n - 1);
         self.ee_write_val(ee::CURRENT_DPI, active)?;
-        // DPI ステージ値・色 (4B ブロック: [x,y,flags,crc] / [r,g,b,crc])
+        // DPI stage values / colors (4B blocks: [x,y,flags,crc] / [r,g,b,crc])
         for (i, s) in cfg.stages.iter().take(8).enumerate() {
             let y = s.dpi_y.unwrap_or(s.dpi);
             self.ee_write(ee::DPI_VALUE + (i * 4) as u16, &Self::encode_stage(s.dpi, y))?;
@@ -390,7 +390,7 @@ impl DeviceDriver for MousefitDriver {
         let mut f = [0u8; 16];
         f[0] = OP_BATTERY;
         let r = self.cmd(&f)?;
-        // resp[6]=percent, resp[7..8]=voltage (マウス休眠時は 0)
+        // resp[6]=percent, resp[7..8]=voltage (0 while the mouse is asleep)
         if r[6] == 0 {
             return Err(HubError::Protocol("mouse asleep".into()));
         }

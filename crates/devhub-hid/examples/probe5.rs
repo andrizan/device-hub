@@ -1,6 +1,6 @@
-//! 解析プローブ #5: レイヤー実数・工場デフォルト・レイアウトスタイル・Caps・未知サブ。
-//! 未知コマンドでファームが detach することがあるため毎回 reopen。
-//! [2,17] (USB detach) は絶対に送らない。
+//! Analysis probe #5: actual layer count, factory defaults, layout style, Caps, unknown subs.
+//! Reopens every time because an unknown command can make the firmware detach.
+//! Never send [2,17] (USB detach).
 
 fn open(api: &hidapi::HidApi) -> Option<hidapi::HidDevice> {
     let dev = api
@@ -17,7 +17,7 @@ fn open(api: &hidapi::HidApi) -> Option<hidapi::HidDevice> {
     Some(d)
 }
 
-/// 1 コマンド送信 → 応答を返す (reopen 方式)。
+/// Send 1 command → return the response (reopen method).
 fn cmd(grp: u8, sub: u8, args: &[u8]) -> Option<Vec<u8>> {
     let api = hidapi::HidApi::new().ok()?;
     let d = open(&api)?;
@@ -51,12 +51,12 @@ fn fmt(r: &[u8]) -> String {
 }
 
 fn main() {
-    // === 1. レイヤー数: [3,1,layer,0] で層 0..5 を試し、実データがあるか見る ===
+    // === 1. Layer count: try layers 0..5 with [3,1,layer,0] and see whether there is real data ===
     println!("== keymap layers [3,1,layer,row0]");
     for layer in 0..5u8 {
         match cmd(3, 1, &[layer, 0]) {
             Some(r) if r[1] != 0xff => {
-                // r[4..] = 30×u16 keycodes。先頭8個だけ表示
+                // r[4..] = 30×u16 keycodes. Show only the first 8
                 let codes: Vec<String> = (0..8)
                     .map(|i| format!("{:04x}", u16::from_le_bytes([r[4 + i * 2], r[5 + i * 2]])))
                     .collect();
@@ -75,7 +75,7 @@ fn main() {
         }
     }
 
-    // === 2. 工場デフォルトキーマップ [3,6,(sys<<4)|fn,row] 全8セット概要 ===
+    // === 2. Factory default keymap [3,6,(sys<<4)|fn,row], overview of all 8 sets ===
     println!("== factory default keymap [3,6,(sys<<4)|fn,row0]");
     for sys in 0..2u8 {
         for fnl in 0..4u8 {
@@ -95,7 +95,7 @@ fn main() {
         }
     }
 
-    // === 3. keyLayoutStyle [3,5,row] 全行デコード ===
+    // === 3. keyLayoutStyle [3,5,row], decode all rows ===
     println!("== keyLayoutStyle [3,5,row] (u16LE → row:5,col:7,ratio:4, /4)");
     for row in 0..6u8 {
         match cmd(3, 5, &[row]) {
@@ -121,7 +121,7 @@ fn main() {
         }
     }
 
-    // === 4. Lighting Caps [5,6] — 読み取り → 書き込み → 読み取り ===
+    // === 4. Lighting Caps [5,6] — read → write → read ===
     println!("== lighting caps [5,6]");
     for args in [&[0u8][..], &[1][..]] {
         match cmd(5, 6, args) {
@@ -129,7 +129,7 @@ fn main() {
             None => println!("  read arg{:?}: timeout", args),
         }
     }
-    // setLightingCaps = [5,6,B,G,R] — 書いて読み戻す (最後に 0,0,0 で復帰)
+    // setLightingCaps = [5,6,B,G,R] — write and read back (restore with 0,0,0 at the end)
     for (b, g, r_) in [(0u8, 0u8, 255u8), (0, 0, 0)] {
         match cmd(5, 6, &[b, g, r_]) {
             Some(r) => println!("  write [{b},{g},{r_}]: {}", fmt(&r)),
@@ -142,7 +142,7 @@ fn main() {
         }
     }
 
-    // === 5. grp10 custom subs 3..11、arg 0/1 ===
+    // === 5. grp10 custom subs 3..11, arg 0/1 ===
     println!("== grp10 custom subs");
     for sub in 3..12u8 {
         for arg in [0u8, 1] {
@@ -153,7 +153,7 @@ fn main() {
         }
     }
 
-    // === 6. grp2 未知サブ 15 + 既知 10/11 sanity ===
+    // === 6. grp2 unknown sub 15 + known 10/11 sanity ===
     println!("== grp2 misc");
     for (sub, arg) in [(15u8, 0u8), (15, 1), (10, 0), (11, 0)] {
         match cmd(2, sub, &[arg]) {

@@ -1,4 +1,4 @@
-//! 解析プローブ #7: keyLayoutStyle 生バイト確認 (オフセット特定用)
+//! Analysis probe #7: raw-byte check of keyLayoutStyle (for identifying offsets)
 
 fn open(api: &hidapi::HidApi) -> Option<hidapi::HidDevice> {
     let dev = api

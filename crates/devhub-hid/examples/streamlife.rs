@@ -1,6 +1,6 @@
-//! 軸ストリームの自己終了時間を測る — [4,3,1,1] を 1 発送って、
-//! その後一切送らずフレームが止まるまで読み続ける。
-//! 実行: cargo run -p devhub-hid --example streamlife
+//! Measures how long the axis stream takes to end by itself — send [4,3,1,1] once,
+//! then send nothing further and keep reading until the frames stop.
+//! Run: cargo run -p devhub-hid --example streamlife
 
 fn main() -> devhub_core::backend::HubResult<()> {
     let api = hidapi::HidApi::new().expect("hidapi init");
@@ -32,7 +32,7 @@ fn main() -> devhub_core::backend::HubResult<()> {
             n += 1;
             last = std::time::Instant::now();
         }
-        // 直近 10 秒フレームが無ければ死んだとみなす。
+        // Consider it dead if there has been no frame for the last 10 seconds.
         if last.elapsed() > std::time::Duration::from_secs(10) {
             break;
         }

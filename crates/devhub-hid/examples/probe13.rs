@@ -1,6 +1,6 @@
-//! 解析プローブ #13: DD 停止後に ' (cell75) が赤のまま固まる問題の切り分け。
-//! 1) [5,3] で cell75 の isCustom を読む → 2) [5,2] 再送で復帰するか
-//!    3) だめなら [5,4] で isCustom を全クリア
+//! Analysis probe #13: isolating why ' (cell75) stays stuck red after DD stops.
+//! 1) Read the isCustom of cell75 via [5,3] → 2) does resending [5,2] recover it?
+//!    3) If not, clear all isCustom via [5,4]
 fn main() {
     let api = hidapi::HidApi::new().unwrap();
     let dev = api
@@ -10,7 +10,7 @@ fn main() {
             api.device_list()
                 .find(|d| d.vendor_id() == 0x1ca6 && d.usage_page() & 0xff00 == 0xff00)
         })
-        .expect("SU66 — デバイスハブを閉じて");
+        .expect("SU66 — close Device HUB");
     let d = dev.open_device(&api).unwrap();
     d.set_blocking_mode(false).unwrap();
     let mut drain = [0u8; 65];
@@ -33,7 +33,7 @@ fn main() {
         }
     };
 
-    // 1) [5,3] readback で cell 73-78 の isCustom を確認
+    // 1) Check the isCustom of cells 73-78 via the [5,3] readback
     let rb = cmd(5, 3, &[0, 4]); // chunk4 = cells 60-74
     let rb2 = cmd(5, 3, &[0, 5]); // chunk5 = cells 75-89
     if let (Some(a), Some(b)) = (&rb, &rb2) {
@@ -56,7 +56,7 @@ fn main() {
         dump(b, 75);
     }
 
-    // 2) DD 停止相当: [5,1] → [5,2] 再送
+    // 2) Equivalent of stopping DD: [5,1] → resend [5,2]
     if let Some(r) = cmd(5, 1, &[0, 0]) {
         let mut args = vec![0u8];
         args.extend_from_slice(&r[4..10]);
@@ -77,10 +77,10 @@ fn main() {
         );
     }
 
-    // 3) まだ custom なら [5,4] で全セルの isCustom をクリア (色は現値保持)
+    // 3) If still custom, clear the isCustom of all cells via [5,4] (colors keep their current values)
     let rb = cmd(5, 3, &[0, 5]);
     if rb.as_ref().is_some_and(|r| r[7] == 255) {
-        println!("cell75 まだ custom → [5,4] でフラグだけクリア");
+        println!("cell75 still custom → clearing only the flag via [5,4]");
         for c in 0..9u8 {
             if let Some(rb) = cmd(5, 3, &[0, c]) {
                 let mut w = [0u8; 65];

@@ -1,29 +1,29 @@
-//! LAMZU Aurora (www.lamzu.net) LM20 世代の機種表と Capabilities。
+//! Model table and Capabilities for the LAMZU Aurora (www.lamzu.net) LM20 generation.
 //!
-//! ドライバ (`devhub-hid::lamzu`) とデモ (`demo.rs`) の両方が使う。
-//! 値はすべて公式 `Config/env-models.json` (v1.0.38) と設定画面
-//! `index-Bn9q780G.js` の LM20 経路 (`T2()`) から取っている
-//! (docs/LAMZU_MAYA_X_V2_AUDIT2.md)。表示名は公式 Aurora の日本語表示に合わせる。
+//! Used by both the driver (`devhub-hid::lamzu`) and the demo (`demo.rs`).
+//! All values are taken from the official `Config/env-models.json` (v1.0.38) and the LM20 path
+//! (`T2()`) of the settings screen `index-Bn9q780G.js`
+//! (docs/LAMZU_MAYA_X_V2_AUDIT2.md). Display names follow the wording of the official Aurora.
 
 use crate::model::*;
 
-/// LM20 世代の 1 機種。
+/// One model of the LM20 generation.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct LamzuModel {
-    /// 有線 PID (ドングル経由ではペア先 PID として返る)。
+    /// Wired PID (via the dongle it is returned as the paired-device PID).
     pub pid: u16,
-    /// 製品名 (公式製品ページの表記)。
+    /// Product name (as written on the official product page).
     pub name: &'static str,
-    /// 内部モデル id。
+    /// Internal model id.
     pub model: &'static str,
-    /// 公式機種定義の行名。
+    /// Row name in the official model definition.
     pub row: &'static str,
     pub sensor_offset: bool,
     pub adaptive_dpi: bool,
     pub glass_mode: bool,
 }
 
-/// 公式機種定義の LM20 行 (Mini は受信機が 0054)。
+/// LM20 rows of the official model definition (the Mini's receiver is 0054).
 pub const MODELS: &[LamzuModel] = &[
     LamzuModel {
         pid: 0x0044,
@@ -76,9 +76,9 @@ pub fn model_by_pid(pid: u16) -> Option<&'static LamzuModel> {
     MODELS.iter().find(|m| m.pid == pid)
 }
 
-/// センサー型番コマンド (cmd 143) の応答 → (表示名, DPI 上限, DPI 刻み, LOD 候補 (mm×10))。
-/// 公式 `T2()`: 1=PAW3395 (26000, 1/2mm)、2=PAW3950 (30000, 0.7/1/2mm)、
-/// 4=PAW3955 (50000, 0.7/1/1.3/1.5/1.7mm、1 刻み)。不明は機種定義の既定 (50000, 0.7/1/2)。
+/// Response of the sensor-model command (cmd 143) → (display name, DPI max, DPI step, LOD candidates (mm×10)).
+/// Official `T2()`: 1=PAW3395 (26000, 1/2mm), 2=PAW3950 (30000, 0.7/1/2mm),
+/// 4=PAW3955 (50000, 0.7/1/1.3/1.5/1.7mm, step 1). Unknown falls back to the model definition default (50000, 0.7/1/2).
 pub fn sensor_profile(code: u8) -> (&'static str, u32, u32, &'static [i64]) {
     match code {
         1 => ("PAW3395", 26000, 50, &[10, 20]),
@@ -88,7 +88,7 @@ pub fn sensor_profile(code: u8) -> (&'static str, u32, u32, &'static [i64]) {
     }
 }
 
-/// 公式の速度連動 DPI プリセット (設定画面 `AdaDPI*PointList`)。
+/// The official speed-linked DPI presets (settings screen `AdaDPI*PointList`).
 pub fn adaptive_presets() -> Vec<(String, Vec<AdaptivePoint>)> {
     let p = |v: &[(u16, f32)]| {
         v.iter()
@@ -96,9 +96,9 @@ pub fn adaptive_presets() -> Vec<(String, Vec<AdaptivePoint>)> {
             .collect::<Vec<_>>()
     };
     vec![
-        ("クラシック".into(), p(&[(0, 1.0), (20, 1.0), (40, 1.0)])),
-        ("ナチュラル".into(), p(&[(0, 1.5), (20, 0.75), (40, 0.1)])),
-        ("リープ".into(), p(&[(0, 0.1), (20, 0.75), (40, 1.5)])),
+        ("Classic".into(), p(&[(0, 1.0), (20, 1.0), (40, 1.0)])),
+        ("Natural".into(), p(&[(0, 1.5), (20, 0.75), (40, 0.1)])),
+        ("Leap".into(), p(&[(0, 0.1), (20, 0.75), (40, 1.5)])),
     ]
 }
 
@@ -106,13 +106,13 @@ fn opts(v: &[(i64, &str)]) -> Vec<ChoiceOpt> {
     v.iter().map(|(a, b)| ChoiceOpt::new(*a, *b)).collect()
 }
 
-/// 機種・接続・センサーに合わせた Capabilities。
+/// Capabilities matched to the model, connection and sensor.
 pub fn caps(model: &LamzuModel, transport: Transport, sensor: u8) -> Capabilities {
     use section::*;
     let wireless = transport == Transport::Wireless24G;
     let (_, dpi_max, dpi_step, lods) = sensor_profile(sensor);
     let polling: &[(i64, &str)] = if wireless {
-        // 公式: 無線は PollingRateWireless = 1000;2000;4000;8000。
+        // Official: wireless is PollingRateWireless = 1000;2000;4000;8000.
         &[(1000, "1K"), (2000, "2K"), (4000, "4K"), (8000, "8K")]
     } else {
         &[(500, "500"), (1000, "1K"), (2000, "2K"), (4000, "4K"), (8000, "8K")]
@@ -130,73 +130,73 @@ pub fn caps(model: &LamzuModel, transport: Transport, sensor: u8) -> Capabilitie
         .collect();
 
     let mut settings = vec![
-        SettingSpec::choice("polling_wireless", PERFORMANCE, "ポーリングレート", opts(polling))
-            .help("マウスのデータ更新頻度 (Hz)"),
-        SettingSpec::toggle("hyper_mode", PERFORMANCE, "競技モード").help(
-            "OFF 時はハイスピードモード。最高の性能と電池持ちを両立するよう調整されたモード",
+        SettingSpec::choice("polling_wireless", PERFORMANCE, "Polling rate", opts(polling))
+            .help("How often the mouse updates its data (Hz)"),
+        SettingSpec::toggle("hyper_mode", PERFORMANCE, "Competitive mode").help(
+            "When OFF, high-speed mode is used. A mode tuned to balance peak performance and battery life",
         ),
         SettingSpec::toggle("tracking_mode", PERFORMANCE, "20K FPS")
-            .help("20kHz スキャンの極限性能モード。競技モードより電力消費が大きい")
+            .help("Extreme-performance mode with 20kHz scanning. Uses more power than competitive mode")
             .enabled_when(
                 "hyper_mode",
                 SettingValue::Bool(true),
-                "先に競技モードを ON にしてください",
+                "Turn on competitive mode first",
             )
             .confirm(
-                "20K FPS は競技モードに比べて電池の持ちが大幅に短くなります。切り替えますか？",
+                "20K FPS shortens battery life considerably compared with competitive mode. Switch anyway?",
             ),
         SettingSpec::choice("lod", SENSOR, "LOD", lod_opts)
-            .help("マウスがトラッキング面から離れ、センサーが反応しなくなる高さ"),
+            .help("The height at which the mouse leaves the tracking surface and the sensor stops responding"),
     ];
     if model.glass_mode {
         settings.push(
-            SettingSpec::toggle("glass_mode", SENSOR, "ガラスモード")
-                .help("ガラス製マウスパッドを自動検知・適応し、LOD 調整を無効にします"),
+            SettingSpec::toggle("glass_mode", SENSOR, "Glass mode")
+                .help("Automatically detects and adapts to glass mousepads, and disables LOD adjustment"),
         );
-        // ガラスモード中は LOD を触らせない (公式と同じ)。
+        // LOD cannot be changed while glass mode is on (same as official).
         if let Some(l) = settings.iter_mut().find(|s| s.id == "lod") {
             l.enabled_when = Some((
                 "glass_mode".into(),
                 SettingValue::Bool(false),
-                "ガラスモード中は LOD を変更できません".into(),
+                "LOD cannot be changed while glass mode is on".into(),
             ));
         }
     }
     settings.extend([
-        SettingSpec::toggle("motion_sync", SENSOR, "移動同期")
-            .help("PC の処理にマウスの動きを同期させ、軌跡をより正確にします"),
-        SettingSpec::toggle("angle_snap", SENSOR, "直線補正")
-            .help("マウス入力をより直線的で正確にします"),
-        SettingSpec::toggle("ripple", SENSOR, "リップル")
-            .help("高速なマウス動作中にポインタの波状の揺れを排除します"),
-        SettingSpec::slider("angle_tune", SENSOR, "角度調整", -30., 30., 1., "°")
-            .help("グリップに合わせてセンサー角度を補正し、斜めに持っても水平に動かせます"),
+        SettingSpec::toggle("motion_sync", SENSOR, "Motion sync")
+            .help("Syncs mouse movement with PC processing for more accurate trajectories"),
+        SettingSpec::toggle("angle_snap", SENSOR, "Angle snapping")
+            .help("Makes mouse input straighter and more precise"),
+        SettingSpec::toggle("ripple", SENSOR, "Ripple control")
+            .help("Eliminates wavy pointer jitter during fast mouse movement"),
+        SettingSpec::slider("angle_tune", SENSOR, "Angle tuning", -30., 30., 1., "°")
+            .help("Corrects the sensor angle to match your grip, so the pointer moves horizontally even if you hold the mouse at a slant"),
     ]);
     if model.sensor_offset {
         settings.push(
-            SettingSpec::slider("sensor_offset", SENSOR, "センサー中心オフセット", -5., 5., 1., "")
-                .help("センサーの中心位置の補正 (公式 SensorCenterOffset)"),
+            SettingSpec::slider("sensor_offset", SENSOR, "Sensor center offset", -5., 5., 1., "")
+                .help("Correction of the sensor's center position (official SensorCenterOffset)"),
         );
     }
     settings.extend([
-        SettingSpec::slider("debounce", CLICK, "デバウンスタイム", 0., 15., 1., "ms").help(
-            "低すぎるとダブルクリックが起きることがあります。ゲーム向けの推奨は 2–4ms",
+        SettingSpec::slider("debounce", CLICK, "Debounce time", 0., 15., 1., "ms").help(
+            "Too low a value can cause double clicks. 2–4ms is recommended for gaming",
         ),
-        SettingSpec::toggle("rapid_left", CLICK, "高速トリガー (左クリック)")
-            .help("アルゴリズムでキー応答を最速化 — 誤ってダブルクリックする可能性があります"),
-        SettingSpec::toggle("rapid_right", CLICK, "高速トリガー (右クリック)")
-            .help("アルゴリズムでキー応答を最速化 — 誤ってダブルクリックする可能性があります"),
+        SettingSpec::toggle("rapid_left", CLICK, "Rapid Trigger (left click)")
+            .help("Maximizes key response with an algorithm — may cause accidental double clicks"),
+        SettingSpec::toggle("rapid_right", CLICK, "Rapid Trigger (right click)")
+            .help("Maximizes key response with an algorithm — may cause accidental double clicks"),
         SettingSpec::choice(
             "bhop_dir",
             CLICK,
-            "スクロールBhop",
-            opts(&[(0, "オフ"), (2, "スクロールアップ"), (3, "スクロールダウン")]),
+            "Scroll bhop",
+            opts(&[(0, "Off"), (2, "Scroll up"), (3, "Scroll down")]),
         )
-        .help("最初のスクロール信号を無効化し、応答時間内に 2 回目が無ければスクロールしません"),
+        .help("Ignores the first scroll signal and does not scroll unless a second one arrives within the response time"),
         SettingSpec::choice(
             "bhop_ms",
             CLICK,
-            "ホイール応答時間",
+            "Wheel response time",
             opts(&[
                 (200, "200ms"),
                 (400, "400ms"),
@@ -205,26 +205,26 @@ pub fn caps(model: &LamzuModel, transport: Transport, sensor: u8) -> Capabilitie
                 (1000, "1000ms"),
             ]),
         )
-        .help("スクロールBhop で 2 回目のスクロールを待つ時間"),
+        .help("How long Scroll bhop waits for the second scroll"),
         SettingSpec::choice(
             "sleep_min",
             POWER,
-            "スリープ時間",
+            "Sleep time",
             opts(&[
-                (1, "1分"),
-                (5, "5分"),
-                (10, "10分"),
-                (15, "15分"),
-                (20, "20分"),
-                (25, "25分"),
+                (1, "1 min"),
+                (5, "5 min"),
+                (10, "10 min"),
+                (15, "15 min"),
+                (20, "20 min"),
+                (25, "25 min"),
             ]),
         )
-        .help("一定時間無操作だとスリープします"),
+        .help("Goes to sleep after a period of inactivity"),
     ]);
     if wireless {
         settings.push(
-            SettingSpec::toggle("dongle_led", LIGHTING, "ドングルLED")
-                .help("レシーバーのライトでマウスの状態を表示"),
+            SettingSpec::toggle("dongle_led", LIGHTING, "Dongle LED")
+                .help("Shows the mouse status on the receiver's light"),
         );
         for (id, name) in [
             ("dongle_led1", "LED 1"),
@@ -236,7 +236,7 @@ pub fn caps(model: &LamzuModel, transport: Transport, sensor: u8) -> Capabilitie
                     id,
                     LIGHTING,
                     name,
-                    opts(&[(6, "バッテリー"), (11, "DPI"), (10, "ポーリングレート"), (12, "信号")]),
+                    opts(&[(6, "Battery"), (11, "DPI"), (10, "Polling rate"), (12, "Signal")]),
                 )
                 .when("dongle_led", SettingValue::Bool(true)),
             );
@@ -245,16 +245,16 @@ pub fn caps(model: &LamzuModel, transport: Transport, sensor: u8) -> Capabilitie
     Capabilities {
         settings,
         actions: vec![
-            ActionSpec::new("reset_profile", section::SYSTEM, "プロファイルをリセット")
-                .help("現在のプロファイルだけを工場出荷時の値に戻します")
-                .danger("現在のプロファイルの設定がすべて初期化されます"),
-            ActionSpec::new("factory_reset", section::SYSTEM, "完全初期化")
+            ActionSpec::new("reset_profile", section::SYSTEM, "Reset profile")
+                .help("Restores only the current profile to its factory values")
+                .danger("All settings of the current profile will be reset"),
+            ActionSpec::new("factory_reset", section::SYSTEM, "Factory reset")
                 .help(if wireless {
-                    "マウスとレシーバーを工場出荷時のデフォルト設定に戻します"
+                    "Restores the mouse and receiver to their factory default settings"
                 } else {
-                    "マウスを工場出荷時のデフォルト設定に戻します"
+                    "Restores the mouse to its factory default settings"
                 })
-                .danger("OK を押すと、マウスは工場出荷時のデフォルト設定に戻ります"),
+                .danger("After you press OK, the mouse returns to its factory default settings"),
         ],
         profiles: Some(ProfileCaps {
             count: 4,
@@ -269,7 +269,7 @@ pub fn caps(model: &LamzuModel, transport: Transport, sensor: u8) -> Capabilitie
             xy_split: true,
             stage_colors: true,
             stage_toggle: false,
-            buttons: ["左クリック", "右クリック", "ホイールクリック", "戻る", "進む"]
+            buttons: ["Left click", "Right click", "Wheel click", "Back", "Forward"]
                 .iter()
                 .map(|n| ButtonSlot { name: (*n).into() })
                 .collect(),

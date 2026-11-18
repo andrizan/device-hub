@@ -1,13 +1,13 @@
-//! 入力インターフェース直接 read でのポーリング計測 PoC。
-//! `cargo run -p devhub-hid --example rateread` — マウスを動かし続けること。
-//! WM_INPUT と違い背面スロットルの影響を受けないはず。
+//! PoC for measuring polling by reading the input interface directly.
+//! `cargo run -p devhub-hid --example rateread` — keep moving the mouse.
+//! Unlike WM_INPUT, it should not be affected by background throttling.
 
 use devhub_hid::transport;
 use std::time::Instant;
 
 fn main() {
     let api = transport::open().unwrap();
-    // ATK ドングル/有線の標準マウス入力コレクション (up=1, u=6) を探す。
+    // Look for the standard mouse input collection (up=1, u=6) of the ATK dongle/wired.
     let d = api
         .device_list()
         .find(|x| {

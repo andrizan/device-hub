@@ -1,4 +1,4 @@
-//! 画面。どれも `impl Shell` で、Shell の状態を直接読む。
+//! Screens. All of them are `impl Shell` and read Shell's state directly.
 
 pub mod advanced;
 pub mod audio;

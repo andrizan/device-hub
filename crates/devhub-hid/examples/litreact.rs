@@ -1,8 +1,8 @@
-//! SU66 ライティング検証プローブ第2弾:
-//!  A) mode0 が「選択パレットスロットの静的表示」か確定 (slot0=虹/他=固色)
-//!  B) effect 20-23 の受理可否 (書き込み→読み戻し)
-//!  C) modes 16-19 がキー反応型か (ユーザーに打鍵してもらい撮影)
-//! 終了時に元の LightingState (パレット含む) を復元する。
+//! SU66 lighting verification probe, round 2:
+//!  A) Determine whether mode0 is a "static display of the selected palette slot" (slot0=rainbow/others=solid color)
+//!  B) Whether effects 20-23 are accepted (write → read back)
+//!  C) Whether modes 16-19 are key-reactive (have the user type and film it)
+//! Restores the original LightingState (including the palette) on exit.
 use devhub_core::{Change, DeviceKind, LightingState, Rgb};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -71,17 +71,17 @@ fn main() {
     s.direction = 0;
     s.color_correction = None;
 
-    // ---- A. mode0 = 静的パレット表示か ----
-    // 8スロットを判別色に書き換え (終了時に復元)
+    // ---- A. Is mode0 a static palette display? ----
+    // Rewrite the 8 slots to distinguishable colors (restored on exit)
     let distinct = [
-        rgb(255, 0, 0),     // 0: 赤   (公式UIでは「more/虹」スロット)
-        rgb(255, 128, 0),   // 1: 橙
-        rgb(255, 255, 0),   // 2: 黄
-        rgb(0, 255, 0),     // 3: 緑
-        rgb(0, 255, 255),   // 4: 水色
-        rgb(0, 0, 255),     // 5: 青
-        rgb(160, 0, 255),   // 6: 紫
-        rgb(255, 255, 255), // 7: 白
+        rgb(255, 0, 0),     // 0: red    (the "more/rainbow" slot in the official UI)
+        rgb(255, 128, 0),   // 1: orange
+        rgb(255, 255, 0),   // 2: yellow
+        rgb(0, 255, 0),     // 3: green
+        rgb(0, 255, 255),   // 4: cyan
+        rgb(0, 0, 255),     // 5: blue
+        rgb(160, 0, 255),   // 6: purple
+        rgb(255, 255, 255), // 7: white
     ];
     s.effect = 0;
     s.palette = distinct.to_vec();
@@ -97,7 +97,7 @@ fn main() {
         p.color = p.palette[sel];
         step(&d, &format!("m0_sel{sel}"), &p, dwell);
     }
-    // 静的モードの輝度応答 (sel=1 橙)
+    // Brightness response of the static mode (sel=1 orange)
     for bri in [20u8, 100] {
         let mut p = s.clone();
         p.palette_sel = 1;
@@ -107,7 +107,7 @@ fn main() {
     }
     s.brightness = 80;
 
-    // ---- B. effect 20-23 受理可否 ----
+    // ---- B. Are effects 20-23 accepted? ----
     s.palette_sel = 1;
     s.color = s.palette[1];
     for m in 20u8..=23 {
@@ -122,9 +122,9 @@ fn main() {
         std::thread::sleep(Duration::from_millis(4000));
     }
 
-    // ---- C. modes 16-19 キー反応テスト ----
+    // ---- C. Key-reaction test for modes 16-19 ----
     println!("=== TYPE_PHASE_START {} ===", ms());
-    println!("*** ここから80秒間、キーボードを連続でタイプしてください ***");
+    println!("*** Keep typing on the keyboard continuously for the next 80 seconds ***");
     for m in [16u8, 17, 18, 19] {
         let mut p = s.clone();
         p.effect = m;

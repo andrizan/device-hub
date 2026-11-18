@@ -1,5 +1,5 @@
-//! 各モードが選択パレット色を使うか検証: palette[1]=赤, sel=1 で各モードを4秒表示。
-//! 赤に染まるモード = .color() フラグあり。終了時に復元。
+//! Verifies whether each mode uses the selected palette color: show each mode for 4 seconds with palette[1]=red, sel=1.
+//! Modes that turn red = have the .color() flag. Restored on exit.
 use devhub_core::{Change, DeviceKind, Rgb};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 

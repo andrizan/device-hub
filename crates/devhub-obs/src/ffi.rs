@@ -1,7 +1,7 @@
-//! obs.dll の関数を実行時に解決する (obs.lib 不要でビルドできる)。
+//! Resolve the obs.dll functions at runtime (builds without obs.lib).
 //!
-//! `GetModuleHandleA("obs")` でホストの libobs を取り、`GetProcAddress` で
-//! 必要なシンボルだけ拾う。見つからないシンボルは Option で残す。
+//! `GetModuleHandleA("obs")` gets the host's libobs, and `GetProcAddress` picks up
+//! only the symbols it needs. Symbols that are not found stay as Option.
 
 #![allow(non_snake_case)]
 
@@ -18,9 +18,9 @@ fn sym(m: *mut c_void, name: &'static [u8]) -> *mut c_void {
     unsafe { GetProcAddress(m, name.as_ptr()) }
 }
 
-/// `obs_source_info` の先頭部分 (ABI はこの並びで固定)。
-/// `obs_register_source_s` に `size_of` を渡すので、末尾のフィールドは
-/// 「古いバージョンでは存在しない」扱いになる — これが公式の前方互換機構。
+/// The leading part of `obs_source_info` (the ABI is fixed in this order).
+/// `obs_register_source_s` is passed `size_of`, so trailing fields
+/// are treated as "absent in older versions" - this is the official forward-compatibility mechanism.
 #[repr(C)]
 pub struct ObsSourceInfo {
     pub id: *const u8,
@@ -44,30 +44,30 @@ pub struct ObsSourceInfo {
 
 pub const OBS_SOURCE_TYPE_INPUT: u32 = 0;
 pub const OBS_SOURCE_VIDEO: u32 = 1;
-/// obs.h: OBS_SOURCE_CUSTOM_DRAW = (1<<3)。1<<7 は DO_NOT_DUPLICATE で別物 —
-/// これを立てないと OBS が既定 "Draw" テクニックの pass 内から video_render
-/// を呼び、こちらの technique_begin が入れ子になって描画が捨てられる。
+/// obs.h: OBS_SOURCE_CUSTOM_DRAW = (1<<3). 1<<7 is DO_NOT_DUPLICATE, a different flag -
+/// without this flag OBS calls video_render from inside the pass of the default "Draw" technique,
+/// so our technique_begin gets nested and the drawing is discarded.
 pub const OBS_SOURCE_CUSTOM_DRAW: u32 = 1 << 3;
 
-/// gs_color_format: GS_RGBA (enum で 3 番目)。
+/// gs_color_format: GS_RGBA (3rd in the enum).
 pub const GS_RGBA: u32 = 3;
-/// gs_texture_flags: GS_DYNAMIC = (1<<1)。1<<0 は GS_BUILD_MIPMAPS。
+/// gs_texture_flags: GS_DYNAMIC = (1<<1). 1<<0 is GS_BUILD_MIPMAPS.
 pub const GS_DYNAMIC: u32 = 1 << 1;
-/// gs_blend_type。
+/// gs_blend_type.
 pub const GS_BLEND_SRCALPHA: u32 = 4;
 pub const GS_BLEND_INVSRCALPHA: u32 = 5;
-/// obs_base_effect: OBS_EFFECT_DEFAULT ("Draw" テクニック + "image" パラメータ)。
+/// obs_base_effect: OBS_EFFECT_DEFAULT ("Draw" technique + "image" parameter).
 pub const OBS_EFFECT_DEFAULT: i32 = 0;
-/// obs_combo_type: OBS_COMBO_TYPE_LIST。
+/// obs_combo_type: OBS_COMBO_TYPE_LIST.
 pub const OBS_COMBO_LIST: i32 = 2;
-/// obs_combo_format: OBS_COMBO_FORMAT_STRING。
+/// obs_combo_format: OBS_COMBO_FORMAT_STRING.
 pub const OBS_COMBO_FMT_STR: i32 = 3;
-/// obs_group_type: OBS_GROUP_NORMAL。
+/// obs_group_type: OBS_GROUP_NORMAL.
 pub const OBS_GROUP_NORMAL: i32 = 0;
-/// obs_text_type: OBS_TEXT_INFO。
+/// obs_text_type: OBS_TEXT_INFO.
 pub const OBS_TEXT_INFO: i32 = 0;
 
-/// 解決した API テーブル。video_render はグラフィックススレッドから呼ばれる。
+/// Resolved API table. video_render is called from the graphics thread.
 pub struct Api {
     pub register_source_s: unsafe extern "C" fn(*const ObsSourceInfo, usize),
     pub version_string: Option<unsafe extern "C" fn() -> *const u8>,
@@ -83,19 +83,19 @@ pub struct Api {
     pub tex_set_image: unsafe extern "C" fn(*mut c_void, *const u8, u32, bool),
     pub tex_destroy: unsafe extern "C" fn(*mut c_void),
     pub draw_sprite: unsafe extern "C" fn(*mut c_void, u32, u32, u32),
-    /// `obs_source_draw(image, x, y, cx, cy, flip)` — effect/technique を
-    /// OBS 側で正しく処理してくれる公式ヘルパー。
+    /// `obs_source_draw(image, x, y, cx, cy, flip)` - an official helper that
+    /// has OBS handle the effect/technique correctly.
     pub source_draw: Option<unsafe extern "C" fn(*mut c_void, i32, i32, u32, u32, bool)>,
-    /// 診断用 (gs_clear で RT 全体を色クリアできるかの切り分けに使った)。
+    /// For diagnostics (used to isolate whether gs_clear can color-clear the whole RT).
     #[allow(dead_code)]
     pub clear: Option<unsafe extern "C" fn(u32, *const f32, f32, u8)>,
-    /// `gs_effect_loop(effect, "Draw")` — technique begin/pass を内包する
-    /// 正規ループ。obs_source_draw はこの内側で呼ぶ必要がある。
+    /// `gs_effect_loop(effect, "Draw")` - the canonical loop that wraps
+    /// technique begin/pass. obs_source_draw must be called inside it.
     pub effect_loop: Option<unsafe extern "C" fn(*mut c_void, *const u8) -> bool>,
     pub blend_push: unsafe extern "C" fn(),
     pub blend_pop: unsafe extern "C" fn(),
     pub blend_function: unsafe extern "C" fn(u32, u32),
-    // ---- プロパティ / obs_data (ソース設定 UI) ----
+    // ---- Properties / obs_data (source settings UI) ----
     pub props_create: unsafe extern "C" fn() -> *mut c_void,
     pub props_add_bool: unsafe extern "C" fn(*mut c_void, *const u8, *const u8) -> *mut c_void,
     pub props_add_list:
@@ -109,8 +109,8 @@ pub struct Api {
     pub props_add_group:
         unsafe extern "C" fn(*mut c_void, *const u8, *const u8, i32, *mut c_void) -> *mut c_void,
     pub prop_list_add_str: unsafe extern "C" fn(*mut c_void, *const u8, *const u8) -> usize,
-    /// `obs_module_get_locale_string(module, key)` — OBS ロケール (en-US 既定 +
-    /// UI 言語の ini で上書き) から訳文を引く。未登録/見つからないときは NULL。
+    /// `obs_module_get_locale_string(module, key)` - looks up the translation from the OBS locale (en-US default +
+    /// overridden by the UI language's ini). NULL when unregistered or not found.
     pub module_locale: Option<unsafe extern "C" fn(*mut c_void, *const u8) -> *const u8>,
     pub data_get_bool: unsafe extern "C" fn(*mut c_void, *const u8) -> bool,
     pub data_get_int: unsafe extern "C" fn(*mut c_void, *const u8) -> i64,
@@ -122,19 +122,19 @@ pub struct Api {
     pub data_set_default_string: unsafe extern "C" fn(*mut c_void, *const u8, *const u8),
 }
 
-/// gs_texture_create のシグネチャ。
+/// gs_texture_create signature.
 pub type TexCreate = unsafe extern "C" fn(u32, u32, u32, u32, *const *const u8, u32) -> *mut c_void;
 
 static API: std::sync::OnceLock<Option<Api>> = std::sync::OnceLock::new();
 
-/// ホストの obs.dll から API を解決。必須シンボルが欠けていたら None。
-/// OBS 内でロードされるときだけ呼ぶこと (obs.dll が居る前提)。
+/// Resolve the API from the host's obs.dll. None if a required symbol is missing.
+/// Call this only when loaded inside OBS (assumes obs.dll is present).
 pub fn resolve() -> Option<&'static Api> {
     if let Some(a) = API.get() {
         return a.as_ref();
     }
     unsafe {
-        // ホストモジュール名は通常 "obs" (bin/64bit/obs.dll)。
+        // The host module name is normally "obs" (bin/64bit/obs.dll).
         let m = [c"obs", c"obs64", c"libobs"]
             .iter()
             .map(|n| GetModuleHandleA(n.as_ptr() as *const u8))
@@ -300,8 +300,8 @@ pub fn resolve() -> Option<&'static Api> {
     }
 }
 
-/// `obs_module_ver` 用: ホストのバージョン文字列 "31.0.3" を semver に詰めて返す。
-/// ホストのバージョンをそのまま返すので、どの OBS 世代でもロードされる。
+/// For `obs_module_ver`: packs the host's version string "31.0.3" into a semver and returns it.
+/// It returns the host's version as is, so the module loads on any OBS generation.
 pub fn host_semver(api: &Api) -> u32 {
     let Some(vs) = api.version_string else {
         return 31 << 24;

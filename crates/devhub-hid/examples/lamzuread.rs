@@ -1,7 +1,7 @@
-//! LAMZU ドライバ経路の実機検証 — lamzu::open → caps → read → apply(読み戻し) → 復元。
+//! Real-device verification of the LAMZU driver path — lamzu::open → caps → read → apply (read back) → restore.
 //! `cargo run -p devhub-hid --example lamzuread`
 //!
-//! Maya X V2 / LM20 有線 (37b0:0044) 専用。往復は全て元値に戻す安全なものだけ。
+//! Maya X V2 / LM20 wired (37b0:0044) only. Round trips are only the safe kind that restore every original value.
 
 use devhub_core::backend::DeviceDriver;
 use devhub_core::model::*;
@@ -10,7 +10,7 @@ use devhub_hid::transport;
 
 fn main() {
     let api = transport::open().expect("hidapi");
-    // 有線 0044 優先、無ければ Orbital 8K ドングル 0048 (同じ feature 経路)。
+    // Prefer wired 0044, otherwise the Orbital 8K dongle 0048 (same feature path).
     let info_raw = api
         .device_list()
         .find(|d| {
@@ -73,7 +73,7 @@ fn main() {
         println!("   {k} = {v:?}");
     }
 
-    // トグル往復: motion_sync を反転 → 読み戻し → 復元。
+    // Toggle round trip: flip motion_sync → read back → restore.
     for id in ["motion_sync"] {
         let cur = matches!(s.settings.get(id), Some(SettingValue::Bool(true)));
         println!("== apply {id} -> {}", !cur);
@@ -93,7 +93,7 @@ fn main() {
         .expect("restore");
     }
 
-    // ポーリング: 1000Hz → 読み戻し → 復元。
+    // Polling: 1000Hz → read back → restore.
     if let Some(SettingValue::Choice(cur)) = s.settings.get("polling_wireless") {
         let cur = *cur;
         println!("== apply polling {cur} -> 1000");
@@ -116,7 +116,7 @@ fn main() {
         .expect("restore");
     }
 
-    // LOD: 1.0mm (Choice 10) → 読み戻し → 復元。
+    // LOD: 1.0mm (Choice 10) → read back → restore.
     if let Some(SettingValue::Choice(cur)) = s.settings.get("lod") {
         let cur = *cur;
         println!("== apply lod {cur} -> 10 (1.0mm)");
@@ -139,7 +139,7 @@ fn main() {
         .expect("restore");
     }
 
-    // デバウンス: ±1 → 読み戻し → 復元。
+    // Debounce: ±1 → read back → restore.
     if let Some(SettingValue::Num(cur)) = s.settings.get("debounce") {
         let t = if *cur < 20.0 { *cur + 1.0 } else { *cur - 1.0 };
         println!("== apply debounce {cur} -> {t}");
@@ -162,7 +162,7 @@ fn main() {
         .expect("restore");
     }
 
-    // アクティブステージ: 0 → 読み戻し → 復元。
+    // Active stage: 0 → read back → restore.
     let orig_stage = ms.active_stage;
     let target = if orig_stage == 0 { 1 } else { 0 };
     println!("== apply active_stage {orig_stage} -> {target}");
@@ -172,7 +172,7 @@ fn main() {
     println!("   readback: {target}");
     d.apply(&Change::ActiveStage(orig_stage)).expect("restore");
 
-    // サイドボタン (slot3): Key('a' usage=4) → 読み戻し → 元に戻す。
+    // Side button (slot3): Key('a' usage=4) → read back → restore.
     if let Some(orig) = ms.buttons.get(3).cloned() {
         let a = ButtonAction::Key(KeyStroke { mods: 0, usage: 4 });
         println!("== apply button3 -> {a:?}");
@@ -187,8 +187,8 @@ fn main() {
         .expect("restore");
     }
 
-    // ---- 拡張往復 ----------------------------------------------------------
-    // トグル系をまとめて反転 → 読み戻し → 復元。
+    // ---- Extended round trips ----------------------------------------------------------
+    // Flip all toggles together → read back → restore.
     for id in [
         "hyper_mode",
         "tracking_mode",
@@ -197,7 +197,7 @@ fn main() {
         "ripple",
         "rapid_right",
         "rapid_left",
-        // ドングル経由のみ存在 (有線では自動スキップ)。
+        // Exists only via the dongle (automatically skipped when wired).
         "dongle_led",
         "glass_mode",
     ] {
@@ -221,7 +221,7 @@ fn main() {
         .expect("restore");
     }
 
-    // 数値系: sensor_offset ±1、angle_tune +5、B-hop ms +200。
+    // Numeric: sensor_offset ±1, angle_tune +5, B-hop ms +200.
     for id in ["sensor_offset", "angle_tune", "bhop_ms"] {
         if let Some(SettingValue::Num(cur)) = s.settings.get(id) {
             let t = match id {
@@ -262,7 +262,7 @@ fn main() {
         }
     }
 
-    // スリープ: 5分 → 読み戻し → 復元。
+    // Sleep: 5 min → read back → restore.
     if let Some(SettingValue::Choice(cur)) = s.settings.get("sleep_min") {
         let cur = *cur;
         println!("== apply sleep_min {cur} -> 5");
@@ -285,7 +285,7 @@ fn main() {
         .expect("restore");
     }
 
-    // ドングル LED モード (無線のみ): led1 → 別モード → 復元。
+    // Dongle LED mode (wireless only): led1 → another mode → restore.
     for id in ["dongle_led1", "dongle_led2", "dongle_led3"] {
         if let Some(SettingValue::Choice(cur)) = s.settings.get(id) {
             let cur = *cur;
@@ -311,7 +311,7 @@ fn main() {
         }
     }
 
-    // AdaDPI カーブ: 末尾の点を少し変えて書き → 読み戻し → 元に復元。
+    // AdaDPI curve: change the last point slightly and write → read back → restore.
     if let Some(cur) = s.mouse.as_ref().and_then(|m| m.adaptive.clone()) {
         let mut tmp = cur.clone();
         if let Some(p) = tmp.points.last_mut() {
@@ -326,7 +326,7 @@ fn main() {
         d.apply(&Change::Adaptive(cur)).expect("adaptive restore");
     }
 
-    // B-hop 方向: 0 (OFF) → 2 (上) → 復元。
+    // B-hop direction: 0 (OFF) → 2 (up) → restore.
     if let Some(SettingValue::Choice(cur)) = s.settings.get("bhop_dir") {
         let cur = *cur;
         let t = if cur == 0 { 2 } else { 0 };
@@ -350,7 +350,7 @@ fn main() {
         .expect("restore");
     }
 
-    // DPI ステージ一括: 同じリストを書き戻す (sub26 経路の E2E)。
+    // DPI stages in bulk: write the same list back (E2E of the sub26 path).
     if !ms.stages.is_empty() {
         println!("== apply dpi stages (same {} stages)", ms.stages.len());
         d.apply(&Change::DpiStages {
@@ -365,7 +365,7 @@ fn main() {
         assert_eq!(st2[0].x, ms.stages[0].x);
     }
 
-    // プロファイル切替: p1→p2→p1 (最後に実行 — 読み出す設定が変わるので)。
+    // Profile switch: p1→p2→p1 (run last — it changes the settings being read).
     println!("== apply profile 0 -> 1");
     d.apply(&Change::Profile(1)).expect("apply");
     let s2 = d.read().expect("read2");

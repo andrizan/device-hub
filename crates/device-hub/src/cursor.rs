@@ -1,10 +1,10 @@
-//! 計測中にカーソルをアプリ窓内に固定する (ゲームと同じ ClipCursor)。
+//! Pin the cursor inside the app window during measurement (ClipCursor, as games do).
 //!
-//! ポーリング実測 (docs/POLLING_RATE.md) で使う — 5 秒計測の間だけ
-//! カーソルをウィンドウ内に閉じ込めると、自然に窓内で速い円を描く動きになり、
-//! アプリが背面に行って raw input が制限される事故も防げる。
-//! 解除は必ず対で呼ぶこと (プロセス終了時は OS が自動解除するが、
-//! 計測中に窓が閉じても tick 側で解除する)。
+//! Used for the measured polling rate (docs/POLLING_RATE.md) — only during the 5-second
+//! measurement. Confining the cursor to the window naturally makes it trace fast circles inside it,
+//! and also prevents the accident of the app going to the background and raw input being throttled.
+//! Always call release as a pair (the OS releases it automatically at process exit, but
+//! release it from the tick side too if the window closes during measurement).
 
 #[cfg(windows)]
 pub fn clip_to_window(window: &gpui_kit::Window) {

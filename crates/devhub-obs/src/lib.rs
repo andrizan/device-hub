@@ -1,9 +1,9 @@
-//! devhub-obs — OBS ソースプラグイン。
+//! devhub-obs — OBS source plugin.
 //!
-//! `devhub-obs.dll` を `C:\ProgramData\obs-studio\plugins\devhub_obs\bin\64bit\`
-//! に置くと、ソース追加一覧に「Device HUB Live / キーボード / マウス」が出る。
-//! (OBS 30.2+ は %APPDATA%\plugins をスキャンしない。)
-//! obs.dll は実行時に GetProcAddress で解決するので import lib は要らない。
+//! Placing `devhub-obs.dll` in `C:\ProgramData\obs-studio\plugins\devhub_obs\bin\64bit\`
+//! makes "Device HUB Live / Keyboard / Mouse" appear in the add-source list.
+//! (OBS 30.2+ does not scan %APPDATA%\plugins.)
+//! obs.dll is resolved at runtime with GetProcAddress, so no import lib is needed.
 
 pub mod config;
 mod ffi;
@@ -19,8 +19,8 @@ use std::sync::Mutex;
 
 static MODULE: AtomicPtr<c_void> = AtomicPtr::new(core::ptr::null_mut());
 
-/// 起動診断ログ (%TEMP%\devhub_obs.log)。ホスト側の obs log には出せないので
-/// ファイルに直接書く — 問題切り分け用、常時 ON。
+/// Startup diagnostic log (%TEMP%\devhub_obs.log). It cannot go to the host's obs log, so
+/// it is written directly to a file - for troubleshooting, always ON.
 fn logline(s: &str) {
     use std::io::Write;
     let p = format!(r"{}\devhub_obs.log", std::env::temp_dir().display());
@@ -43,18 +43,18 @@ struct Src {
     pix: Option<render::Pix>,
     tex: *mut c_void,
     last_seq: u64,
-    /// 最後に反映したアプリ設定 (obs_overlay.json) の世代。
+    /// Generation of the app settings (obs_overlay.json) applied last.
     last_cfg: u64,
     dirty: bool,
-    /// 初回描画の診断用。
+    /// For diagnosing the first render.
     first_render: Option<bool>,
-    /// プロパティ設定 (update() が UI スレッドから書く)。
+    /// Property settings (written by update() from the UI thread).
     vis: Mutex<render::Vis>,
-    /// 補間のターゲットとなる最新スナップショット。
+    /// Latest snapshot that serves as the interpolation target.
     live: live::Live,
-    /// 表示中の補間値: キーごとの route (mm、samples 順) / ボタンごとの depth (0..1)。
-    /// データ到着 (~15-25Hz) より描画 (~60fps) のほうが速いので、
-    /// 値をそのまま描くと紙芝居になる — 指数補間で滑らかにする。
+    /// Interpolated values on display: route per key (mm, in samples order) / depth per button (0..1).
+    /// Rendering (~60fps) is faster than data arrival (~15-25Hz), so
+    /// drawing the raw values looks like a slideshow - smooth it with exponential interpolation.
     sm_route: Vec<f32>,
     sm_depth: Vec<f32>,
     last_tick: std::time::Instant,
@@ -79,15 +79,15 @@ impl Src {
         }
     }
 
-    /// 補間値をターゲットへ近づける。まだ動いている (再描画が要る) なら true。
+    /// Move the interpolated values toward the target. Returns true if still moving (a redraw is needed).
     fn advance(&mut self, dt: f32) -> bool {
-        const TAU: f32 = 0.045; // s — 60fps なら ~3 フレームで 9 割追従
+        const TAU: f32 = 0.045; // s - at 60fps it tracks 90% in ~3 frames
         let k = 1.0 - (-dt / TAU).exp();
         let mut moving = false;
         match &self.live.kb {
             Some(kb) => {
                 if self.sm_route.len() != kb.samples.len() {
-                    // 構成変更時はその場で追いつく (初回のスイープイン防止)。
+                    // Catch up immediately on a configuration change (prevents a sweep-in on the first frame).
                     self.sm_route = kb.samples.iter().map(|s| s.route).collect();
                 } else {
                     for (sm, t) in self
@@ -132,7 +132,7 @@ impl Src {
         moving
     }
 
-    /// 補間値で route/depth を差し替えた描画用スナップショット。
+    /// Snapshot for rendering with route/depth replaced by the interpolated values.
     fn smoothed_live(&self) -> live::Live {
         let mut l = self.live.clone();
         if let Some(kb) = &mut l.kb {
@@ -149,7 +149,7 @@ impl Src {
     }
 }
 
-// ---------------- ソースコールバック ----------------
+// ---------------- Source callbacks ----------------
 
 unsafe extern "C" fn name_both(_d: *mut c_void) -> *const u8 {
     lt(c"devhub.src.both", c"Device HUB Live")
@@ -180,7 +180,7 @@ unsafe extern "C" fn destroy(d: *mut c_void) {
     }
 }
 
-/// サイズは表示キー・テーマ・倍率で変わるので、最後に焼いたビットマップに合わせる。
+/// The size changes with the shown keys, theme, and scale, so match the bitmap rendered last.
 unsafe extern "C" fn get_width(d: *mut c_void) -> u32 {
     let s = &*(d as *mut Src);
     match &s.pix {
@@ -201,8 +201,8 @@ fn render_default_live() -> live::Live {
 }
 
 impl Src {
-    /// OBS プロパティ + アプリ設定を合成した描画設定。
-    /// `obs_all` (「すべての表示設定を OBS で行う」) のソースはアプリ設定を見ない。
+    /// Render settings composed from the OBS properties + the app settings.
+    /// `obs_all` ("Configure everything in OBS") do not look at the app settings.
     fn merge_vis(&self, cfg: &config::OverlayCfg) -> render::Vis {
         let v = self
             .vis
@@ -222,7 +222,7 @@ impl Src {
     }
 }
 
-/// OBS 設定文字列を Rust String に (UTF-8、先頭 max バイトまで)。
+/// OBS settings string to a Rust String (UTF-8, up to the first max bytes).
 unsafe fn cstr_text(p: *const u8, max: usize) -> String {
     if p.is_null() {
         return String::new();
@@ -236,11 +236,11 @@ unsafe fn cstr_text(p: *const u8, max: usize) -> String {
     String::from_utf8_lossy(&buf).into_owned()
 }
 
-/// OBS のプラグインロケール (`data/locale/<lang>.ini`) で訳文を引く。
-/// 未ロード/キー無し/古い OBS なら fallback (英語) を返す。
-/// 返るポインタは OBS のルックアップ表・static・または引数の CStr — いずれも
-/// この式の評価中は生きており、OBS は desc をコピーして持つので安全。
-/// (get_name/description に渡す fallback は 'static の CStr に限る)
+/// Look up the translation in the OBS plugin locale (`data/locale/<lang>.ini`).
+/// Returns the fallback (English) if not loaded, the key is missing, or OBS is old.
+/// The returned pointer is in OBS's lookup table, static, or the argument's CStr - all of which
+/// stay alive while this expression is evaluated, and OBS copies desc and keeps its own, so it is safe.
+/// (the fallback passed to get_name/description must be a 'static CStr)
 unsafe fn lt(key: &std::ffi::CStr, fallback: &std::ffi::CStr) -> *const u8 {
     let m = MODULE.load(std::sync::atomic::Ordering::Relaxed);
     if let (Some(api), false) = (ffi::resolve(), m.is_null()) {
@@ -254,7 +254,7 @@ unsafe fn lt(key: &std::ffi::CStr, fallback: &std::ffi::CStr) -> *const u8 {
     fallback.as_ptr() as *const u8
 }
 
-/// OBS の色データ (int、下位から R,G,B,A の 8bit) を pack/unpack。
+/// Pack/unpack OBS color data (int, 8 bits each of R,G,B,A from the low end).
 fn pack_rgb(r: i64, g: i64, b: i64) -> i64 {
     r | (g << 8) | (b << 16) | (255i64 << 24)
 }
@@ -267,7 +267,7 @@ fn unpack_rgb(v: i64) -> [u8; 4] {
     ]
 }
 
-/// グラフィックススレッド — テクスチャを捨てる (create 側で遅延生成)。
+/// Graphics thread - drop the texture (created lazily on the create side).
 unsafe extern "C" fn deactivate(d: *mut c_void) {
     let s = &mut *(d as *mut Src);
     if !s.tex.is_null() {
@@ -278,10 +278,10 @@ unsafe extern "C" fn deactivate(d: *mut c_void) {
     }
 }
 
-// ---- プロパティ (設定 UI) ----
+// ---- Properties (settings UI) ----
 
-/// 既定値: タイトル/ラベル ON、アクセント=アプリ設定。`obs_cfg` は OFF — 既存シーンの
-/// 見た目を変えない。詳細設定は OverlayCfg の既定と同じ (ON にしたときそのまま使える)。
+/// Defaults: title/labels ON, accent = app settings. `obs_cfg` is OFF - so existing scenes'
+/// look does not change. The detailed settings match OverlayCfg's defaults (usable as is when turned ON).
 unsafe extern "C" fn get_defaults(settings: *mut c_void) {
     let Some(api) = ffi::resolve() else { return };
     let dbool = |n: &std::ffi::CStr, v: bool| {
@@ -294,7 +294,7 @@ unsafe extern "C" fn get_defaults(settings: *mut c_void) {
     dbool(c"labels", true);
     dstr(c"accent", c"app");
     dbool(c"obs_cfg", false);
-    // ---- 「すべての表示設定を OBS で行う」の既定 (OverlayCfg::default と同じ) ----
+    // ---- Defaults for "Configure everything in OBS" (same as OverlayCfg::default) ----
     dstr(c"theme", c"glass");
     dbool(c"numbers", false);
     dstr(c"mstyle", c"both");
@@ -316,8 +316,8 @@ unsafe extern "C" fn get_defaults(settings: *mut c_void) {
     (api.data_set_default_int)(settings, c"pcolor".as_ptr() as *const u8, pack_rgb(255, 150, 60));
 }
 
-/// 設定読み込み。`sk{i}`/`sb{i}` が true のインデックスを表示集合に入れる
-/// (全て false = すべて表示。1 つでも true があればそれだけを表示)。
+/// Load settings. Indices whose `sk{i}`/`sb{i}` is true go into the shown set
+/// (all false = show all; if any is true, show only those).
 unsafe extern "C" fn update(d: *mut c_void, settings: *mut c_void) {
     let Some(api) = ffi::resolve() else { return };
     let s = &mut *(d as *mut Src);
@@ -328,8 +328,8 @@ unsafe extern "C" fn update(d: *mut c_void, settings: *mut c_void) {
         obs_all: getb(c"obs_cfg"),
         ..render::Vis::default()
     };
-    // 「すべての表示設定を OBS で行う」が ON のときは詳細項目を全部読む
-    // (OFF なら値は捨てて、cur_vis 側でアプリ設定が使われる)。
+    // When "Configure everything in OBS" is ON, read all the detailed items
+    // (when OFF, discard the values and cur_vis uses the app settings).
     if vis.obs_all {
         use config::{Arrange, FillMode, MouseStyle, Theme};
         let gets = |n: &std::ffi::CStr, m| cstr_text((api.data_get_string)(settings, n.as_ptr() as *const u8), m);
@@ -404,8 +404,8 @@ unsafe extern "C" fn update(d: *mut c_void, settings: *mut c_void) {
     *s.vis.lock().unwrap_or_else(|p| p.into_inner()) = vis;
 }
 
-/// プロパティ UI。キー/ボタンは接続中デバイスのレイアウトから生成する
-/// (キーボード未接続時は既知の SU66 レイアウトを使う)。
+/// Properties UI. Keys/buttons are generated from the connected device's layout
+/// (when no keyboard is connected, the known SU66 layout is used).
 unsafe extern "C" fn get_properties(d: *mut c_void) -> *mut c_void {
     let Some(api) = ffi::resolve() else {
         return core::ptr::null_mut();
@@ -413,15 +413,15 @@ unsafe extern "C" fn get_properties(d: *mut c_void) -> *mut c_void {
     let s = &mut *(d as *mut Src);
     let snap = live::shared().lock().map(|l| l.clone()).unwrap_or_default();
     let props = (api.props_create)();
-    // 説明文は OBS ロケールから (未翻訳は英語フォールバック)。ポインタは
-    // OBS 所有か static なので lt() の結果をそのまま渡せる。
+    // Descriptions come from the OBS locale (untranslated ones fall back to English). The pointers
+    // are owned by OBS or static, so the result of lt() can be passed as is.
     let addb = |p: *mut c_void, name: &str, desc: *const u8| {
         let n = cs(name);
         (api.props_add_bool)(p, n.as_ptr() as *const u8, desc);
     };
     addb(props, "title", lt(c"devhub.title", c"Show title"));
     addb(props, "labels", lt(c"devhub.labels", c"Show key/button names"));
-    // アクセント色。
+    // Accent color.
     {
         let n = cs("accent");
         let l = (api.props_add_list)(
@@ -431,7 +431,7 @@ unsafe extern "C" fn get_properties(d: *mut c_void) -> *mut c_void {
             ffi::OBS_COMBO_LIST,
             ffi::OBS_COMBO_FMT_STR,
         );
-        // 既定: Device HUB アプリの「OBS オーバーレイ」画面で選んだ色。
+        // Default: the color chosen on the "OBS overlay" screen of the Device HUB app.
         (api.prop_list_add_str)(
             l,
             lt(c"devhub.accent.app", c"Follow Device HUB app"),
@@ -460,7 +460,7 @@ unsafe extern "C" fn get_properties(d: *mut c_void) -> *mut c_void {
             lt(c"devhub.acolor", c"Custom accent color"),
         );
     }
-    // ---- 全設定を OBS だけで行うモード (Device HUB アプリ不要・OSS 配布向け) ----
+    // ---- Mode where all settings are done in OBS only (no Device HUB app needed; for OSS distribution) ----
     addb(
         props,
         "obs_cfg",
@@ -581,7 +581,7 @@ unsafe extern "C" fn get_properties(d: *mut c_void) -> *mut c_void {
         );
     }
     if s.mode != render::Mode::Mouse {
-        // キー単位の表示選択 (チェックしたキーだけ表示。全未チェック = すべて表示)。
+        // Per-key display selection (only checked keys are shown; none checked = show all).
         let fallback = devhub_core::registry::su66max_layout();
         let layout: &[devhub_core::model::LayoutKey] = snap
             .kb
@@ -643,7 +643,7 @@ unsafe extern "C" fn video_render(d: *mut c_void, _e: *mut c_void) {
         return;
     };
     let s = &mut *(d as *mut Src);
-    // 新しいデータ世代があれば補間のターゲットとして保持する。
+    // If there is a newer data generation, keep it as the interpolation target.
     let (cfg, cfg_gen) = config::current();
     let cfg_changed = cfg_gen != s.last_cfg;
     let new_data = {
@@ -663,8 +663,8 @@ unsafe extern "C" fn video_render(d: *mut c_void, _e: *mut c_void) {
             }
         }
     };
-    // 毎フレーム補間を進め、動いていれば焼き直す — ポーリング (~15-25Hz)
-    // より描画 (~60fps) が速いので、これで紙芝居を解消する。
+    // Advance the interpolation every frame and re-render if it is moving - polling (~15-25Hz)
+    // is slower than rendering (~60fps), so this removes the slideshow effect.
     let now = std::time::Instant::now();
     let dt = now
         .duration_since(s.last_tick)
@@ -676,7 +676,7 @@ unsafe extern "C" fn video_render(d: *mut c_void, _e: *mut c_void) {
         let vis = s.merge_vis(&cfg);
         let disp = s.smoothed_live();
         let pix = render::draw(&disp, s.font.as_ref(), s.mode, &vis);
-        // サイズが変わったらテクスチャを作り直す。
+        // Recreate the texture if the size changed.
         if s.pix.as_ref().is_some_and(|o| o.w != pix.w || o.h != pix.h) && !s.tex.is_null() {
             (api.tex_destroy)(s.tex);
             s.tex = core::ptr::null_mut();
@@ -715,7 +715,7 @@ unsafe extern "C" fn video_render(d: *mut c_void, _e: *mut c_void) {
     (api.blend_push)();
     (api.blend_function)(ffi::GS_BLEND_SRCALPHA, ffi::GS_BLEND_INVSRCALPHA);
     let effect = (api.base_effect)(ffi::OBS_EFFECT_DEFAULT);
-    // libobs 正規パターン: gs_effect_loop の pass 内で obs_source_draw。
+    // Canonical libobs pattern: obs_source_draw inside the pass of gs_effect_loop.
     if let (Some(eff_loop), Some(draw)) = (api.effect_loop, api.source_draw) {
         if !effect.is_null() {
             let mut first = true;
@@ -771,8 +771,8 @@ unsafe extern "C" fn video_render(d: *mut c_void, _e: *mut c_void) {
     (api.blend_pop)();
 }
 
-/// `obs_register_source_s` は構造体をコピーするのでローカル生成でよい
-/// (生ポインタを含むので static にはできない)。
+/// `obs_register_source_s` copies the struct, so a locally created one is fine
+/// (it contains raw pointers, so it cannot be static).
 fn source_info(
     id: &'static std::ffi::CStr,
     get_name: unsafe extern "C" fn(*mut c_void) -> *const u8,
@@ -799,7 +799,7 @@ fn source_info(
     }
 }
 
-// ---------------- モジュールエントリ ----------------
+// ---------------- Module entry ----------------
 
 #[no_mangle]
 pub extern "C" fn obs_module_set_pointer(m: *mut c_void) {

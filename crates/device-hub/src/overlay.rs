@@ -1,4 +1,4 @@
-//! 最前面の層: ポップアップメニュー・モーダル・トースト。
+//! Topmost layer: popup menus, modals and toasts.
 
 use crate::app::{Modal, Shell};
 use crate::ui::{self, Btn};
@@ -16,7 +16,7 @@ const PRESETS: &[u32] = &[
 ];
 
 impl Shell {
-    // ------------------------------------------------------------------ ポップアップ
+    // ------------------------------------------------------------------ Popups
 
     pub fn popup_layer(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let pop = self.popup.as_ref()?;
@@ -28,7 +28,7 @@ impl Shell {
         let n = items.len();
         let item_h = 34.;
         let height = (n as f32 * item_h + 12.).min(380.);
-        // 画面下にはみ出すなら上に開く。
+        // Open upward if it would overflow the bottom of the screen.
         let (_, win_h) = motion::rect("root-size")
             .map(|r| (r[2], r[3]))
             .unwrap_or((1280., 800.));
@@ -121,7 +121,7 @@ impl Shell {
         )
     }
 
-    // ------------------------------------------------------------------ トースト
+    // ------------------------------------------------------------------ Toasts
 
     pub fn toast_layer(&mut self, _cx: &mut Context<Self>) -> Option<AnyElement> {
         if self.toasts.is_empty() {
@@ -181,7 +181,7 @@ impl Shell {
         Some(col.into_any_element())
     }
 
-    // ------------------------------------------------------------------ モーダル
+    // ------------------------------------------------------------------ Modals
 
     pub fn modal_layer(
         &mut self,
@@ -202,7 +202,7 @@ impl Shell {
                     .map(|b| b.name.clone())
                     .unwrap_or_default();
                 (
-                    format!("{name} の割り当て"),
+                    format!("Assign {name}"),
                     self.modal_button(window, cx),
                     620.,
                 )
@@ -210,9 +210,9 @@ impl Shell {
             Modal::CaptureKey { title, .. } => (title.clone(), self.modal_capture(cx), 420.),
             Modal::Color { title, .. } => (title.clone(), self.modal_color(window, cx), 440.),
             Modal::Text { title, .. } => (title.clone(), self.modal_text(window, cx), 420.),
-            Modal::Palette => ("コマンド".into(), self.modal_palette(window, cx), 560.),
+            Modal::Palette => ("Commands".into(), self.modal_palette(window, cx), 560.),
             Modal::Calibrate { .. } => (
-                "磁軸キャリブレーション".into(),
+                "Magnetic switch calibration".into(),
                 self.modal_calibrate(window, cx),
                 900.,
             ),
@@ -302,7 +302,7 @@ impl Shell {
             .pt(px(4.))
             .child(ui::button(
                 "m-cancel",
-                "キャンセル",
+                "Cancel",
                 None,
                 Btn::Ghost,
                 cx,
@@ -350,7 +350,7 @@ impl Shell {
             .flex_col()
             .gap(px(14.))
             .child(Input::new(&input))
-            .child(self.modal_footer("保存", false, cx, |this, w, cx| {
+            .child(self.modal_footer("Save", false, cx, |this, w, cx| {
                 let v = this.input_value("modal", cx).unwrap_or_default();
                 if let Some(Modal::Text { on_ok, .. }) = this.modal.take() {
                     on_ok(this, v, w, cx);
@@ -367,7 +367,7 @@ impl Shell {
         };
         let label = got
             .map(keycode::stroke_label)
-            .unwrap_or_else(|| "キーを押してください…".into());
+            .unwrap_or_else(|| "Press a key…".into());
         div()
             .flex()
             .flex_col()
@@ -385,9 +385,9 @@ impl Shell {
                     .child(ui::big_number(label, 26.)),
             )
             .child(ui::faint(
-                "修飾キー (Ctrl / Shift / Alt / Win) と組み合わせて押せます",
+                "You can press it together with modifier keys (Ctrl / Shift / Alt / Win)",
             ))
-            .child(self.modal_footer("決定", false, cx, |this, w, cx| {
+            .child(self.modal_footer("OK", false, cx, |this, w, cx| {
                 if let Some(Modal::CaptureKey {
                     got: Some(k),
                     on_key,
@@ -401,7 +401,7 @@ impl Shell {
             .into_any_element()
     }
 
-    // ------------------------------------------------------------------ 色
+    // ------------------------------------------------------------------ Color
 
     fn modal_color(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = theme::pal();
@@ -468,11 +468,11 @@ impl Shell {
                             .flex()
                             .flex_col()
                             .gap(px(6.))
-                            .child(ui::faint("16 進"))
+                            .child(ui::faint("Hex"))
                             .child(Input::new(&hex_in))
                             .child(ui::button(
                                 "hex-apply",
-                                "反映",
+                                "Apply",
                                 None,
                                 Btn::Glass,
                                 cx,
@@ -492,7 +492,7 @@ impl Shell {
             )
             .child(presets)
             .child(ui::row_first(
-                "色相",
+                "Hue",
                 None,
                 ui::slider(
                     "hue",
@@ -510,7 +510,7 @@ impl Shell {
                 .w(px(260.)),
             ))
             .child(ui::row(
-                "彩度",
+                "Saturation",
                 None,
                 ui::slider("sat", s, 0., 1., 0.01, None, cx, move |this, ns, cx| {
                     set_color_draft(this, hsv_to_rgb(h, ns, v.max(0.05)));
@@ -519,7 +519,7 @@ impl Shell {
                 .w(px(260.)),
             ))
             .child(ui::row(
-                "明るさ",
+                "Brightness",
                 None,
                 ui::slider("val", v, 0., 1., 0.01, None, cx, move |this, nv, cx| {
                     set_color_draft(this, hsv_to_rgb(h, s, nv));
@@ -527,7 +527,7 @@ impl Shell {
                 })
                 .w(px(260.)),
             ))
-            .child(self.modal_footer("決定", false, cx, |this, w, cx| {
+            .child(self.modal_footer("OK", false, cx, |this, w, cx| {
                 if let Some(Modal::Color { draft, on_ok, .. }) = this.modal.take() {
                     on_ok(this, draft, w, cx);
                 }
@@ -536,7 +536,7 @@ impl Shell {
             .into_any_element()
     }
 
-    // ------------------------------------------------------------------ マウスボタン割り当て
+    // ------------------------------------------------------------------ Mouse button assignment
 
     fn modal_button(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let p = theme::pal();
@@ -560,18 +560,18 @@ impl Shell {
         let kinds: Vec<ButtonActionKind> = mc.button_kinds.clone();
         let cur_kind = draft.kind();
         let kind_label = |k: ButtonActionKind| match k {
-            ButtonActionKind::Disabled => "無効",
-            ButtonActionKind::Mouse => "マウス",
+            ButtonActionKind::Disabled => "Disabled",
+            ButtonActionKind::Mouse => "Mouse",
             ButtonActionKind::Dpi => "DPI",
-            ButtonActionKind::Fire => "連射",
-            ButtonActionKind::Key => "キーボード",
-            ButtonActionKind::Media => "メディア",
-            ButtonActionKind::Macro => "マクロ",
-            ButtonActionKind::PollingCycle => "ポーリング切替",
-            ButtonActionKind::ProfileCycle => "プロファイル切替",
-            ButtonActionKind::ScrollModeToggle => "上下ロール切替",
+            ButtonActionKind::Fire => "Rapid fire",
+            ButtonActionKind::Key => "Keyboard",
+            ButtonActionKind::Media => "Media",
+            ButtonActionKind::Macro => "Macro",
+            ButtonActionKind::PollingCycle => "Polling rate cycle",
+            ButtonActionKind::ProfileCycle => "Profile cycle",
+            ButtonActionKind::ScrollModeToggle => "Wheel direction toggle",
         };
-        // 種類のチップ。
+        // Kind chips.
         let mut kinds_row = div().flex().flex_wrap().gap(px(6.));
         for k in kinds.iter().copied() {
             let on = k == cur_kind;
@@ -674,11 +674,11 @@ impl Shell {
                 };
                 let mut g = div().grid().grid_cols(4).gap(px(6.));
                 for (lab, a) in [
-                    ("DPI 循環", DpiFn::Cycle),
+                    ("DPI cycle", DpiFn::Cycle),
                     ("DPI +", DpiFn::Up),
                     ("DPI −", DpiFn::Down),
                     (
-                        "DPI ロック (押している間)",
+                        "DPI lock (while held)",
                         DpiFn::Shift(shift.unwrap_or(400)),
                     ),
                 ] {
@@ -696,7 +696,7 @@ impl Shell {
                     .child(g)
                     .when_some(shift, |d, v| {
                         d.child(ui::row(
-                            "押している間の DPI",
+                            "DPI while held",
                             None,
                             ui::slider_value(
                                 "dpishift",
@@ -727,14 +727,14 @@ impl Shell {
                     .flex()
                     .flex_col()
                     .child(ui::row_first(
-                        "連射するボタン",
+                        "Rapid-fire button",
                         None,
                         ui::segmented(
                             "fire-btn",
                             &[
-                                "左クリック".into(),
-                                "右クリック".into(),
-                                "中クリック".into(),
+                                "Left click".into(),
+                                "Right click".into(),
+                                "Middle click".into(),
                             ],
                             match b {
                                 MouseFn::Right => 1,
@@ -757,14 +757,14 @@ impl Shell {
                         .w(px(300.)),
                     ))
                     .child(ui::row(
-                        "回数",
+                        "Count",
                         None,
                         ui::stepper(
                             "fire-count",
                             c as i64,
                             1,
                             255,
-                            "回",
+                            "×",
                             cx,
                             move |this, v, cx| {
                                 if let Some(Modal::Button { draft, .. }) = this.modal.as_mut() {
@@ -779,7 +779,7 @@ impl Shell {
                         ),
                     ))
                     .child(ui::row(
-                        "間隔",
+                        "Interval",
                         None,
                         ui::slider_value(
                             "fire-int",
@@ -852,16 +852,16 @@ impl Shell {
                             .border_color(if capture { p.accent } else { p.hair })
                             .child(ui::big_number(
                                 if capture {
-                                    "キーを押してください…".to_string()
+                                    "Press a key…".to_string()
                                 } else {
                                     keycode::stroke_label(s)
                                 },
                                 22.,
                             ))
                             .child(ui::faint(if capture {
-                                "Esc 以外の任意のキー"
+                                "Any key except Esc"
                             } else {
-                                "クリックしてキーを取り込む"
+                                "Click to capture a key"
                             }))
                             .on_click(cx.listener(|this, _, w, cx| {
                                 if let Some(Modal::Button { capture, .. }) = this.modal.as_mut() {
@@ -871,9 +871,9 @@ impl Shell {
                                 cx.notify();
                             })),
                     )
-                    .child(ui::row_first("修飾キー", None, mods_row))
+                    .child(ui::row_first("Modifiers", None, mods_row))
                     .child(ui::row(
-                        "一覧から選ぶ",
+                        "Choose from list",
                         None,
                         ui::select(
                             "btn-key",
@@ -905,7 +905,7 @@ impl Shell {
                         crate::app::PopItem::new(
                             m.as_ref()
                                 .map(|m| format!("{}: {}", i + 1, m.name))
-                                .unwrap_or_else(|| format!("{}: (空)", i + 1)),
+                                .unwrap_or_else(|| format!("{}: (empty)", i + 1)),
                             i as u8 == slot,
                         )
                     })
@@ -914,15 +914,15 @@ impl Shell {
                     .get(slot as usize)
                     .and_then(|m| m.as_ref())
                     .map(|m| m.name.clone())
-                    .unwrap_or_else(|| format!("スロット {}", slot + 1));
+                    .unwrap_or_else(|| format!("Slot {}", slot + 1));
                 let times = if let MacroRun::Times(n) = run { n } else { 1 };
                 div()
                     .flex()
                     .flex_col()
                     .child(ui::row_first(
-                        "マクロ",
+                        "Macro",
                         if macros.iter().all(|m| m.is_none()) {
-                            Some("先に「マクロ」タブで作成してください")
+                            Some("Create one in the Macros tab first")
                         } else {
                             None
                         },
@@ -938,11 +938,11 @@ impl Shell {
                         }),
                     ))
                     .child(ui::row(
-                        "実行方法",
+                        "Run mode",
                         None,
                         ui::segmented(
                             "btn-macro-run",
-                            &["回数指定".into(), "離すまで".into(), "再度押すまで".into()],
+                            &["Set count".into(), "Until released".into(), "Until pressed again".into()],
                             match run {
                                 MacroRun::Times(_) => 0,
                                 MacroRun::WhileHeld => 1,
@@ -969,14 +969,14 @@ impl Shell {
                     ))
                     .when(matches!(run, MacroRun::Times(_)), |d| {
                         d.child(ui::row(
-                            "回数",
+                            "Count",
                             None,
                             ui::stepper(
                                 "btn-macro-times",
                                 times as i64,
                                 1,
                                 255,
-                                "回",
+                                "×",
                                 cx,
                                 |this, v, cx| {
                                     if let Some(Modal::Button {
@@ -994,19 +994,19 @@ impl Shell {
                     .into_any_element()
             }
             ButtonAction::Disabled => {
-                ui::sub("このボタンを押しても何も起きません。").into_any_element()
+                ui::sub("Pressing this button does nothing.").into_any_element()
             }
             ButtonAction::PollingCycle => {
-                ui::sub("押すたびにポーリングレートを順に切り替えます。").into_any_element()
+                ui::sub("Each press switches the polling rate in turn.").into_any_element()
             }
             ButtonAction::ProfileCycle => {
-                ui::sub("押すたびにオンボードプロファイルを順に切り替えます。").into_any_element()
+                ui::sub("Each press switches the onboard profile in turn.").into_any_element()
             }
             ButtonAction::ScrollModeToggle => {
-                ui::sub("ホイールの上下ロール動作を切り替えます。").into_any_element()
+                ui::sub("Toggles the wheel's up/down roll direction.").into_any_element()
             }
             ButtonAction::Unsupported { .. } => {
-                ui::sub("このデバイスに記録されている割当は未対応の種類です。別の割当を選ぶと元には戻せません。")
+                ui::sub("The assignment stored on this device is of an unsupported type. Once you choose a different assignment, it cannot be restored.")
                     .into_any_element()
             }
         };
@@ -1017,11 +1017,11 @@ impl Shell {
             .gap(px(14.))
             .child(kinds_row)
             .child(div().min_h(px(110.)).child(detail))
-            .child(self.modal_footer("適用", false, cx, |this, _, cx| {
+            .child(self.modal_footer("Apply", false, cx, |this, _, cx| {
                 let Some(Modal::Button { slot, draft, .. }) = this.modal.take() else {
                     return;
                 };
-                // 左クリックが 1 つも無くなる割り当ては拒否する (mouse.fit と同じ)。
+                // Reject assignments that leave no left click at all (same as mouse.fit).
                 let need_left = this
                     .cur()
                     .and_then(|s| s.caps.as_ref())
@@ -1040,11 +1040,7 @@ impl Shell {
                             })
                             .unwrap_or(true);
                     if !others_left && draft != ButtonAction::Mouse(MouseFn::Left) {
-                        this.toast(
-                            "少なくとも 1 つのボタンを左クリックにしてください",
-                            true,
-                            cx,
-                        );
+                        this.toast("At least one button must be set to left click", true, cx);
                         this.modal = Some(Modal::Button {
                             slot,
                             draft,
@@ -1133,7 +1129,7 @@ pub fn hsv_to_rgb(h: f32, s: f32, v: f32) -> Rgb {
     )
 }
 
-/// 色選択ダイアログを開く。
+/// Opens the color picker dialog.
 pub fn pick_color(
     this: &mut Shell,
     title: &str,

@@ -1,22 +1,22 @@
-//! mouse.fit プロトコル (www.mouse.fit / G-Wolves 等) — 新プロトコル機種専用。
+//! mouse.fit protocol (www.mouse.fit / G-Wolves, etc.) — for new-protocol models only.
 //!
-//! 対象機種 (HTS Plus Pro / HTX Ultra / 8K ドングル) はすべて `IsNewProtocol=1`
-//! (docs/PROTOCOL_NOTES.md, env-models.json)。旧 report-8 EEPROM 経路は実装しない。
+//! The target models (HTS Plus Pro / HTX Ultra / 8K dongle) all have `IsNewProtocol=1`
+//! (docs/PROTOCOL_NOTES.md, env-models.json). The old report-8 EEPROM path is not implemented.
 //!
-//! # トランスポート
-//! - 64B feature report のみ (`send_feature_report(0)` / `get_feature_report(0)`)。
-//! - 要求: `[2]=devID, [3]=group, [4]=sub-family, [5]=cmd, [6..]=args`。
-//!   読みは `cmd = 0x80|n`、書きは `cmd = n`。`[3]` は可変 (ボタン/マクロ系は `5+ctxLen` 等)。
-//! - 応答: `L[1]=0xA1` (ACK)。レスポンスは要求を 1 バイト右にずらした形でエコーし、
-//!   データは「7 + 要求引数バイト数」の位置に来る:
-//!   - 引数なし要求 (FW/battery/PID) → データは L[7..]
-//!   - profile を `[6]` に置く要求 → データは L[8..]
-//!   - stage-info のように `[6]=profile,[7]=N` → L[8]=N, レコードは L[9..]
-//! - `hidIndex`: 応答ペイロード先頭が 0xA0 以上なら hi=1 (L[i]=buf[i])、
-//!   未満なら hi=0 (L[i]=buf[1+i])。先頭にゴミが載る実機差を吸収する JS 由来の規則。
+//! # Transport
+//! - 64B feature reports only (`send_feature_report(0)` / `get_feature_report(0)`).
+//! - Request: `[2]=devID, [3]=group, [4]=sub-family, [5]=cmd, [6..]=args`.
+//!   Reads use `cmd = 0x80|n`, writes use `cmd = n`. `[3]` varies (`5+ctxLen` etc. for button/macro commands).
+//! - Response: `L[1]=0xA1` (ACK). The response echoes the request shifted right by 1 byte, and
+//!   the data comes at position "7 + number of request argument bytes":
+//!   - request without arguments (FW/battery/PID) → data at L[7..]
+//!   - request with the profile in `[6]` → data at L[8..]
+//!   - like stage-info with `[6]=profile,[7]=N` → L[8]=N, records at L[9..]
+//! - `hidIndex`: hi=1 (L[i]=buf[i]) when the first byte of the response payload is 0xA0 or more,
+//!   hi=0 (L[i]=buf[1+i]) otherwise. A rule from the JS that absorbs real-device differences where junk precedes the payload.
 //!
-//! # プロファイル / ステージは 1-based
-//! getProfileID / setActiveDPI は 1 始まり。v2 側の `usize` へは -1 する。
+//! # Profiles / stages are 1-based
+//! getProfileID / setActiveDPI start at 1. Subtract 1 to get the v2 `usize`.
 
 use crate::transport::Channel;
 use devhub_core::backend::*;
@@ -29,22 +29,22 @@ use std::time::Duration;
 const ACK: u8 = 0xA1;
 const MAX_STAGES: usize = 7;
 
-// ==================================================================== 機種表
+// ==================================================================== model table
 
-/// env-models.json 由来の機種差。
+/// Per-model differences from env-models.json.
 pub struct MfModel {
-    /// true = GW_056 系 (XVI=1): ボタンは ie 型 + z-id。false = JM 系: Ya 型 + slot index。
+    /// true = GW_056 family (XVI=1): buttons use the ie type + z-id. false = JM family: Ya type + slot index.
     pub xvi: bool,
     pub dpi_max: u32,
     pub dpi_step: u32,
     pub max_stages: usize,
-    /// LOD の選択肢 (display mm ×10 の i64 値とラベル)。
+    /// LOD choices (i64 value of display mm ×10, and label).
     pub lod_choices: &'static [(i64, &'static str)],
-    /// JM 系は LOD を 1-based index で書く。GW 系は実値 (0.7→0x87)。
+    /// The JM family writes LOD as a 1-based index. The GW family writes the real value (0.7→0x87).
     pub lod_is_index: bool,
     pub spdt: bool,
     pub liftoff_debounce: bool,
-    /// ポーリング候補 (Hz)。
+    /// Polling candidates (Hz).
     pub polling: &'static [u32],
 }
 
@@ -58,7 +58,7 @@ const LOD_JM: &[(i64, &str)] = &[
 const LOD_GW: &[(i64, &str)] = &[(7, "0.7mm"), (10, "1.0mm"), (20, "2.0mm")];
 const POLL_8K: &[u32] = &[125, 250, 500, 1000, 2000, 4000, 8000];
 
-/// HTS Plus Pro — JM_052_3955 (XVI=0, 3955, 磁気スイッチだがトリガー API は stub)。
+/// HTS Plus Pro — JM_052_3955 (XVI=0, 3955, magnetic switches but the trigger API is a stub).
 const HTS_PLUS_PRO: MfModel = MfModel {
     xvi: false,
     dpi_max: 40_000,
@@ -70,7 +70,7 @@ const HTS_PLUS_PRO: MfModel = MfModel {
     liftoff_debounce: false,
     polling: POLL_8K,
 };
-/// HTX Ultra (GW_056, XVI=1)。
+/// HTX Ultra (GW_056, XVI=1).
 const HTX_ULTRA_GW: MfModel = MfModel {
     xvi: true,
     dpi_max: 30_000,
@@ -82,7 +82,7 @@ const HTX_ULTRA_GW: MfModel = MfModel {
     liftoff_debounce: true,
     polling: POLL_8K,
 };
-/// HTX Ultra 3950 版 (JM_056_3950, XVI=0)。
+/// HTX Ultra 3950 version (JM_056_3950, XVI=0).
 const HTX_ULTRA_3950: MfModel = MfModel {
     xvi: false,
     dpi_max: 32_000,
@@ -94,7 +94,7 @@ const HTX_ULTRA_3950: MfModel = MfModel {
     liftoff_debounce: false,
     polling: POLL_8K,
 };
-/// HTX Ultra 3955 版 (JM_056_3955, XVI=0)。
+/// HTX Ultra 3955 version (JM_056_3955, XVI=0).
 const HTX_ULTRA_3955: MfModel = MfModel {
     xvi: false,
     dpi_max: 40_000,
@@ -113,12 +113,12 @@ fn model_for(model: &str, pid: u16) -> &'static MfModel {
         ("htx-ultra", _) => &HTX_ULTRA_GW,
         ("htx-ultra-3950", _) => &HTX_ULTRA_3950,
         ("htx-ultra-3955", _) => &HTX_ULTRA_3955,
-        // 8K ドングル単体は開いてから GetDevicePID_2 で実機を引く (open() が差し替える)。
+        // A standalone 8K dongle is opened first, then the real device is looked up via GetDevicePID_2 (open() swaps it in).
         _ => &HTS_PLUS_PRO,
     }
 }
 
-/// ドングルが報告した内側 PID → registry model 名。
+/// Inner PID reported by the dongle → registry model name.
 fn model_name_for_inner_pid(pid: u16) -> &'static str {
     match pid {
         0x5219 => "hts-plus-pro",
@@ -129,14 +129,14 @@ fn model_name_for_inner_pid(pid: u16) -> &'static str {
     }
 }
 
-// ==================================================================== 応答アクセス
+// ==================================================================== response access
 
-/// feature report 応答を「論理位置」で読むラッパ。
-/// JS の `o[i - hidIndex]` と同じ: `L[i]` = 論理位置 i のバイト。
+/// A wrapper that reads the feature report response by "logical position".
+/// Same as the JS `o[i - hidIndex]`: `L[i]` = the byte at logical position i.
 fn logical(buf: &[u8; 65]) -> [u8; 64] {
-    // hidapi は buf[0]=report ID(0), buf[1..]=payload。
-    // payload[0] >= 0xA0 → hi=1 (L[i]=buf[base+i-1]); それ未満 → hi=0 (L[i]=buf[base+i])。
-    // 環境によって payload が buf[0] 始まりのこともあるので buf[1]→buf[0] の順で判定。
+    // hidapi gives buf[0]=report ID(0), buf[1..]=payload.
+    // payload[0] >= 0xA0 → hi=1 (L[i]=buf[base+i-1]); below that → hi=0 (L[i]=buf[base+i]).
+    // Depending on the environment the payload may start at buf[0], so check buf[1] first, then buf[0].
     let (base, hi) = if buf[1] >= 0xA0 {
         (1usize, 1usize)
     } else if buf[0] >= 0xA0 {
@@ -158,7 +158,7 @@ fn u32be(l: &[u8; 64], i: usize) -> u32 {
     ((l[i] as u32) << 24) | ((l[i + 1] as u32) << 16) | ((l[i + 2] as u32) << 8) | l[i + 3] as u32
 }
 
-// ==================================================================== ドライバ
+// ==================================================================== driver
 
 pub struct MousefitDriver {
     info: DeviceInfo,
@@ -172,7 +172,7 @@ pub struct MousefitDriver {
 pub fn open(dev: hidapi::HidDevice, info: DeviceInfo) -> HubResult<MousefitDriver> {
     let ch = Channel::open(dev, 65, 65);
     let mut info = info;
-    // ドングル経由 (0x3854) のとき内側の実機 PID を聞いて機種を差し替える。
+    // Behind a dongle (0x3854), ask for the inner real device PID and swap the model.
     let probe = MousefitDriver {
         caps: Capabilities::empty(),
         model: &HTS_PLUS_PRO,
@@ -222,8 +222,8 @@ fn registry_name(_model: &str, fallback: &str) -> String {
 }
 
 impl MousefitDriver {
-    // ---- 基本コマンド --------------------------------------------------
-    /// 要求 64B → 応答の論理 64B。ACK (L[1]==0xA1) を確認。最大 3 回再送。
+    // ---- basic commands --------------------------------------------------
+    /// 64B request → 64B logical response. Checks for ACK (L[1]==0xA1). Resends up to 3 times.
     fn cmd(&self, req: &[u8; 64]) -> HubResult<[u8; 64]> {
         let mut last = HubError::Protocol("no response".into());
         for _ in 0..3 {
@@ -243,7 +243,7 @@ impl MousefitDriver {
         Err(last)
     }
 
-    /// dev/group/sub/cmd + args ([6..])。
+    /// dev/group/sub/cmd + args ([6..]).
     fn req(&self, dev: u8, group: u8, sub: u8, cmd: u8, args: &[u8]) -> HubResult<[u8; 64]> {
         let mut r = [0u8; 64];
         r[2] = dev;
@@ -255,18 +255,18 @@ impl MousefitDriver {
         self.cmd(&r)
     }
 
-    /// profile スコープの読み (引数 1B) → L[8]。
+    /// Profile-scoped read (1B argument) → L[8].
     fn read8(&self, prof: u8, group: u8, sub: u8, cmd: u8) -> HubResult<u8> {
         let l = self.req(2, group, sub, cmd, &[prof])?;
         Ok(l[8])
     }
-    /// profile スコープの書き (引数 profile + value)。
+    /// Profile-scoped write (arguments profile + value).
     fn write1(&self, prof: u8, group: u8, sub: u8, cmd: u8, v: u8) -> HubResult<()> {
         self.req(2, group, sub, cmd, &[prof, v])?;
         Ok(())
     }
 
-    /// FW バージョンと内側 PID (resp L[7..11]=version, L[11..13]=pid)。
+    /// FW version and inner PID (resp L[7..11]=version, L[11..13]=pid).
     fn firmware_version(&self, dev: u8) -> HubResult<(Option<String>, Option<u16>)> {
         let l = self.req(dev, 16, 0, 129, &[])?;
         if l[6] != 129 {
@@ -293,7 +293,7 @@ impl MousefitDriver {
             Err(_) => return 1,
         };
         let v = l[7];
-        // 値が個数かビットマスクか機種で揺れる → 8 超は popcount とみなす。
+        // Whether the value is a count or a bitmask varies by model → treat anything above 8 as a popcount.
         if v == 0 {
             1
         } else if v <= 8 {
@@ -304,7 +304,7 @@ impl MousefitDriver {
         .max(1)
     }
 
-    // ---- 個別機能 -------------------------------------------------------
+    // ---- individual features -------------------------------------------------------
     fn polling(&self, prof: u8) -> HubResult<u32> {
         let code = self.read8(prof, 2, 1, 128)?;
         Ok(poll_from_code(code))
@@ -412,16 +412,16 @@ impl MousefitDriver {
         Ok(())
     }
 
-    // ---- ボタン --------------------------------------------------------
-    /// GetButton: [7]=id, [9]=type問い合わせ(0), [10]=ctx len(0)。応答 L[10]=type, L[12..]=ctx。
+    // ---- buttons --------------------------------------------------------
+    /// GetButton: [7]=id, [9]=type query (0), [10]=ctx len (0). Response L[10]=type, L[12..]=ctx.
     fn get_button(&self, prof: u8, id: u8) -> HubResult<(u8, Vec<u8>)> {
         let l = self.req(2, 5, 3, 128, &[prof, id, 0, 0, 0])?;
-        let len = l[11] as usize; // 応答側の ctx 長 (echo+1 位置)
+        let len = l[11] as usize; // ctx length on the response side (echo+1 position)
         let start = 12;
         let ctx: Vec<u8> = (0..len.min(20)).map(|i| l[start + i]).collect();
         Ok((l[10], ctx))
     }
-    /// SetButton: [7]=id(slot/zid), [9]=type, [10]=ctx len, [11..]=ctx, [3]=5+len。
+    /// SetButton: [7]=id(slot/zid), [9]=type, [10]=ctx len, [11..]=ctx, [3]=5+len.
     fn set_button(&self, prof: u8, id: u8, ty: u8, ctx: &[u8]) -> HubResult<()> {
         let mut r = [0u8; 64];
         r[2] = 2;
@@ -437,7 +437,7 @@ impl MousefitDriver {
         Ok(())
     }
 
-    // ---- マクロ ---------------------------------------------------------
+    // ---- macros ---------------------------------------------------------
     fn macro_alloc(&self, id: u16, size: u32) -> HubResult<()> {
         let mut args = id.to_be_bytes().to_vec();
         args.extend_from_slice(&size.to_be_bytes());
@@ -466,7 +466,7 @@ impl MousefitDriver {
     }
     fn macro_size(&self, id: u16) -> HubResult<u32> {
         let l = self.req(2, 6, 4, 129, &id.to_be_bytes())?;
-        // 応答は [6]=cmd echo + [7,8]=id echo → size u32BE は L[9..13]。保険で L[8..12] も見る。
+        // The response has [6]=cmd echo + [7,8]=id echo → size u32BE is at L[9..13]. Also check L[8..12] as a safeguard.
         let s = u32be(&l, 9);
         Ok(if s > 0x10000 { u32be(&l, 8) } else { s })
     }
@@ -484,12 +484,12 @@ impl MousefitDriver {
     }
 }
 
-// ==================================================================== ポーリング
+// ==================================================================== polling
 
 pub(crate) fn poll_from_code(code: u8) -> u32 {
     match code {
-        // OpenMouse (@openmouse/protocol gwolves) が実機キャプチャで検証:
-        // <=1K は周期 ms、>1K は bit4/5/6 の one-hot
+        // Verified by OpenMouse (@openmouse/protocol gwolves) with real-device captures:
+        // <=1K is the period in ms, >1K is a one-hot of bit4/5/6
         8 => 125,
         4 => 250,
         2 => 500,
@@ -513,9 +513,9 @@ pub(crate) fn poll_to_code(hz: u32) -> HubResult<u8> {
     })
 }
 
-// ==================================================================== ボタン変換
+// ==================================================================== button conversion
 
-/// MouseFn → GW z-id (ButtonCode ctx)。
+/// MouseFn → GW z-id (ButtonCode ctx).
 fn zid_of_mouse(f: MouseFn) -> u8 {
     match f {
         MouseFn::Left => 1,
@@ -525,7 +525,7 @@ fn zid_of_mouse(f: MouseFn) -> u8 {
         MouseFn::Forward => 5,
         MouseFn::ScrollUp => 16,
         MouseFn::ScrollDown => 17,
-        MouseFn::DoubleClick => 1, // X_Click で表現
+        MouseFn::DoubleClick => 1, // expressed as X_Click
         _ => 1,
     }
 }
@@ -541,7 +541,7 @@ fn mouse_of_zid(z: u8) -> Option<MouseFn> {
         _ => return None,
     })
 }
-/// MediaFn → consumer code (u16)。
+/// MediaFn → consumer code (u16).
 fn media_code(m: MediaFn) -> u16 {
     match m {
         MediaFn::PlayPause => 0xCD,
@@ -578,7 +578,7 @@ fn media_of_code(c: u16) -> Option<MediaFn> {
 }
 
 fn macro_run_byte(run: MacroRun) -> (u8, u8) {
-    // (ie type, times byte): Times→16/n, WhileHeld→17/254, Toggle→18/253。
+    // (ie type, times byte): Times→16/n, WhileHeld→17/254, Toggle→18/253.
     match run {
         MacroRun::Times(n) => (16, n.min(252) as u8),
         MacroRun::WhileHeld => (17, 254),
@@ -586,7 +586,7 @@ fn macro_run_byte(run: MacroRun) -> (u8, u8) {
     }
 }
 
-/// GW (XVI=1) エンコード: (ie_type, ctx)。
+/// GW (XVI=1) encoding: (ie_type, ctx).
 fn encode_gw(action: &ButtonAction) -> HubResult<(u8, Vec<u8>)> {
     use ButtonAction::*;
     Ok(match action {
@@ -627,7 +627,7 @@ fn encode_gw(action: &ButtonAction) -> HubResult<(u8, Vec<u8>)> {
     })
 }
 
-/// GW (ie) デコード。
+/// GW (ie) decoding.
 fn decode_gw(ty: u8, ctx: &[u8]) -> ButtonAction {
     use ButtonAction::*;
     let c = |i: usize| ctx.get(i).copied().unwrap_or(0);
@@ -666,7 +666,7 @@ fn decode_gw(ty: u8, ctx: &[u8]) -> ButtonAction {
     }
 }
 
-/// JM (XVI=0) エンコード: (Ya_type, ctx)。button slot index は呼び側が [7] に入れる。
+/// JM (XVI=0) encoding: (Ya_type, ctx). The caller puts the button slot index in [7].
 fn encode_jm(slot: usize, action: &ButtonAction) -> HubResult<(u8, Vec<u8>)> {
     use ButtonAction::*;
     let mouse_mask = |m: u8| vec![m, 0];
@@ -694,7 +694,7 @@ fn encode_jm(slot: usize, action: &ButtonAction) -> HubResult<(u8, Vec<u8>)> {
             count, interval_ms, ..
         } => (4, vec![(*interval_ms).min(255) as u8, *count]),
         Key(k) => {
-            // ShortcutKey: [count*2, 各3B: (type|0x80 down / |0x40 up), lo, hi]
+            // ShortcutKey: [count*2, 3B each: (type|0x80 down / |0x40 up), lo, hi]
             let mut events: Vec<[u8; 3]> = vec![];
             for bit in 0..8 {
                 if k.mods >> bit & 1 == 1 {
@@ -731,8 +731,8 @@ fn encode_jm(slot: usize, action: &ButtonAction) -> HubResult<(u8, Vec<u8>)> {
             )
         }
         Macro { slot: mslot, run } => {
-            // ctx[0]=対象 (実機検証待ち: JS は btn slot を入れるが macro index と解釈して送る),
-            // ctx[1]=cycle (Times=n / WhileHeld=254 / Toggle=253)。
+            // ctx[0]=target (awaiting real-device verification: the JS puts in the btn slot but we send it interpreted as the macro index),
+            // ctx[1]=cycle (Times=n / WhileHeld=254 / Toggle=253).
             let (_, times) = macro_run_byte(*run);
             let _ = slot;
             (6, vec![mslot + 1, times])
@@ -744,7 +744,7 @@ fn encode_jm(slot: usize, action: &ButtonAction) -> HubResult<(u8, Vec<u8>)> {
     })
 }
 
-/// JM (Ya) デコード。
+/// JM (Ya) decoding.
 fn decode_jm(ty: u8, ctx: &[u8]) -> ButtonAction {
     use ButtonAction::*;
     let c = |i: usize| ctx.get(i).copied().unwrap_or(0);
@@ -774,13 +774,13 @@ fn decode_jm(ty: u8, ctx: &[u8]) -> ButtonAction {
             }
         }
         5 => {
-            // メディア: [2, 0x82, lo, hi, 0x42, ...]
+            // Media: [2, 0x82, lo, hi, 0x42, ...]
             if c(0) == 2 && c(1) == 0x82 {
                 media_of_code(c(2) as u16 | ((c(3) as u16) << 8))
                     .map(Media)
                     .unwrap_or(Disabled)
             } else {
-                // キー: イベント列から mods+usage を復元
+                // Key: restore mods+usage from the event sequence
                 let n = c(0) as usize;
                 let mut mods = 0u8;
                 let mut usage = 0u16;
@@ -820,9 +820,9 @@ fn decode_jm(ty: u8, ctx: &[u8]) -> ButtonAction {
     }
 }
 
-// ==================================================================== マクロ変換
+// ==================================================================== macro conversion
 
-/// MacroDef.events → mouse.fit イベントバイト列 (ec() 相当)。
+/// MacroDef.events → mouse.fit event byte sequence (equivalent of ec()).
 fn encode_macro(def: &MacroDef) -> Vec<u8> {
     let mut out = Vec::new();
     for ev in &def.events {
@@ -874,7 +874,7 @@ fn push_delay(out: &mut Vec<u8>, ms: u32) {
     }
 }
 
-/// バイト列 → MacroDef.events (decode)。mode/repeat は束縛側の情報なので既定値。
+/// Byte sequence → MacroDef.events (decode). mode/repeat belong to the binding side, so they get defaults.
 fn decode_macro(data: &[u8]) -> Vec<MacroEvent> {
     let mut evs = Vec::new();
     let mut i = 0;
@@ -916,7 +916,7 @@ fn decode_macro(data: &[u8]) -> Vec<MacroEvent> {
                         MacroEdge::Down,
                     ),
                     _ => {
-                        // ty==1: マウスボタン。mask→down, 0→up。
+                        // ty==1: mouse button. mask→down, 0→up.
                         let f = match v {
                             1 => MouseFn::Left,
                             2 => MouseFn::Right,
@@ -990,16 +990,16 @@ fn build_caps(info: &DeviceInfo, m: &MfModel) -> Capabilities {
     let mut settings = vec![SettingSpec::choice(
         "polling_wired",
         PERFORMANCE,
-        "ポーリングレート (有線)",
+        "Polling rate (wired)",
         poll_opts,
     )
-    .help("マウスがPCへ位置を報告する頻度 (Hz)")];
+    .help("How often the mouse reports its position to the PC (Hz)")];
     if wireless {
         settings.push(
             SettingSpec::choice(
                 "polling_wireless",
                 PERFORMANCE,
-                "ポーリングレート (無線)",
+                "Polling rate (wireless)",
                 opts(&[
                     (125, "125"),
                     (250, "250"),
@@ -1010,37 +1010,39 @@ fn build_caps(info: &DeviceInfo, m: &MfModel) -> Capabilities {
                     (8000, "8K"),
                 ]),
             )
-            .help("使用中のレシーバー (1K / 4K / 8K) で選べる値が変わります"),
+            .help("The selectable values depend on the receiver in use (1K / 4K / 8K)"),
         );
     }
     settings.extend([
-        SettingSpec::toggle("competitive", PERFORMANCE, "競技モード")
-            .help("センサーを常時最高性能で動かします (Tracking Mode)"),
-        SettingSpec::choice("lod", SENSOR, "リフトオフ距離", opts(m.lod_choices))
-            .help("マウスを持ち上げたとき反応しなくなる高さ"),
-        SettingSpec::toggle("motion_sync", SENSOR, "モーション同期")
-            .help("ポインタとマウスの動きを同期させ、軌跡を滑らかにします"),
-        SettingSpec::toggle("angle_snap", SENSOR, "直線補正").help("移動のブレを直線に補正します"),
-        SettingSpec::toggle("ripple", SENSOR, "リップル制御").help("高DPI時の細かい揺れを抑えます"),
-        SettingSpec::slider("sensor_angle", SENSOR, "センサー角度", -30., 30., 1., "°")
-            .help("持ち方に合わせて座標軸を回転させます"),
-        SettingSpec::toggle("dpi_xy", SENSOR, "DPI X/Y 個別設定")
-            .help("横方向と縦方向で別々のDPIにします"),
+        SettingSpec::toggle("competitive", PERFORMANCE, "Competitive mode")
+            .help("Runs the sensor at maximum performance at all times (Tracking Mode)"),
+        SettingSpec::choice("lod", SENSOR, "Lift-off distance", opts(m.lod_choices))
+            .help("Height at which the mouse stops tracking when lifted"),
+        SettingSpec::toggle("motion_sync", SENSOR, "Motion sync")
+            .help("Syncs pointer and mouse movement to smooth the trajectory"),
+        SettingSpec::toggle("angle_snap", SENSOR, "Angle snapping")
+            .help("Straightens out wobble in movement"),
+        SettingSpec::toggle("ripple", SENSOR, "Ripple control")
+            .help("Reduces fine jitter at high DPI"),
+        SettingSpec::slider("sensor_angle", SENSOR, "Sensor angle", -30., 30., 1., "°")
+            .help("Rotates the coordinate axes to match your grip"),
+        SettingSpec::toggle("dpi_xy", SENSOR, "Separate DPI for X/Y")
+            .help("Uses a different DPI for the horizontal and vertical directions"),
         SettingSpec::slider(
             "debounce_press",
             CLICK,
-            "クリックデバウンス (押下)",
+            "Click debounce (press)",
             0.,
             50.,
             1.,
             "ms",
         )
-        .help("短くすると反応が速く、長くすると誤クリックを防ぎます")
-        .confirm("0ms にするとダブルクリックが発生する場合があります。続けますか?"),
+        .help("Shorter responds faster; longer prevents accidental clicks")
+        .confirm("Setting 0ms may cause double clicks. Continue?"),
         SettingSpec::slider(
             "debounce_release",
             CLICK,
-            "クリックデバウンス (解放)",
+            "Click debounce (release)",
             0.,
             50.,
             1.,
@@ -1049,7 +1051,7 @@ fn build_caps(info: &DeviceInfo, m: &MfModel) -> Capabilities {
         SettingSpec::slider(
             "wheel_debounce",
             CLICK,
-            "ホイールデバウンス",
+            "Wheel debounce",
             0.,
             245.,
             5.,
@@ -1059,7 +1061,7 @@ fn build_caps(info: &DeviceInfo, m: &MfModel) -> Capabilities {
     if m.spdt {
         settings.extend([
             SettingSpec::toggle("spdt_left", CLICK, "Left SPDT")
-                .help("光学/機械スイッチの SPDT 方式でチャタリングを防ぎます"),
+                .help("Prevents chatter with the SPDT design of optical/mechanical switches"),
             SettingSpec::toggle("spdt_right", CLICK, "Right SPDT"),
         ]);
     }
@@ -1068,13 +1070,13 @@ fn build_caps(info: &DeviceInfo, m: &MfModel) -> Capabilities {
             SettingSpec::slider(
                 "liftoff_debounce",
                 CLICK,
-                "持ち上げデバウンス",
+                "Lift-off debounce",
                 0.,
                 30.,
                 1.,
                 "ms",
             )
-            .help("持ち上げた瞬間のクリックを無視する時間"),
+            .help("Time to ignore clicks right as the mouse is lifted"),
         );
     }
     if wireless {
@@ -1082,29 +1084,29 @@ fn build_caps(info: &DeviceInfo, m: &MfModel) -> Capabilities {
             SettingSpec::choice(
                 "sleep_min",
                 POWER,
-                "スリープまでの時間",
+                "Time until sleep",
                 opts(&[
-                    (1, "1分"),
-                    (2, "2分"),
-                    (3, "3分"),
-                    (5, "5分"),
-                    (10, "10分"),
-                    (15, "15分"),
-                    (30, "30分"),
+                    (1, "1 min"),
+                    (2, "2 min"),
+                    (3, "3 min"),
+                    (5, "5 min"),
+                    (10, "10 min"),
+                    (15, "15 min"),
+                    (30, "30 min"),
                 ]),
             )
-            .help("この時間動かさないとスリープします"),
+            .help("Goes to sleep after this much time without movement"),
         );
     }
     settings.push(
-        SettingSpec::toggle("dpi_indicator", POWER, "DPI インジケーター")
-            .help("DPI 切替時に LED で知らせます"),
+        SettingSpec::toggle("dpi_indicator", POWER, "DPI indicator")
+            .help("Signals DPI changes with the LED"),
     );
 
     Capabilities {
         settings,
         actions: vec![],
-        profiles: None, // open() 後に caps へ入れるため profile_count を別途反映
+        profiles: None, // filled into caps after open(), so profile_count is applied separately
         mouse: Some(MouseCaps {
             dpi_min: 50,
             dpi_max: m.dpi_max,
@@ -1117,9 +1119,9 @@ fn build_caps(info: &DeviceInfo, m: &MfModel) -> Capabilities {
             buttons: [
                 "Left",
                 "Right",
-                "ホイールクリック",
-                "サイド (戻る)",
-                "サイド (進む)",
+                "Wheel click",
+                "Side (back)",
+                "Side (forward)",
             ]
             .iter()
             .map(|n| ButtonSlot { name: (*n).into() })
@@ -1143,9 +1145,9 @@ fn build_caps(info: &DeviceInfo, m: &MfModel) -> Capabilities {
                 max_events: 70,
                 max_delay_ms: 0xFF_FFFF,
                 modes: opts(&[
-                    (0, "指定回数実行"),
-                    (1, "離すまで繰り返す"),
-                    (2, "もう一度押すまで繰り返す"),
+                    (0, "Run a set number of times"),
+                    (1, "Repeat until released"),
+                    (2, "Repeat until pressed again"),
                 ]),
                 repeat_modes: vec![0],
                 names: false,
@@ -1183,7 +1185,7 @@ impl DeviceDriver for MousefitDriver {
 
     fn caps(&self) -> Capabilities {
         let mut c = self.caps.clone();
-        // プロファイル数は機種/FW 依存 → 読めたら宣言 (読めなくても caps は返す)。
+        // The profile count depends on model/FW → declare it if readable (caps are returned even if not).
         let n = self.profile_count();
         if n > 1 {
             c.profiles = Some(ProfileCaps {
@@ -1222,7 +1224,7 @@ impl DeviceDriver for MousefitDriver {
             "lod",
             self.lod(prof).map(|w| {
                 let tenth = if self.model.lod_is_index {
-                    // 1-based index → choice の i64 値
+                    // 1-based index → the choice's i64 value
                     self.model
                         .lod_choices
                         .get(w.max(1) as usize - 1)
@@ -1293,7 +1295,7 @@ impl DeviceDriver for MousefitDriver {
             self.bool_get(prof, 2, 2, 132).map(SettingValue::Bool)
         );
 
-        // DPI ステージ
+        // DPI stages
         let (n, xy) = self.dpi_stages(prof)?;
         let colors = self.dpi_colors(prof).unwrap_or_default();
         let active = self
@@ -1311,7 +1313,7 @@ impl DeviceDriver for MousefitDriver {
             })
             .collect();
 
-        // ボタン (左/右/中/戻/進 = zid 1..5 / JM slot 0..4)
+        // Buttons (left/right/middle/back/forward = zid 1..5 / JM slot 0..4)
         let mut buttons = Vec::with_capacity(5);
         for slot in 0..5usize {
             let id = if self.model.xvi {
@@ -1332,7 +1334,7 @@ impl DeviceDriver for MousefitDriver {
             buttons.push(action);
         }
 
-        // マクロ (slot 0..2 → device id 1..3)
+        // Macros (slot 0..2 → device id 1..3)
         let mut macros = Vec::with_capacity(3);
         for slot in 0..3u16 {
             let def = self
@@ -1341,7 +1343,7 @@ impl DeviceDriver for MousefitDriver {
                 .filter(|&s| s > 0 && s <= 4096)
                 .and_then(|s| self.macro_read(slot + 1, s).ok())
                 .map(|data| MacroDef {
-                    name: format!("マクロ {}", slot + 1),
+                    name: format!("Macro {}", slot + 1),
                     events: decode_macro(&data),
                     mode: 0,
                     repeat: 1,
@@ -1379,7 +1381,7 @@ impl DeviceDriver for MousefitDriver {
                     .iter()
                     .map(|s| (s.x, s.y.unwrap_or(s.x)))
                     .collect();
-                // JS と同じ順序: 先に active を clamp して書き、続けてステージと色。
+                // Same order as the JS: clamp and write active first, then the stages and colors.
                 self.set_active_stage(prof, (*active).min(n - 1))?;
                 self.write_dpi_stages(prof, &xy)?;
                 let colors: Vec<Rgb> = stages[..n].iter().map(|s| s.color).collect();
@@ -1449,7 +1451,7 @@ impl MousefitDriver {
                         .ok_or_else(|| HubError::Invalid("lod".into()))?
                         + 1) as u8
                 } else {
-                    // 実値: 0.7 → (7*10|128)=0x87, >=1 → mm 値
+                    // Real value: 0.7 → (7*10|128)=0x87, >=1 → mm value
                     if tenth >= 10 {
                         (tenth / 10) as u8
                     } else {
@@ -1501,7 +1503,7 @@ impl MousefitDriver {
     }
 }
 
-// ==================================================================== テスト
+// ==================================================================== tests
 
 #[cfg(test)]
 mod tests {
@@ -1584,7 +1586,7 @@ mod tests {
         assert_eq!(ty, 7);
         assert_eq!(ctx, vec![5, 1, 0x90, 1, 0x90]);
         assert_eq!(decode_gw(ty, &ctx), ButtonAction::Dpi(DpiFn::Shift(400)));
-        // マクロ
+        // Macro
         let (ty, ctx) = encode_gw(&ButtonAction::Macro {
             slot: 2,
             run: MacroRun::WhileHeld,
@@ -1688,9 +1690,9 @@ mod tests {
 
     #[test]
     fn lod_wire() {
-        // JM index: choice値 7 → index 1 → wire 1
+        // JM index: choice value 7 → index 1 → wire 1
         assert_eq!(HTS_PLUS_PRO.lod_choices[0].0, 7);
-        // GW 実値: 0.7mm → 0x87
+        // GW real value: 0.7mm → 0x87
         assert_eq!((7u8) | 0x80, 0x87);
     }
 }

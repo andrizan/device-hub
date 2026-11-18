@@ -7,8 +7,6 @@ USB DACs — no browser required. Replaces keeping the vendor web configurators
 Built with [GPUI](https://github.com/zed-industries/zed) (Zed's GPU UI framework)
 with a Liquid Glass design.
 
-**日本語版は下にあります → [日本語](#日本語)**
-
 ![Device HUB](docs/screenshot.png)
 
 ## Features
@@ -111,37 +109,3 @@ GPUI (Apache-2.0, © Zed Industries).
 
 Unless you explicitly state otherwise, any contribution intentionally submitted
 for inclusion shall be dual-licensed as above, without additional terms.
-
----
-
-## 日本語
-
-磁気スイッチキーボード・ホール効果マウス・USB DAC を、ブラウザを開かずに設定する
-Windows 用ネイティブアプリです (公式 Web 設定ツール `mouse.fit` / `hub.xsyd.top` の代わり)。
-UI は GPUI + Liquid Glass デザイン。
-
-### 主な機能
-
-- **マウス** — DPI・ポーリング・ボタン割り当て (キー/ショートカット/メディア/マクロ)・
-  磁気ボタン校正・Rapid Trigger・トリガー位置・スリープ・電池表示
-- **磁気キーボード** — オンボードレイヤー付きキーマップ・キーごとの AP/RT/リセット・
-  デッドゾーン・ライティング・高度キー (DKS/MPT/MT/TGL/SOCD/RS)・マクロ・押下深さライブ表示
-- **USB DAC** — パラメトリック EQ
-- **プロセス連動** — 指定アプリが前面になったらプロファイルを適用、離れたら復帰 (複数デバイス対応)
-- **OBS プラグイン** — 押下深さのライブソース。アプリ無しで単体動作し、設定は OBS プロパティで完結
-- 設定・プロファイルのインポート/エクスポート、元に戻す、プリセット、コマンドパレット
-
-### 動作確認デバイス
-
-HTS Plus Pro (有線+ドングル) · SU66 Max · TP55 USB DAC
-(同プロトコルの他機種も caps ベースで自動検出)
-
-### ビルド
-
-```sh
-cargo run --release -p device-hub
-```
-
-`device-hub.exe` はフォント・アイコン埋め込みの単体バイナリです。設定は `%APPDATA%\DeviceHub\`。
-
-詳細は `docs/` と `AGENTS.md` を参照してください。

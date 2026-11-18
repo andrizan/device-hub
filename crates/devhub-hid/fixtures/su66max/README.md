@@ -1,16 +1,17 @@
-# SU66 Max フィクスチャ
+# SU66 Max fixtures
 
-`probe1.txt` — 2026-11-15 に実機 (VID:PID `1ca6:3009`, usagePage `FFB0`) へ各コマンドを
-送った全応答の 16 進ダンプ。`.req.bin` / `.resp.bin` はその一部を 64B バイナリ化したもの。
+`probe1.txt` — hex dump of every response to the commands sent to the real device
+(VID:PID `1ca6:3009`, usagePage `FFB0`) on 2026-11-15. `.req.bin` / `.resp.bin` are some of
+them saved as 64B binaries.
 
-| name | 要求 | 応答の要点 |
+| name | request | response highlights |
 |---|---|---|
-| `perf` | `[4,1,1,0]` 性能読み (row1,col0) | mode=0, nP=nR=2.0, rtF=0.5, rtP=rtR=0.3, dZ=0.2/0.2, axis=0, calib=1, axisV2=0x3561, coef=0x0c80, rangeMax=0.1 |
-| `higher_none` | `[6,1,1,0,0]` 高度キー読み | mode=0 (NONE、未設定) |
-| `macro_space` | `[2,14,0]` マクロ領域 | r[3]=16 スロット, r[4,5]=960 最大イベント数 |
-| `poll_read` | `[2,5,1]` ポーリング現在値 | r[3]=0 (8KHz) |
-| `route_r1` | `[4,3,1,1]` route 行1 | 全 0 (無押下)。`live_travel` はこれを行 1..5 で収集 |
+| `perf` | `[4,1,1,0]` performance read (row1,col0) | mode=0, nP=nR=2.0, rtF=0.5, rtP=rtR=0.3, dZ=0.2/0.2, axis=0, calib=1, axisV2=0x3561, coef=0x0c80, rangeMax=0.1 |
+| `higher_none` | `[6,1,1,0,0]` advanced key read | mode=0 (NONE, not set) |
+| `macro_space` | `[2,14,0]` macro area | r[3]=16 slots, r[4,5]=960 max events |
+| `poll_read` | `[2,5,1]` current polling rate | r[3]=0 (8KHz) |
+| `route_r1` | `[4,3,1,1]` route row 1 | all 0 (nothing pressed). `live_travel` collects this over rows 1..5 |
 
-注: probe 時点では全キー mode=0 (通常)・高度キー未設定・マクロ空。
-`axisRangeMax` (perf r[25,26]) は 0.1mm を返した — 全ストロークではないので
-`XsydInfo::travel` は既定 4.0mm を使う (0.5mm 未満の値は採用しない)。
+Note: at probe time every key was mode=0 (normal), no advanced keys were set and the macros were empty.
+`axisRangeMax` (perf r[25,26]) returned 0.1mm — that is not the full stroke, so
+`XsydInfo::travel` uses the default 4.0mm (values under 0.5mm are not adopted).

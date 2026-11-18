@@ -1,6 +1,6 @@
-//! 部品 (カード・行・トグル・スライダー・セグメント・ドロップダウン・ボタン…)。
+//! Components (card, row, toggle, slider, segmented control, dropdown, button…).
 //!
-//! 部品はすべて `Shell` を相手にしたリスナーを作るので `cx: &mut Context<Shell>` を取る。
+//! Every component builds listeners targeting `Shell`, so it takes `cx: &mut Context<Shell>`.
 
 use crate::app::{CbF, PopItem, Shell};
 use crate::{glass, motion, theme};
@@ -9,7 +9,7 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 use std::rc::Rc;
 
-// ====================================================================== 文字
+// ====================================================================== Text
 
 pub fn icon(name: &str, size: f32, color: Hsla) -> Svg {
     svg()
@@ -56,7 +56,7 @@ pub fn faint(text: impl Into<SharedString>) -> Div {
         .child(text.into())
 }
 
-/// 大きな数字 (DPI など)。
+/// Big number (DPI etc.).
 pub fn big_number(text: impl Into<SharedString>, size: f32) -> Div {
     let p = theme::pal();
     div()
@@ -68,9 +68,9 @@ pub fn big_number(text: impl Into<SharedString>, size: f32) -> Div {
         .child(text.into())
 }
 
-// ====================================================================== 面
+// ====================================================================== Surfaces
 
-/// ガラスのカード。子を足して使う。
+/// Glass card. Add children to use it.
 pub fn card() -> Div {
     let p = theme::pal();
     div()
@@ -86,7 +86,7 @@ pub fn card() -> Div {
         .child(glass::surface(glass::Kind::Panel, theme::R_CARD))
 }
 
-/// 見出し付きカード。`body` に行を足す。
+/// Card with a heading. Add rows to `body`.
 pub fn card_titled(title: &str, icon_name: &str, trailing: Option<AnyElement>) -> Div {
     let p = theme::pal();
     card().child(
@@ -120,12 +120,12 @@ pub fn card_titled(title: &str, icon_name: &str, trailing: Option<AnyElement>) -
     )
 }
 
-/// カードの中身の器 (左右の余白)。
+/// Container for a card's contents (left/right padding).
 pub fn body() -> Div {
     div().relative().flex().flex_col().px(px(18.)).pb(px(12.))
 }
 
-/// 設定の 1 行。
+/// One row of a setting.
 pub fn row(label: &str, help: Option<&str>, control: impl IntoElement) -> Div {
     let p = theme::pal();
     div()
@@ -154,7 +154,7 @@ pub fn row(label: &str, help: Option<&str>, control: impl IntoElement) -> Div {
         .child(div().flex_none().flex().items_center().child(control))
 }
 
-/// 区切りの無い行 (カードの先頭用)。
+/// Row without a divider (for the top of a card).
 pub fn row_first(label: &str, help: Option<&str>, control: impl IntoElement) -> Div {
     row(label, help, control).border_t_0()
 }
@@ -193,7 +193,7 @@ pub fn sync_dot(pending: bool) -> Div {
 
 pub fn battery_pill(pct: u8, charging: bool) -> Div {
     let p = theme::pal();
-    // 4 段階の残量アイコン。充電中は稲妻、20% 以下は橙、10% 以下は赤。
+    // 4-level battery icon. A lightning bolt while charging, orange at 20% or below, red at 10% or below.
     let (ic, c) = if charging {
         ("battery-charging", p.ok)
     } else if pct <= 10 {
@@ -215,7 +215,7 @@ pub fn battery_pill(pct: u8, charging: bool) -> Div {
         .text_color(if charging { p.ok } else { p.sub })
         .child(icon(ic, 14., c))
         .child(if charging {
-            "充電中".to_string()
+            "Charging".to_string()
         } else {
             format!("{pct}%")
         })
@@ -278,7 +278,7 @@ pub fn empty_state(icon_name: &str, title_text: &str, body_text: &str) -> Div {
         )
 }
 
-// ====================================================================== ボタン
+// ====================================================================== Buttons
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Btn {
@@ -358,7 +358,7 @@ pub fn button(
     .on_click(cx.listener(move |this, _, w, cx| on(this, w, cx)))
 }
 
-/// 丸いアイコンボタン。
+/// Round icon button.
 pub fn icon_button(
     id: impl Into<SharedString>,
     icon_name: &str,
@@ -379,7 +379,7 @@ pub fn icon_button(
         .on_click(cx.listener(move |this, _, w, cx| on(this, w, cx)))
 }
 
-// ====================================================================== トグル
+// ====================================================================== Toggle
 
 pub fn toggle(
     id: impl Into<SharedString>,
@@ -443,9 +443,9 @@ pub fn toggle(
         }))
 }
 
-// ====================================================================== スライダー
+// ====================================================================== Slider
 
-/// 値を step に丸める。
+/// Round a value to the step.
 pub fn quantize(v: f32, min: f32, max: f32, step: f32) -> f32 {
     let v = if step > 0. {
         min + ((v - min) / step).round() * step
@@ -468,7 +468,7 @@ pub fn slider(
     slider_curve(id, value, min, max, step, 1., color, cx, f)
 }
 
-/// `gamma` > 1 で低い値ほど細かく動かせる (DPI など桁が広い値)。
+/// With `gamma` > 1, lower values can be moved more finely (for wide-range values such as DPI).
 pub fn slider_curve(
     id: &str,
     value: f32,
@@ -506,7 +506,7 @@ pub fn slider_curve(
         .min_w(px(120.))
         .cursor_pointer()
         .child(motion::track(format!("slh:{id}")))
-        // トラック
+        // Track
         .child(
             div()
                 .absolute()
@@ -531,7 +531,7 @@ pub fn slider_curve(
                             linear_color_stop(accent, 1.),
                         )),
                 )
-                // つまみ
+                // Knob
                 .child(
                     div()
                         .absolute()
@@ -573,7 +573,7 @@ pub fn slider_curve(
         )
 }
 
-/// スライダー + 値表示の 1 行分の部品。
+/// A component for one row of slider + value display.
 pub fn slider_value(
     id: &str,
     value: f32,
@@ -603,8 +603,8 @@ pub fn slider_value(
         )
 }
 
-/// `slider_value` + 右側に直接入力できる数値欄。`input` は `Shell::num_field` で用意する
-/// (入力欄は単位つき表示文字列を持つので `unit` は `num_field` 側で渡す)。
+/// `slider_value` + a numeric field you can type into on the right. `input` is prepared with `Shell::num_field`
+/// (the input holds a display string with its unit, so `unit` is passed on the `num_field` side).
 pub fn slider_value_edit(
     id: &str,
     value: f32,
@@ -641,7 +641,7 @@ pub fn fmt_num(v: f32, step: f32, unit: &str) -> String {
     format!("{:.*}{}", dec, v, unit)
 }
 
-// ====================================================================== セグメント
+// ====================================================================== Segmented control
 
 pub fn segmented(
     id: &str,
@@ -663,7 +663,7 @@ pub fn segmented(
         .bg(p.ctrl)
         .border_1()
         .border_color(p.hair);
-    // 動く選択面。
+    // Moving selection surface.
     row = row.child(
         div()
             .absolute()
@@ -727,7 +727,7 @@ pub fn segmented(
     row
 }
 
-// ====================================================================== ドロップダウン
+// ====================================================================== Dropdown
 
 pub fn select(
     id: &str,
@@ -787,7 +787,7 @@ pub fn select(
         }))
 }
 
-// ====================================================================== ステッパー
+// ====================================================================== Stepper
 
 pub fn stepper(
     id: &str,
@@ -853,7 +853,7 @@ pub fn stepper(
         )
 }
 
-/// 表示を自由にできるステッパー。
+/// Stepper with free-form display.
 pub fn stepper_custom(
     id: &str,
     text: String,
@@ -916,7 +916,7 @@ pub fn stepper_custom(
         )
 }
 
-// ====================================================================== 浮いたタブバー
+// ====================================================================== Floating tab bar
 
 pub fn tab_bar(
     id: &str,
@@ -927,7 +927,7 @@ pub fn tab_bar(
 ) -> Div {
     let p = theme::pal();
     let f = Rc::new(f);
-    // 各タブの位置を記録し、選択面をばねで動かす。
+    // Record each tab's position and move the selection surface with a spring.
     let cont = format!("tabs:{id}");
     let sel_rect = motion::rect(&format!("tab:{id}:{selected}"));
     let base = motion::rect(&cont);
@@ -1017,7 +1017,7 @@ pub fn tab_bar(
     bar
 }
 
-/// 横に並ぶカードのグリッド (幅に応じて 1〜2 列)。
+/// Grid of cards laid side by side (1-2 columns depending on width).
 pub fn grid2(children: Vec<AnyElement>) -> Div {
     let mut left = div()
         .flex_1()

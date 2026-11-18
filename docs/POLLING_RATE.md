@@ -1,86 +1,86 @@
-# 「ポーリング実測」の検証と改善案 (2026-11-16)
+# Verification of the "measured polling rate" and improvement proposals (2026-11-16)
 
-症状: HTS Plus Pro を 8K に設定しているのに「ポーリング実測」が ~2700Hz。
+Symptom: the HTS Plus Pro is set to 8K, but the "measured polling rate" shows ~2700Hz.
 
-## 1. 今の計測の仕組み
-- `devhub-obs/src/rawinput.rs`: メッセージ専用ウィンドウで Raw Input (マウス/キーボード) を `RIDEV_INPUTSINK` 受信し、
-  `WM_INPUT` 1 通ごとに `GetRawInputData` → hDevice ごとに時刻を記録。
-- 表示値 = `rawinput::hz()` = **直近 1.0 秒に届いた WM_INPUT の個数**。`store.rs` の `Job::PollRate` が ~400ms ごとに取得。
-- 参考: `rawinput::gap_stats()` (間隔の中央値/p95) と `min_gap_ms()` も計算済みだが、大きな数字には使っていない。
+## 1. How the current measurement works
+- `devhub-obs/src/rawinput.rs`: receives Raw Input (mouse/keyboard) with `RIDEV_INPUTSINK` in a message-only window,
+  and for each `WM_INPUT` calls `GetRawInputData` → records the time per hDevice.
+- Displayed value = `rawinput::hz()` = **the number of WM_INPUT messages that arrived in the last 1.0 second**. `Job::PollRate` in `store.rs` fetches it about every 400ms.
+- For reference: `rawinput::gap_stats()` (median/p95 of the intervals) and `min_gap_ms()` are also computed, but are not used for the big number.
 
-## 2. 結論: 「届いた入力レポート数/秒」としては正しいが、「ポーリングレート」としては過小に出る
+## 2. Conclusion: correct as "input reports that arrived per second", but it reads low as a "polling rate"
 
-### 原因 A (最大の要因): マウスは「動きがあるときだけ」レポートを送る
-8K ポーリングでも、125µs の間にセンサーのカウント (移動量) が 1 以上溜まらなければレポートは送られない。
-よって **届くレポート数 ≦ カウント/秒 = 移動速度 × DPI**。
+### Cause A (the biggest factor): a mouse sends reports "only when there is motion"
+Even at 8K polling, no report is sent unless the sensor has accumulated at least 1 count (movement) within the 125µs.
+So **reports that arrive ≤ counts/second = movement speed × DPI**.
 
-| DPI | 8000 レポート/秒に必要な速度 |
+| DPI | Speed needed for 8000 reports/second |
 | --- | --- |
 | 400 | 50.8 cm/s |
 | 800 | 25.4 cm/s |
 | 1600 | 12.7 cm/s |
 | 3200 | 6.4 cm/s |
 
-例: 800 DPI で 10 cm/s 動かすと 約 3150 カウント/秒 → 上限 約 3150Hz。**2700Hz は「DPI と速度で頭打ち」の典型値**で、
-8K が効いていないとは限らない。MouseTester 等も同じ制約がある (高 DPI で速く円を描いて計測するのが定石)。
+Example: moving at 10 cm/s at 800 DPI gives about 3150 counts/second → an upper limit of about 3150Hz. **2700Hz is a typical value for "capped by DPI and speed"**,
+and does not necessarily mean 8K is not working. MouseTester and similar tools have the same limitation (the standard approach is to draw fast circles at high DPI).
 
-### 原因 B: 1 秒の固定窓に止まっている時間・減速中が混ざる
-円を描く途中の減速や折り返しも分母に入るので、ピークより必ず低く出る。
+### Cause B: a fixed 1-second window includes time when the mouse is stopped or slowing down
+Slowing down and turning around in the middle of a circle also enter the denominator, so the value always reads lower than the peak.
 
-### 原因 C: WM_INPUT を 1 通ずつ処理している
-8000 通/秒の dispatch + 毎回の Vec 確保 + Mutex で、高負荷時に取りこぼしや dispatch 合体の余地がある。
-`GetRawInputBuffer` でまとめて読むのが Microsoft 推奨の高頻度向け手順。
-また時刻は「到達時刻」ではなく「処理時刻」なので、間隔統計はジッタを含む。
+### Cause C: WM_INPUT is processed one message at a time
+8000 dispatches/second + a Vec allocation each time + a Mutex leave room for missed events and merged dispatches under heavy load.
+Reading in bulk with `GetRawInputBuffer` is the procedure Microsoft recommends for high-frequency input.
+Also, the timestamp is the "processing time", not the "arrival time", so the interval statistics include jitter.
 
-### 原因 D (前面/背面): Windows 11 は背面プロセスへの raw input を制限する
-→ 既に UI で「背面のため OS が入力を制限中」と出し分け済み。前面で計測すること。
+### Cause D (foreground/background): Windows 11 restricts raw input to background processes
+→ The UI already distinguishes this with "the OS is restricting input because the window is in the background". Measure in the foreground.
 
-### 別件: OBS オーバーレイの「8K Hz」表示も別物
-`mousefit8::live_report_hz()` は **ベンダー IF の op10 / report4 通知の数** を数えている (`rate_tick`)。
-マウス移動のレポートではないので「ポーリングレート」として表示するのは誤り。OBS 側は rawinput か表記変更を。
+### Separate issue: the "8K Hz" display in the OBS overlay is also something else
+`mousefit8::live_report_hz()` counts the **number of op10 / report4 notifications on the vendor IF** (`rate_tick`).
+These are not mouse-movement reports, so displaying it as a "polling rate" is wrong. On the OBS side, use rawinput or change the label.
 
-## 3. 改善案 (優先順)
+## 3. Improvement proposals (in priority order)
 
-### P1 表示を「ポーリングレート」として意味のある値に (フロント + rawinput.rs)
-1. **連続して動かした区間だけで測る**: 間隔が 2ms を超えたら「止まった」とみなして区間を切り、
-   区間内の (レポート数 / 区間長) を出す。100ms 以上続いた区間の最大値を「ピーク」、直近区間を「現在」。
-2. **中央値間隔からの推定**: `1000 / gap_stats().median` (0.05ms 未満は除外済み) を「推定ポーリング周期」として併記。
-   8K が効いていれば中央値は ~0.125ms (= 8000Hz) 付近に出る — 速度/DPI 不足でも、来ているレポートの間隔は 0.125ms の倍数になる。
-3. **頭打ち診断**: RAWMOUSE の `lLastX/lLastY` から「1 レポートあたりのカウント」を集計。
-   ほとんどのレポートが ±1 カウントなら「DPI か速度が足りずレポートが間引かれています — DPI を 3200 以上にして速く大きく円を」と表示。
-   ついでに `カウント/秒` を出せば「この速度・DPI での理論上限 ≒ ○○Hz」が示せる。
-4. 大きな数字は「ピーク」、小さく「平均 (1 秒)」「推定周期 0.125ms」。グラフは 250ms バケットのままで良い。
-5. 計測ボタン「5 秒間計測」: 押してから 5 秒の最大区間レートと中央値間隔を結果として固定表示 (MouseTester 的な使い方)。
+### P1 Make the display a meaningful value as a "polling rate" (frontend + rawinput.rs)
+1. **Measure only over spans of continuous movement**: when an interval exceeds 2ms, treat it as "stopped" and cut the span,
+   and output (number of reports / span length) within the span. The maximum over spans that lasted 100ms or more is the "peak", and the latest span is the "current".
+2. **Estimate from the median interval**: show `1000 / gap_stats().median` (intervals under 0.05ms are already excluded) alongside as the "estimated polling period".
+   If 8K is working, the median should land near ~0.125ms (= 8000Hz) — even with insufficient speed/DPI, the intervals of the reports that do arrive are multiples of 0.125ms.
+3. **Cap diagnosis**: aggregate the "counts per report" from RAWMOUSE `lLastX/lLastY`.
+   If most reports are ±1 count, show "Reports are being thinned out because DPI or speed is too low — set DPI to 3200 or higher and draw fast, large circles".
+   Also showing `counts/second` can indicate "theoretical limit at this speed and DPI ≈ X Hz".
+4. The big number is the "peak", with a small "average (1 s)" and "estimated period 0.125ms". The graph can stay with 250ms buckets.
+5. A "Measure for 5 seconds" button: after pressing it, show a fixed result of the maximum span rate and the median interval over 5 seconds (used like MouseTester).
 
-### P2 計測の取りこぼし対策 (rawinput.rs)
-- `WM_INPUT` 受信時に `GetRawInputBuffer` で溜まっている分をまとめて読む (1 回の syscall で複数 RAWINPUT)。
-  バッファは使い回し、ロックは 1 バッチ 1 回にする (今は 1 イベントごとに Vec 確保 + Mutex)。
-- イベント時刻は Vec<Instant> ではなく u64 (QPC tick) のリングバッファ (固定 16K 件) にして、UI 側の取得は
-  集計済みの数値だけ返す (今は `devs_for` が 1 万件近い Instant/gap をロック中にコピーしている)。
-- 可能なら `RAWINPUTHEADER` と一緒に `GetMessageTime` ではなく QPC を即時取得 (今と同じ) — 到達時刻ではない点は注記を維持。
+### P2 Countermeasures for missed measurements (rawinput.rs)
+- On `WM_INPUT`, read everything that has accumulated in one go with `GetRawInputBuffer` (multiple RAWINPUT per syscall).
+  Reuse the buffer and take the lock once per batch (currently a Vec allocation + Mutex per event).
+- Make the event times a ring buffer (fixed 16K entries) of u64 (QPC ticks) instead of Vec<Instant>, and have the UI-side fetch return only
+  aggregated numbers (currently `devs_for` copies nearly 10,000 Instant/gap values while holding the lock).
+- If possible, take QPC immediately together with `RAWINPUTHEADER` instead of `GetMessageTime` (same as now) — keep the note that it is not the arrival time.
 
-### P3 OBS の Hz 表示
-- `live_report_hz` を「通知レート」と明記するか、OBS プラグインでも rawinput (背面制限あり — OBS が前面でないと不正確) を使う。
-  正確さが担保できないなら OBS 表示から Hz を外す方が安全。
+### P3 The Hz display in OBS
+- Either state clearly that `live_report_hz` is a "notification rate", or use rawinput in the OBS plugin too (with the background restriction — inaccurate unless OBS is in the foreground).
+  If accuracy cannot be guaranteed, it is safer to remove Hz from the OBS display.
 
-## 4. ユーザー向けの計測手順 (UI のヘルプに出す文言案)
-1. Device HUB を前面にする (背面だと OS が入力を間引く)
-2. DPI を一時的に 3200 以上にする (計測後に戻す)
-3. マウスパッド上で速く大きな円を 3〜5 秒描く
-4. 「ピーク」と「推定周期」を見る (8K なら ~8000Hz / ~0.125ms)
+## 4. Measurement steps for users (draft wording for the UI help)
+1. Bring Device HUB to the foreground (in the background the OS thins out the input)
+2. Temporarily set DPI to 3200 or higher (restore it after measuring)
+3. Draw fast, large circles on the mouse pad for 3 to 5 seconds
+4. Look at the "peak" and the "estimated period" (for 8K, ~8000Hz / ~0.125ms)
 
-## 5. 実装状況 (2026-11-16)
+## 5. Implementation status (2026-11-16)
 
-- **P1 (表示)** — 実装済。テストタブの「ポーリング実測」カード: 大きな数字はピーク
-  (動いている区間の最大レート)、サブ行に平均(1秒)と現在区間、推定周期 (間隔中央値) 行、
-  「移動量 X/秒 → 上限 ≒ X Hz」行 + ほぼ1カウントのとき DPI/速度不足ヒント。
-  「5 秒間計測」ボタン: 計測中はカーソルを窓内に ClipCursor 固定、終了で
-  ピーク・間隔中央値・移動量を結果として固定表示。
-- **P2 (取りこぼし対策)** — 実装済。`WM_INPUT` で `GetRawInputData` 読み後
-  `GetRawInputBuffer` でキューをドレイン (Microsoft の高周波向け公式手順、
-  バッファは使い回し・ロックは 1 バッチ 1 回)。イベントは u64 ms 時刻のリング、
-  `stats()` が集計済みスナップショットを 1 ロックで返す。
-- **P3 (OBS)** — 対応済 (Hz 表示はオーバーレイから撤去済み)。
-- rawinput.rs API 変更: `hz/hist/min_gap_ms/gap_stats` → `stats() -> PollStats`
-  (hz, hist, min_gap_ms, gap_stats, seg_hz, peak_hz, counts_per_sec, low_frac, segs)。
-  `Session.poll: Option<PollStats>` が UI の窓口。検証は `cargo run -p devhub-obs --example rate`。
+- **P1 (display)** — implemented. "Measured polling rate" card on the Test tab: the big number is the peak
+  (maximum rate of a moving span), with a sub-row showing the average (1 s) and the current span, an estimated period (median interval) row,
+  a "movement X/s → limit ≈ X Hz" row, and a DPI/speed-shortage hint when it is almost 1 count.
+  "Measure for 5 seconds" button: while measuring, the cursor is pinned inside the window with ClipCursor, and at the end the
+  peak, median interval, and movement are shown as a fixed result.
+- **P2 (countermeasures for missed events)** — implemented. After reading with `GetRawInputData` on `WM_INPUT`,
+  the queue is drained with `GetRawInputBuffer` (Microsoft's official procedure for high frequencies,
+  the buffer is reused and the lock is taken once per batch). Events are a ring of u64 ms timestamps,
+  and `stats()` returns an aggregated snapshot under one lock.
+- **P3 (OBS)** — done (the Hz display has been removed from the overlay).
+- rawinput.rs API change: `hz/hist/min_gap_ms/gap_stats` → `stats() -> PollStats`
+  (hz, hist, min_gap_ms, gap_stats, seg_hz, peak_hz, counts_per_sec, low_frac, segs).
+  `Session.poll: Option<PollStats>` is the entry point for the UI. Verify with `cargo run -p devhub-obs --example rate`.

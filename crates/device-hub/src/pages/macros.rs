@@ -1,4 +1,4 @@
-//! マクロ (マウス・キーボード共通の編集画面)。
+//! Macros (editing screen shared by mouse and keyboard).
 
 use crate::app::{Modal, PopItem, Recording, Shell};
 use crate::ui::{self, Btn};
@@ -39,13 +39,13 @@ impl Shell {
         self.macro_sel = self.macro_sel.min(list.len().saturating_sub(1));
         let sel = self.macro_sel;
 
-        // ---- スロット一覧
+        // ---- Slot list
         let mut slots = ui::body().pt(px(4.)).gap(px(2.));
         for (i, m) in list.iter().enumerate() {
             let on = i == sel;
             let (name, sub) = match m {
-                Some(m) => (m.name.clone(), format!("{} イベント", m.events.len())),
-                None => (format!("スロット {}", i + 1), "空".into()),
+                Some(m) => (m.name.clone(), format!("{} events", m.events.len())),
+                None => (format!("Slot {}", i + 1), "Empty".into()),
             };
             let defined = m.is_some();
             slots = slots.child(
@@ -106,17 +106,17 @@ impl Shell {
                     })),
             );
         }
-        let slot_card = ui::card_titled("マクロ一覧", "list-video", None)
+        let slot_card = ui::card_titled("Macro list", "list-video", None)
             .w(px(260.))
             .flex_none()
             .child(slots.pb(px(14.)));
 
-        // ---- 編集
+        // ---- Editing
         if self.macro_draft.is_none() {
             if let Some(Some(m)) = list.get(sel) {
                 self.macro_draft = Some(m.clone());
                 let n = m.name.clone();
-                self.input("macro_name", "", "名前", window, cx);
+                self.input("macro_name", "", "Name", window, cx);
                 self.set_input("macro_name", &n, window, cx);
             }
         }
@@ -132,12 +132,12 @@ impl Shell {
                         .items_center()
                         .child(ui::empty_state(
                             "list-video",
-                            "このスロットは空です",
-                            "キー操作を記録してマクロを作れます。",
+                            "This slot is empty",
+                            "Record key presses to create a macro.",
                         ))
                         .child(ui::button(
                             "macro-new",
-                            "新規作成",
+                            "Create new",
                             Some("plus"),
                             Btn::Primary,
                             cx,
@@ -146,14 +146,14 @@ impl Shell {
                                     .macro_caps()
                                     .and_then(|m| m.modes.first().map(|o| o.value as u8))
                                     .unwrap_or(0);
-                                let name = format!("マクロ {}", sel + 1);
+                                let name = format!("Macro {}", sel + 1);
                                 this.macro_draft = Some(MacroDef {
                                     name: name.clone(),
                                     events: vec![],
                                     mode,
                                     repeat: 1,
                                 });
-                                this.input("macro_name", "", "名前", w, cx);
+                                this.input("macro_name", "", "Name", w, cx);
                                 this.set_input("macro_name", &name, w, cx);
                                 cx.notify();
                             },
@@ -184,9 +184,9 @@ impl Shell {
     ) -> Div {
         let p = theme::pal();
         let recording = self.recording.is_some();
-        let name_in = self.input("macro_name", &d.name, "名前", window, cx);
+        let name_in = self.input("macro_name", &d.name, "Name", window, cx);
 
-        // モード。
+        // Mode.
         let items: Vec<PopItem> = mcap
             .modes
             .iter()
@@ -202,14 +202,14 @@ impl Shell {
         let mut props = ui::body().pt(px(4.));
         if mcap.names {
             props = props.child(ui::row_first(
-                "名前",
+                "Name",
                 None,
                 div().w(px(260.)).child(Input::new(&name_in)),
             ));
         }
         props = props.child(
             ui::row(
-                "実行モード",
+                "Run mode",
                 None,
                 ui::select(
                     "macro-mode",
@@ -229,14 +229,14 @@ impl Shell {
         );
         if mcap.repeat_modes.contains(&d.mode) {
             props = props.child(ui::row(
-                "繰り返し回数",
+                "Repeat count",
                 None,
                 ui::stepper(
                     "macro-rep",
                     d.repeat as i64,
                     1,
                     255,
-                    "回",
+                    "×",
                     cx,
                     |this, v, cx| {
                         if let Some(d) = this.macro_draft.as_mut() {
@@ -248,7 +248,7 @@ impl Shell {
             ));
         }
 
-        // 記録ツール。
+        // Recording tools.
         let rec_mode = self
             .recording
             .as_ref()
@@ -257,7 +257,7 @@ impl Shell {
         let rec_btn = if recording {
             ui::button(
                 "rec-stop",
-                "記録を停止",
+                "Stop recording",
                 Some("square"),
                 Btn::Danger,
                 cx,
@@ -269,7 +269,7 @@ impl Shell {
         } else {
             ui::button(
                 "rec-start",
-                "記録を開始",
+                "Start recording",
                 Some("circle"),
                 Btn::Primary,
                 cx,
@@ -290,7 +290,7 @@ impl Shell {
         let mut insert = div().flex().flex_wrap().gap(px(6.)).child(rec_btn).child(
             ui::segmented(
                 "rec-mode",
-                &["実時間".into(), "固定 20ms".into(), "遅延なし".into()],
+                &["Real time".into(), "Fixed 20ms".into(), "No delay".into()],
                 rec_mode as usize,
                 cx,
                 |this, i, _| {
@@ -304,13 +304,13 @@ impl Shell {
         );
         insert = insert.child(ui::button(
             "ins-key",
-            "キーを挿入",
+            "Insert key",
             Some("keyboard"),
             Btn::Glass,
             cx,
             |this, _, cx| {
                 this.modal = Some(Modal::CaptureKey {
-                    title: "挿入するキー".into(),
+                    title: "Key to insert".into(),
                     got: None,
                     on_key: Rc::new(|this, k, _, cx| {
                         let at = this.macro_event_sel.map(|i| i + 1);
@@ -373,7 +373,7 @@ impl Shell {
             insert = insert.child(ui::select(
                 "ins-mouse",
                 items,
-                "マウスクリックを挿入",
+                "Insert mouse click",
                 190.,
                 cx,
                 |this, i, _, cx| {
@@ -402,7 +402,7 @@ impl Shell {
             ));
         }
 
-        // イベント列。
+        // Event list.
         let max_delay = mcap.max_delay_ms;
         let mut events = div().flex().flex_col().gap(px(2.));
         if d.events.is_empty() {
@@ -416,9 +416,9 @@ impl Shell {
                     .border_1()
                     .border_color(if recording { p.danger } else { p.hair })
                     .child(ui::faint(if recording {
-                        "キーを押すと記録されます…"
+                        "Press keys to record them…"
                     } else {
-                        "「記録を開始」してキーボードを操作してください"
+                        "Click \"Start recording\" and use the keyboard"
                     })),
             );
         }
@@ -454,7 +454,7 @@ impl Shell {
                     .child(div().flex_1().text_size(px(13.)).child(format!(
                         "{} {}",
                         event_label(e),
-                        if down { "押す" } else { "離す" }
+                        if down { "Press" } else { "Release" }
                     )))
                     .child(ui::stepper_custom(
                         &format!("mev-d-{i}"),
@@ -515,7 +515,7 @@ impl Shell {
             .items_center()
             .gap(px(8.))
             .child(ui::faint(format!(
-                "{} / {} イベント · 合計 {:.2} 秒",
+                "{} / {} events · total {:.2} s",
                 d.events.len(),
                 mcap.max_events,
                 total as f32 / 1000.
@@ -523,7 +523,7 @@ impl Shell {
             .child(div().flex_1())
             .child(ui::button(
                 "macro-clear",
-                "クリア",
+                "Clear",
                 Some("eraser"),
                 Btn::Ghost,
                 cx,
@@ -536,15 +536,15 @@ impl Shell {
             ))
             .child(ui::button(
                 "macro-del",
-                "削除",
+                "Delete",
                 Some("trash"),
                 Btn::Danger,
                 cx,
                 move |this, _, cx| {
                     this.confirm(
-                    "マクロを削除",
-                    "このスロットのマクロを削除します。割り当て済みのボタンは動作しなくなります。",
-                    "削除",
+                    "Delete macro",
+                    "Deletes the macro in this slot. Buttons it is assigned to will stop working.",
+                    "Delete",
                     true,
                     Rc::new(move |this, _, cx| {
                         this.apply(Change::Macro { slot, def: None }, cx);
@@ -556,7 +556,7 @@ impl Shell {
             ))
             .child(ui::button(
                 "macro-save",
-                "デバイスに保存",
+                "Save to device",
                 Some("save"),
                 Btn::Primary,
                 cx,
@@ -568,10 +568,10 @@ impl Shell {
                             d.name = n.trim().to_string();
                         }
                         if d.events.is_empty() {
-                            this.toast("イベントが空です", true, cx);
+                            this.toast("The event list is empty", true, cx);
                             return;
                         }
-                        // 押したまま終わるキーには離すイベントを補う。
+                        // Add release events for keys that end up held down.
                         let mut held: Vec<MacroInput> = vec![];
                         for e in &d.events {
                             match e.edge {
@@ -588,15 +588,15 @@ impl Shell {
                         }
                         this.macro_draft = Some(d.clone());
                         this.apply(Change::Macro { slot, def: Some(d) }, cx);
-                        this.toast("マクロを保存しました", false, cx);
+                        this.toast("Macro saved", false, cx);
                     }
                 },
             ));
 
         ui::card_titled(
-            &format!("スロット {} を編集", slot + 1),
+            &format!("Edit slot {}", slot + 1),
             "pencil",
-            recording.then(|| ui::chip("● 記録中", p.danger).into_any_element()),
+            recording.then(|| ui::chip("● Recording", p.danger).into_any_element()),
         )
         .child(props)
         .child(ui::body().gap(px(10.)).pt(px(6.)).child(insert))

@@ -1,4 +1,4 @@
-//! キーボード: キーボード図 (共通部品)・キー割り当て・トリガー (磁気スイッチ)。
+//! Keyboard: keyboard diagram (shared component), key mapping and triggers (magnetic switches).
 
 use crate::app::Shell;
 use crate::ui::{self, Btn};
@@ -9,21 +9,21 @@ use gpui_kit::prelude::*;
 use gpui_kit::*;
 use std::rc::Rc;
 
-/// キーキャップ 1 個の見た目。
+/// Appearance of one keycap.
 #[derive(Clone, Default)]
 pub struct Cap {
     pub top: String,
     pub sub: Option<String>,
-    /// 2 行目の sub (1u キーで "0.15/0.001" がはみ出るので縦積み用)。
+    /// sub on the second line (a 1u key overflows with "0.15/0.001", so it is stacked vertically).
     pub sub2: Option<String>,
-    /// 面の色 (ヒートマップ・ライティング)。
+    /// Face color (heatmap, lighting).
     pub tint: Option<Hsla>,
     pub selected: bool,
     pub badge: Option<String>,
-    /// 押下深さ 0..1 (ストロークテスト)。
+    /// Press depth 0..1 (stroke test).
     pub depth: Option<f32>,
     pub dim: bool,
-    /// 他のキーとの関係 (SOCD の相手など) を示す枠。
+    /// Frame showing a relationship with other keys (e.g. the SOCD counterpart).
     pub link: bool,
 }
 
@@ -35,14 +35,14 @@ pub fn kb_parts(this: &Shell) -> Option<(KeyboardCaps, KeyboardState)> {
     ))
 }
 
-/// KeyAction の表示 (キーキャップ用の短い名前, 一覧用の名前)。
+/// Display of a KeyAction (short name for the keycap, name for the list).
 pub fn action_label(kc: &KeyboardCaps, a: &KeyAction) -> (String, String) {
     match a {
-        KeyAction::None => ("—".into(), "無効".into()),
-        KeyAction::Transparent => ("▽".into(), "透過 (下のレイヤー)".into()),
+        KeyAction::None => ("—".into(), "Disabled".into()),
+        KeyAction::Transparent => ("▽".into(), "Transparent (layer below)".into()),
         KeyAction::Code(c) => match kc.code_label(*c) {
             Some((l, s)) => (s.unwrap_or(l).to_string(), l.to_string()),
-            None => (format!("{c:X}"), format!("コード 0x{c:X}")),
+            None => (format!("{c:X}"), format!("Code 0x{c:X}")),
         },
         KeyAction::Combo { mods, code } => {
             let k = kc
@@ -50,14 +50,14 @@ pub fn action_label(kc: &KeyboardCaps, a: &KeyAction) -> (String, String) {
                 .map(|(l, s)| s.unwrap_or(l).to_string())
                 .unwrap_or_default();
             let m = keys::mods_label(*mods);
-            (format!("{m}{k}"), format!("組み合わせ: {m}{k}"))
+            (format!("{m}{k}"), format!("Combo: {m}{k}"))
         }
-        KeyAction::Macro(i) => (format!("M{}", i + 1), format!("マクロ {}", i + 1)),
+        KeyAction::Macro(i) => (format!("M{}", i + 1), format!("Macro {}", i + 1)),
     }
 }
 
 impl Shell {
-    /// キーボード図。`on_click(shell, index, shift)`。
+    /// Keyboard diagram. `on_click(shell, index, shift)`.
     pub fn keyboard_view(
         &mut self,
         id: &str,
@@ -79,7 +79,7 @@ impl Shell {
             .w(px(w_units * u))
             .h(px(h_units * u))
             .mx_auto();
-        // 同じ刻印のキーが複数あるとき (分割スペース ×3 など) は L/C/R を添える。
+        // When several keys share the same legend (e.g. a split space ×3), add L/C/R.
         let suffix: Vec<Option<String>> = kc
             .layout
             .iter()
@@ -226,7 +226,7 @@ impl Shell {
             .child(board)
     }
 
-    // ================================================================== キー割り当て
+    // ================================================================== Key mapping
 
     pub fn page_keymap(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let p = theme::pal();
@@ -290,16 +290,16 @@ impl Shell {
             )
             .child(ui::button(
                 "layer-reset",
-                "このレイヤーを初期化",
+                "Reset this layer",
                 Some("rotate-ccw"),
                 Btn::Ghost,
                 cx,
                 move |this, _, cx| {
                     let l = layer as u8;
                     this.confirm(
-                        "レイヤーを初期化",
-                        "このレイヤーのキー割り当てを既定に戻します。",
-                        "初期化",
+                        "Reset layer",
+                        "Restore this layer's key assignments to their defaults.",
+                        "Reset",
                         true,
                         Rc::new(move |this, _, cx| {
                             this.apply(Change::KeyMapReset { layer: l }, cx);
@@ -320,22 +320,22 @@ impl Shell {
                     .collect();
                 let items: Vec<crate::app::PopItem> = others
                     .iter()
-                    .map(|(_, n)| crate::app::PopItem::new(format!("{n} へコピー"), false))
+                    .map(|(_, n)| crate::app::PopItem::new(format!("Copy to {n}"), false))
                     .collect();
                 let src = map.clone();
                 d.child(ui::select(
                     "layer-copy",
                     items,
-                    "別レイヤーへコピー",
+                    "Copy to another layer",
                     170.,
                     cx,
                     move |this, i, _, cx| {
                         let (dst, name) = others[i].clone();
                         let src = src.clone();
                         this.confirm(
-                            "レイヤーをコピー",
-                            &format!("表示中のレイヤーの割り当てで「{name}」を上書きします。"),
-                            "コピー",
+                            "Copy layer",
+                            &format!("Overwrite \"{name}\" with the assignments of the layer being shown."),
+                            "Copy",
                             true,
                             Rc::new(move |this, _, cx| {
                                 let cur = crate::pages::keyboard::kb_parts(this)
@@ -361,7 +361,7 @@ impl Shell {
             });
 
         let board_card =
-            ui::card_titled("キーボード", "keyboard", Some(layer_ctl.into_any_element()))
+            ui::card_titled("Keyboard", "keyboard", Some(layer_ctl.into_any_element()))
                 .child(ui::body().pt(px(10.)).pb(px(18.)).child(view));
 
         let editor = match sel {
@@ -373,7 +373,7 @@ impl Shell {
                     .items_center()
                     .gap(px(12.))
                     .child(ui::icon("mouse-pointer-click", 18., p.sub))
-                    .child(ui::sub("割り当てを変えたいキーをクリックしてください")),
+                    .child(ui::sub("Click the key you want to change")),
             ),
             Some(i) => self.key_picker(&kc, &ks, layer as u8, i, window, cx),
         };
@@ -409,15 +409,15 @@ impl Shell {
             .map(|k| k.label.clone())
             .unwrap_or_default();
 
-        // グループ: catalog + 特殊 + マクロ + 組み合わせ。
+        // Groups: catalog + Special + Macros + Combos.
         let mut groups: Vec<String> = kc.catalog.iter().map(|g| g.name.clone()).collect();
-        groups.push("特殊".into());
+        groups.push("Special".into());
         let macro_slots = kc.macros.as_ref().map(|m| m.slots).unwrap_or(0);
         if macro_slots > 0 {
-            groups.push("マクロ".into());
+            groups.push("Macros".into());
         }
         if kc.combos {
-            groups.push("組み合わせ".into());
+            groups.push("Combos".into());
         }
         self.key_group = self.key_group.min(groups.len() - 1);
         let g = self.key_group;
@@ -511,7 +511,7 @@ impl Shell {
         let search_in = self.input(
             "key_search",
             "",
-            "キーを検索 (例: F5, 音量, マウス)",
+            "Search keys (e.g. F5, volume, mouse)",
             window,
             cx,
         );
@@ -521,7 +521,7 @@ impl Shell {
             .trim()
             .to_lowercase();
         let mut grid = div().flex().flex_wrap().gap(px(6.));
-        let combo_mode = gname == "組み合わせ" && q.is_empty();
+        let combo_mode = gname == "Combos" && q.is_empty();
         if !q.is_empty() {
             let mut n = 0;
             for group in &kc.catalog {
@@ -550,15 +550,15 @@ impl Shell {
                 }
             }
             if n == 0 {
-                grid = grid.child(ui::faint("見つかりません"));
+                grid = grid.child(ui::faint("Nothing found"));
             }
-        } else if gname == "特殊" {
+        } else if gname == "Special" {
             grid = grid
                 .child(
                     choice(
                         "k-none".into(),
-                        "無効".into(),
-                        Some("何もしない".into()),
+                        "Disabled".into(),
+                        Some("Does nothing".into()),
                         cur == KeyAction::None,
                     )
                     .on_click(cx.listener(assign(KeyAction::None))),
@@ -566,13 +566,13 @@ impl Shell {
                 .child(
                     choice(
                         "k-trans".into(),
-                        "透過".into(),
-                        Some("下のレイヤー".into()),
+                        "Transparent".into(),
+                        Some("Layer below".into()),
                         cur == KeyAction::Transparent,
                     )
                     .on_click(cx.listener(assign(KeyAction::Transparent))),
                 );
-        } else if gname == "マクロ" {
+        } else if gname == "Macros" {
             for m in 0..macro_slots {
                 let a = KeyAction::Macro(m);
                 let defined = ks.macros.get(m as usize).is_some_and(|x| x.is_some());
@@ -581,9 +581,9 @@ impl Shell {
                         format!("k-m{m}"),
                         format!("M{}", m + 1),
                         Some(if defined {
-                            "定義済み".into()
+                            "Defined".into()
                         } else {
-                            "空".into()
+                            "Empty".into()
                         }),
                         cur == a,
                     )
@@ -610,7 +610,7 @@ impl Shell {
             grid = grid
                 .child(div().w_full().child(mods_row))
                 .child(div().w_full().child(ui::faint(
-                    "修飾を選んでから、組み合わせるキーを押してください",
+                    "Choose the modifiers, then press the key to combine",
                 )));
             let mods = self.combo_mods;
             if let Some(basic) = kc.catalog.first() {
@@ -640,9 +640,9 @@ impl Shell {
         }
 
         ui::card_titled(
-            &format!("「{orig}」に割り当てる"),
+            &format!("Assign to \"{orig}\""),
             "replace",
-            Some(ui::chip(format!("現在: {cur_long}"), p.accent).into_any_element()),
+            Some(ui::chip(format!("Current: {cur_long}"), p.accent).into_any_element()),
         )
         .child(
             ui::body()
@@ -659,7 +659,7 @@ impl Shell {
         )
     }
 
-    // ================================================================== トリガー
+    // ================================================================== Triggers
 
     pub fn page_trigger(
         &mut self,
@@ -677,7 +677,7 @@ impl Shell {
             .cur()
             .map(|s| (s.travel_on, s.travel.clone(), s.travel_max))
             .unwrap_or((false, vec![], 0.));
-        // 実測最大で正規化 (実際の底は公称全ストロークより浅い)。
+        // Normalize by the measured maximum (the real bottom is shallower than the nominal full stroke)
         let live_max = live.2.max(0.5);
         let n = kc.layout.len();
         self.kb_sel.retain(|i| *i < n);
@@ -689,8 +689,8 @@ impl Shell {
             .enumerate()
             .map(|(i, k)| {
                 let pf = ks.perf.get(i).copied().unwrap_or_default();
-                // モードに応じた トリガー/リセット のペアを出す:
-                // 通常 = normalPress / normalRelease、RT = rt_first / rt_release。
+                // Show the trigger/reset pair depending on the mode:
+                // normal = normalPress / normalRelease, RT = rt_first / rt_release.
                 let (trig, reset) = if pf.mode == TriggerMode::Rapid {
                     (pf.rt_first, pf.rt_release)
                 } else {
@@ -698,7 +698,7 @@ impl Shell {
                 };
                 let t = (trig / pc.travel).clamp(0., 1.);
                 let heat = theme::mix(theme::hex(0x3ec7ff, 0.38), theme::hex(0xff7a3d, 0.42), t);
-                // 0.001 級が 0.00 に潰れて見えないよう、小さい値は桁を増やす。
+                // Add digits for small values so that 0.001-level values do not collapse to 0.00 and vanish.
                 let fv = |v: f32| {
                     if v != 0. && v < 0.01 {
                         format!("{v:.3}")
@@ -708,7 +708,7 @@ impl Shell {
                 };
                 Cap {
                     top: k.label.clone(),
-                    // アクチュエーションポイント/リセットを縦2行で (1u キーでも欠けない)
+                    // Actuation point / reset on two vertical lines (not clipped even on 1u keys)
                     sub: Some(format!("AP{}", fv(trig))),
                     sub2: Some(format!("R{}", fv(reset))),
                     tint: Some(heat),
@@ -729,7 +729,7 @@ impl Shell {
             caps,
             cx,
             Rc::new(|this, i, _shift, _| {
-                // クリックで選択トグル (複数選択が基本)。Shift も同じ動作。
+                // A click toggles the selection (multi-select is the norm). Shift behaves the same.
                 if !this.kb_sel.insert(i) {
                     this.kb_sel.remove(&i);
                 }
@@ -754,7 +754,7 @@ impl Shell {
             .gap(px(6.))
             .child(ui::button(
                 "sel-all",
-                "全選択",
+                "Select all",
                 Some("square-check"),
                 Btn::Ghost,
                 cx,
@@ -773,7 +773,7 @@ impl Shell {
             ))
             .child(ui::button(
                 "sel-inv",
-                "反転",
+                "Invert",
                 None,
                 Btn::Ghost,
                 cx,
@@ -784,7 +784,7 @@ impl Shell {
             ))
             .child(ui::button(
                 "sel-none",
-                "選択解除",
+                "Deselect",
                 None,
                 Btn::Ghost,
                 cx,
@@ -797,11 +797,7 @@ impl Shell {
                 let on = live.0;
                 d.child(ui::button(
                     "live",
-                    if on {
-                        "テスト終了"
-                    } else {
-                        "ストロークテスト"
-                    },
+                    if on { "End test" } else { "Stroke test" },
                     Some("activity"),
                     if on { Btn::Primary } else { Btn::Glass },
                     cx,
@@ -814,19 +810,19 @@ impl Shell {
                 ))
             });
 
-        let board = ui::card_titled("トリガーマップ", "arrow-down-to-line", Some(tools.into_any_element())).child(
+        let board = ui::card_titled("Trigger map", "arrow-down-to-line", Some(tools.into_any_element())).child(
             ui::body()
                 .pt(px(10.))
                 .pb(px(14.))
                 .gap(px(10.))
                 .child(view)
                 .child(
-                    // 凡例: キーの色 = トリガー位置 (浅い→深い)
+                    // Legend: key color = trigger position (shallow → deep)
                     div()
                         .flex()
                         .items_center()
                         .gap(px(10.))
-                        .child(ui::faint(format!("浅い {:.1}mm", pc.min.max(0.1))))
+                        .child(ui::faint(format!("Shallow {:.1}mm", pc.min.max(0.1))))
                         .child(
                             div()
                                 .w(px(160.))
@@ -838,9 +834,9 @@ impl Shell {
                                     linear_color_stop(theme::hex(0xff7a3d, 0.9), 1.),
                                 )),
                         )
-                        .child(ui::faint(format!("深い {:.1}mm", pc.travel)))
+                        .child(ui::faint(format!("Deep {:.1}mm", pc.travel)))
                         .child(div().flex_1())
-                        .child(ui::faint("AP = アクチュエーションポイント / R = リセット · RT = ラピッドトリガー · クリックで複数選択")),
+                        .child(ui::faint("AP = actuation point / R = reset · RT = Rapid Trigger · Click to select multiple")),
                 ),
         );
 
@@ -853,7 +849,7 @@ impl Shell {
                     .items_center()
                     .gap(px(12.))
                     .child(ui::icon("mouse-pointer-click", 18., p.sub))
-                    .child(ui::sub("設定するキーを選んでください (複数可)")),
+                    .child(ui::sub("Select the keys to configure (multiple allowed)")),
             )
         } else {
             self.perf_editor(&kc, &ks, &pc, &sel, live, window, cx)
@@ -887,11 +883,11 @@ impl Shell {
             .filter_map(|i| kc.layout.get(*i).map(|k| k.label.clone()))
             .collect();
         let title = if sel.len() > 6 {
-            format!("{} 他 {} キー", names.join(" "), sel.len() - 6)
+            format!("{} +{} more keys", names.join(" "), sel.len() - 6)
         } else {
             names.join(" ")
         };
-        // フィールド変更の apply クロージャを作る (スライダーと数値入力で共用)。
+        // Build the apply closure for field changes (shared by the slider and the numeric input)
         let mkset = {
             let keys = keys.clone();
             move |f: Rc<dyn Fn(&mut KeyPerf, f32)>| {
@@ -914,15 +910,15 @@ impl Shell {
         let mut body = ui::body().pt(px(6.));
         if pc.rapid_trigger {
             body = body.child(ui::row_first(
-                "トリガー方式",
+                "Trigger mode",
                 Some(if rapid {
-                    "押し戻し量で ON/OFF を判定 (素早い切り返し)"
+                    "ON/OFF decided by how far the key moves back (fast reversals)"
                 } else {
-                    "決まった深さで ON / OFF"
+                    "ON / OFF at a fixed depth"
                 }),
                 ui::segmented(
                     "perf-mode",
-                    &["通常".into(), "ラピッドトリガー".into()],
+                    &["Normal".into(), "Rapid Trigger".into()],
                     rapid as usize,
                     cx,
                     move |this, i, cx| {
@@ -944,12 +940,12 @@ impl Shell {
                 .w(px(280.)),
             ));
         }
-        // 連続高速トリガーは公式と同じく方式選択のすぐ下に置く (RT 時のみ)。
+        // Continuous Rapid Trigger goes right under the mode selection, as in the official one (RT only).
         if rapid && pc.continuous_rt {
             let keys_c = keys.clone();
             body = body.child(ui::row(
-                "連続高速トリガー",
-                Some("完全に戻るまでラピッドトリガーを続ける"),
+                "Continuous Rapid Trigger",
+                Some("Keep Rapid Trigger active until the key fully returns"),
                 ui::toggle("perf-cont", cur.continuous, cx, move |this, on, cx| {
                     let mut np = cur;
                     np.continuous = on;
@@ -963,8 +959,8 @@ impl Shell {
                 }),
             ));
         }
-        // 公式と同じ並び: ファーストトラベル → 押下 (トリガー) → 離す (リセット) → 上下デッドゾーン。
-        // RT 時の 押下/離す は rtPress/rtRelease (感度)、通常時は normalPress/normalRelease。
+        // Same order as the official one: first travel → press (trigger) → release (reset) → top/bottom deadzones.
+        // In RT, press/release are rtPress/rtRelease (sensitivity); in normal mode they are normalPress/normalRelease.
         if rapid {
             if pc.rt_first {
                 let f = mkset(Rc::new(|p, v| p.rt_first = v));
@@ -980,8 +976,8 @@ impl Shell {
                     f.clone(),
                 );
                 body = body.child(ui::row(
-                    "ファーストトラベル",
-                    Some("最初に ON になる深さ"),
+                    "First travel",
+                    Some("Depth at which it first turns ON"),
                     ui::slider_value_edit(
                         "perf-first",
                         cur.rt_first,
@@ -1009,8 +1005,8 @@ impl Shell {
                     f.clone(),
                 );
                 body = body.child(ui::row(
-                    "押下 (トリガー)",
-                    Some("さらに押し込んで再 ON になる量"),
+                    "Press (trigger)",
+                    Some("How much further to press to turn ON again"),
                     ui::slider_value_edit(
                         "perf-rtp",
                         cur.rt_press,
@@ -1037,8 +1033,8 @@ impl Shell {
                     f.clone(),
                 );
                 body = body.child(ui::row(
-                    "離す (リセット)",
-                    Some("戻して OFF になる量"),
+                    "Release (reset)",
+                    Some("How far to return to turn OFF"),
                     ui::slider_value_edit(
                         "perf-rtr",
                         cur.rt_release,
@@ -1066,8 +1062,8 @@ impl Shell {
                     f.clone(),
                 );
                 body = body.child(ui::row(
-                    "押下 (トリガー)",
-                    Some("この深さで押下と判定"),
+                    "Press (trigger)",
+                    Some("Counted as pressed at this depth"),
                     ui::slider_value_edit(
                         "perf-act",
                         cur.actuation,
@@ -1081,18 +1077,18 @@ impl Shell {
                 ));
             }
             if pc.separate_release {
-                // 離す位置は公式同様常に表示。release=None (押下連動) なら
-                // actuation の値を見せ、動かすと独立設定に切り替わる。
+                // The release position is always shown, as in the official one. If release=None (linked to press),
+                // show the actuation value; moving it switches to an independent setting.
                 let rel = cur.release.unwrap_or(cur.actuation);
                 let f = mkset(Rc::new(|p, v| p.release = Some(v)));
                 let inp =
                     self.num_field("perf-rel", rel, min, max, step, "mm", window, cx, f.clone());
                 body = body.child(ui::row(
-                    "離す (リセット)",
+                    "Release (reset)",
                     Some(if cur.release.is_some() {
-                        "この深さまで戻ると離したと判定"
+                        "Counted as released once it returns to this depth"
                     } else {
-                        "押下と連動中 — 動かすと独立設定になる"
+                        "Linked to press — moving it makes it independent"
                     }),
                     ui::slider_value_edit(
                         "perf-rel",
@@ -1121,8 +1117,8 @@ impl Shell {
                 f.clone(),
             );
             body = body.child(ui::row(
-                "上端デッドゾーン",
-                Some("触れただけの誤入力を防ぐ"),
+                "Top deadzone",
+                Some("Prevents accidental input from a mere touch"),
                 ui::slider_value_edit(
                     "perf-tdz",
                     cur.top_deadzone,
@@ -1147,8 +1143,8 @@ impl Shell {
                 f.clone(),
             );
             body = body.child(ui::row(
-                "下端デッドゾーン",
-                Some("底打ち付近の揺れを無視"),
+                "Bottom deadzone",
+                Some("Ignores jitter near bottoming out"),
                 ui::slider_value_edit(
                     "perf-bdz",
                     cur.bottom_deadzone,
@@ -1161,9 +1157,9 @@ impl Shell {
                 ),
             ));
         }
-        // ---- 詳細設定 (公式に無い追加項目) ----
-        body = body.child(ui::section_label("詳細設定"));
-        // ワンクリックのプリセット (Web 版には無い)。
+        // ---- Advanced settings (extras not in the official one) ----
+        body = body.child(ui::section_label("Advanced settings"));
+        // One-click presets (not in the Web version).
         {
             let presets: Vec<(&str, KeyPerf)> = {
                 let rt = |first: f32, s: f32| KeyPerf {
@@ -1177,11 +1173,11 @@ impl Shell {
                 };
                 let mut v = vec![];
                 if pc.rapid_trigger {
-                    v.push(("最速 RT", rt(0.1, 0.03)));
-                    v.push(("競技 RT", rt(0.2, 0.1)));
+                    v.push(("Fastest RT", rt(0.1, 0.03)));
+                    v.push(("Competitive RT", rt(0.2, 0.1)));
                 }
                 v.push((
-                    "標準",
+                    "Standard",
                     KeyPerf {
                         mode: TriggerMode::Normal,
                         actuation: 1.2f32.min(max),
@@ -1190,7 +1186,7 @@ impl Shell {
                     },
                 ));
                 v.push((
-                    "タイピング",
+                    "Typing",
                     KeyPerf {
                         mode: TriggerMode::Normal,
                         actuation: 2.0f32.min(max),
@@ -1230,18 +1226,18 @@ impl Shell {
                 );
             }
             body = body.child(ui::row(
-                "プリセット",
-                Some("選択中のキーにまとめて適用"),
+                "Presets",
+                Some("Apply to the selected keys at once"),
                 chips,
             ));
         }
         if !rapid && pc.separate_release {
-            // release=None は「押下に連動」。離す位置を別にしたい場合は OFF にする。
+            // release=None means "linked to press". Turn it OFF to set the release position separately.
             let linked = cur.release.is_none();
             let keys_rel = keys.clone();
             body = body.child(ui::row(
-                "離す位置を押下に連動",
-                Some("ON ならリセット点は押下と同じ位置になる"),
+                "Link release position to press",
+                Some("When ON, the reset point is at the same position as the press"),
                 ui::toggle("perf-rel-link", linked, cx, move |this, on, cx| {
                     let mut np = cur;
                     np.release = if on { None } else { Some(cur.actuation) };
@@ -1255,8 +1251,8 @@ impl Shell {
                 }),
             ));
         }
-        // RT 時に使われない通常モード用の値 (押下/離す) は公式と同じく出さない。
-        // 値は KeyPerf に残るので、通常に切り替えればまた編集できる。
+        // Values for normal mode that RT does not use (press/release) are not shown, as in the official one.
+        // The values stay in KeyPerf, so they can be edited again by switching back to normal.
         if !pc.switch_types.is_empty() {
             let items: Vec<crate::app::PopItem> = pc
                 .switch_types
@@ -1266,8 +1262,8 @@ impl Shell {
                 .collect();
             let keys_sw = keys.clone();
             body = body.child(ui::row(
-                "スイッチ種別",
-                Some("使っている磁気スイッチに合わせる"),
+                "Switch type",
+                Some("Match the magnetic switch you use"),
                 ui::select(
                     "perf-sw",
                     items,
@@ -1292,7 +1288,7 @@ impl Shell {
             ));
         }
 
-        // 右側: ストローク図。
+        // Right side: stroke diagram.
         let depth = if live.0 {
             sel.first().and_then(|i| live.1.get(*i)).copied()
         } else {
@@ -1302,16 +1298,16 @@ impl Shell {
         let all = (0..kc.layout.len()).collect::<Vec<_>>();
         let apply_all = ui::button(
             "perf-all",
-            "全キーに適用",
+            "Apply to all keys",
             Some("copy"),
             Btn::Ghost,
             cx,
             move |this, _, cx| {
                 let a = all.clone();
                 this.confirm(
-                    "全キーに適用",
-                    "この設定をすべてのキーにコピーします。",
-                    "適用",
+                    "Apply to all keys",
+                    "Copy this setting to every key.",
+                    "Apply",
                     false,
                     Rc::new(move |this, _, cx| {
                         this.apply(
@@ -1343,10 +1339,10 @@ impl Shell {
     }
 }
 
-/// 縦のストローク図 (上 = 0mm、下 = 全ストローク)。
-/// 通常モードは作動/解放位置、RT モードは初回位置と再ON/OFFの変化量を描く。
-/// ラベルは重ならないよう縦にずらし、ずれた分は引き出し線で元の位置につなぐ。
-/// mm 値の表示。0.01 未満 (RT の 0.001mm 刻み) は小数 3 桁まで出す。
+/// Vertical stroke diagram (top = 0mm, bottom = full stroke).
+/// Normal mode draws the actuation/release positions; RT mode draws the first position and the re-ON/OFF deltas.
+/// Labels are shifted vertically so they do not overlap, and the shift is connected back to the original position with a leader line.
+/// Display of an mm value. Below 0.01 (RT's 0.001mm steps) it shows up to 3 decimal places.
 fn mm_fmt(v: f32) -> String {
     if v.abs() >= 0.01 {
         format!("{v:.2}")
@@ -1358,13 +1354,13 @@ fn mm_fmt(v: f32) -> String {
 fn travel_figure(pf: &KeyPerf, pc: &PerfCaps, live: Option<f32>) -> Div {
     let p = theme::pal();
     let h = 264.;
-    let bar_x = 26.; // 左に目盛りラベル用の余白
+    let bar_x = 26.; // left margin for the scale labels
     let bar_w = 44.;
     let label_x = bar_x + bar_w + 8.;
     let y = |mm: f32| (mm / pc.travel).clamp(0., 1.) * h;
     let rapid = pf.mode == TriggerMode::Rapid;
 
-    // バーのトラック
+    // Bar track
     let mut fig = div().relative().w(px(212.)).h(px(h)).child(
         div()
             .absolute()
@@ -1378,7 +1374,7 @@ fn travel_figure(pf: &KeyPerf, pc: &PerfCaps, live: Option<f32>) -> Div {
             .border_color(p.hair),
     );
 
-    // 目盛り (0 / 半分 / 全ストローク) — バーの左に数字、バーに届く短い刻み線
+    // Scale (0 / half / full stroke) — numbers to the left of the bar, short tick lines reaching the bar
     for (mm, s) in [
         (0., "0".to_string()),
         (pc.travel / 2., format!("{:.1}", pc.travel / 2.)),
@@ -1407,7 +1403,7 @@ fn travel_figure(pf: &KeyPerf, pc: &PerfCaps, live: Option<f32>) -> Div {
             );
     }
 
-    // デッドゾーン (薄い塗り。0 でもラベルは出すが帯は 1px 未満なら描かない)
+    // Deadzones (light fill. The label is shown even at 0, but the band is not drawn if under 1px)
     if pf.top_deadzone > 0.001 {
         fig = fig.child(
             div()
@@ -1434,7 +1430,7 @@ fn travel_figure(pf: &KeyPerf, pc: &PerfCaps, live: Option<f32>) -> Div {
         );
     }
 
-    // 現在の深さ (実機ライブ)
+    // Current depth (live from the device)
     if let Some(d) = live {
         let dd = motion::spring_with("live-depth", y(d), 40.);
         fig = fig.child(
@@ -1453,7 +1449,7 @@ fn travel_figure(pf: &KeyPerf, pc: &PerfCaps, live: Option<f32>) -> Div {
         );
     }
 
-    // ---- マーク収集: (線の y [None=注釈], ラベル希望 y, 色, 文字) ----
+    // ---- Collect marks: (line y [None = annotation], desired label y, color, text) ----
     let mut marks: Vec<(Option<f32>, f32, Hsla, String)> = vec![];
     if rapid {
         let yf = y(pf.rt_first);
@@ -1461,20 +1457,20 @@ fn travel_figure(pf: &KeyPerf, pc: &PerfCaps, live: Option<f32>) -> Div {
             Some(yf),
             yf,
             p.warn,
-            format!("初回 {}", mm_fmt(pf.rt_first)),
+            format!("First {}", mm_fmt(pf.rt_first)),
         ));
-        // 変化量は位置ではないので、初回ラインの上下に矢印注釈として置く
+        // The deltas are not positions, so they are placed as arrow annotations above and below the first line
         marks.push((
             None,
             yf - 17.,
             p.ok,
-            format!("↑ -{} でOFF", mm_fmt(pf.rt_release)),
+            format!("↑ -{} to OFF", mm_fmt(pf.rt_release)),
         ));
         marks.push((
             None,
             yf + 17.,
             p.accent,
-            format!("↓ +{} で再ON", mm_fmt(pf.rt_press)),
+            format!("↓ +{} to ON again", mm_fmt(pf.rt_press)),
         ));
     } else {
         let ya = y(pf.actuation);
@@ -1482,30 +1478,25 @@ fn travel_figure(pf: &KeyPerf, pc: &PerfCaps, live: Option<f32>) -> Div {
             Some(ya),
             ya,
             p.accent,
-            format!("作動 {}", mm_fmt(pf.actuation)),
+            format!("Actuation {}", mm_fmt(pf.actuation)),
         ));
         if let Some(r) = pf.release {
             let yr = y(r);
-            marks.push((Some(yr), yr, p.ok, format!("解放 {}", mm_fmt(r))));
+            marks.push((Some(yr), yr, p.ok, format!("Release {}", mm_fmt(r))));
         }
     }
-    // デッドゾーン境界ラベル (帯の縁に合わせる)
+    // Deadzone boundary labels (aligned to the edge of the band)
     let dzt = y(pf.top_deadzone);
     let dzb = h - y(pf.bottom_deadzone);
-    marks.push((
-        None,
-        dzt,
-        p.sub,
-        format!("上端 {}", mm_fmt(pf.top_deadzone)),
-    ));
+    marks.push((None, dzt, p.sub, format!("Top {}", mm_fmt(pf.top_deadzone))));
     marks.push((
         None,
         dzb,
         p.sub,
-        format!("下端 {}", mm_fmt(pf.bottom_deadzone)),
+        format!("Bottom {}", mm_fmt(pf.bottom_deadzone)),
     ));
 
-    // ラベルの重なり解消: 希望 y でソート → 最小 14px 間隔に広げ → 図内に収める
+    // Resolve label overlap: sort by desired y → spread to a minimum 14px spacing → fit inside the figure
     marks.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
     let gap = 14.;
     let (lo, hi) = (9., h - 9.);
@@ -1532,7 +1523,7 @@ fn travel_figure(pf: &KeyPerf, pc: &PerfCaps, live: Option<f32>) -> Div {
         }
     }
 
-    // 描画: 位置ライン → 引き出し線 → ラベル
+    // Drawing: position lines → leader lines → labels
     for (line_y, label_y, c, text) in &marks {
         if let Some(ly) = line_y {
             fig = fig.child(
@@ -1544,7 +1535,7 @@ fn travel_figure(pf: &KeyPerf, pc: &PerfCaps, live: Option<f32>) -> Div {
                     .h(px(2.))
                     .bg(*c),
             );
-            // ラベルがずれたときの引き出し線 (縦 1px + 横 4px)
+            // Leader line when a label has shifted (vertical 1px + horizontal 4px)
             let diff = label_y - ly;
             if diff.abs() > 4. {
                 fig = fig
@@ -1580,7 +1571,7 @@ fn travel_figure(pf: &KeyPerf, pc: &PerfCaps, live: Option<f32>) -> Div {
         );
     }
 
-    // 凡例
+    // Legend
     let mut legend = div().flex().gap_2().flex_wrap();
     let swatch = |c: Hsla, name: &str| {
         div()
@@ -1598,15 +1589,15 @@ fn travel_figure(pf: &KeyPerf, pc: &PerfCaps, live: Option<f32>) -> Div {
     };
     if rapid {
         legend = legend
-            .child(swatch(p.warn, "初回のON位置"))
-            .child(swatch(p.ok, "↑戻し量でOFF"))
-            .child(swatch(p.accent, "↓押込量で再ON"));
+            .child(swatch(p.warn, "First ON position"))
+            .child(swatch(p.ok, "↑ Return to OFF"))
+            .child(swatch(p.accent, "↓ Press to ON again"));
     } else {
         legend = legend
-            .child(swatch(p.accent, "作動 (ON)"))
-            .child(swatch(p.ok, "解放 (OFF)"));
+            .child(swatch(p.accent, "Actuation (ON)"))
+            .child(swatch(p.ok, "Release (OFF)"));
     }
-    legend = legend.child(swatch(theme::alpha(p.fg, 0.35), "デッドゾーン"));
+    legend = legend.child(swatch(theme::alpha(p.fg, 0.35), "Deadzone"));
 
     div()
         .flex()
@@ -1615,11 +1606,11 @@ fn travel_figure(pf: &KeyPerf, pc: &PerfCaps, live: Option<f32>) -> Div {
         .child(fig)
         .child(legend)
         .when_some(live, |d, v| {
-            d.child(ui::chip(format!("現在 {}mm", mm_fmt(v)), p.accent))
+            d.child(ui::chip(format!("Current {}mm", mm_fmt(v)), p.accent))
         })
 }
 
-/// 刻印と割り当て名が同じキーを指しているか (LShift / Shift、Backspace / BS などを同一視)。
+/// Whether the legend and the assignment name point at the same key (treat LShift / Shift, Backspace / BS etc. as the same).
 fn same_key(a: &str, b: &str) -> bool {
     fn norm(s: &str) -> String {
         let s = s.to_lowercase().replace(' ', "");

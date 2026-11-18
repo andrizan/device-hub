@@ -1,5 +1,5 @@
-//! デバイスのライブ計測。バックグラウンド 1 本で HID を叩き、
-//! 描画側は最新フレームを読むだけ。
+//! Live measurement of the device. A single background thread hits HID,
+//! and the render side just reads the latest frame.
 
 use devhub_core::backend::{DeviceDriver, HubBackend};
 use devhub_core::model::{AxisSample, ButtonDepth, KeyPerf, LayoutKey};
@@ -7,14 +7,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-/// 描画側が読むスナップショット。
+/// Snapshot read by the render side.
 #[derive(Clone, Default)]
 pub struct Live {
     pub kb: Option<KbLive>,
     pub mouse: Option<MouseLive>,
-    /// デバイスがまだ見つかっていないときの案内。
+    /// Guidance shown while no device has been found yet.
     pub status: String,
-    /// フレーム番号 (変化検出用)。
+    /// Frame number (for change detection).
     pub seq: u64,
 }
 
@@ -22,26 +22,26 @@ pub struct Live {
 pub struct KbLive {
     pub name: String,
     pub layout: Vec<LayoutKey>,
-    /// フルストローク mm (正規化に使う)。
+    /// Full stroke in mm (used for normalization).
     pub travel: f32,
-    /// キーごとの作動点 mm (layout 順。RT キーは First touch)。
-    /// `DeviceDriver::live_actuation` 未対応/読み取り失敗時は空。
+    /// Actuation point in mm per key (in layout order; RT keys use First touch).
+    /// Empty when `DeviceDriver::live_actuation` is unsupported or the read fails.
     pub actuation: Vec<f32>,
     pub perf: Vec<KeyPerf>,
-    /// layout と同じ並び。
+    /// Same order as layout.
     pub samples: Vec<AxisSample>,
 }
 
 #[derive(Clone)]
 pub struct MouseLive {
     pub name: String,
-    /// `live_buttons` と同じ並びの表示名。
+    /// Display names in the same order as `live_buttons`.
     pub names: Vec<String>,
     pub depths: Vec<ButtonDepth>,
     pub fast: Vec<Option<u8>>,
 }
 
-/// キーボード側のターゲット: ドライバ / 名前 / レイアウト / 移動量 (mm) / 作動点 (mm、layout 順)。
+/// Keyboard-side target: driver / name / layout / travel (mm) / actuation points (mm, in layout order).
 type KbTarget = (
     Arc<dyn DeviceDriver>,
     String,
@@ -50,7 +50,7 @@ type KbTarget = (
     Vec<f32>,
     Vec<KeyPerf>,
 );
-/// マウス側のターゲット: ドライバ / 名前 / ボタン名一覧 / fast フラグ。
+/// Mouse-side target: driver / name / list of button names / fast flags.
 type MouseTarget = (Arc<dyn DeviceDriver>, String, Vec<String>, Vec<Option<u8>>);
 
 struct Targets {
@@ -79,7 +79,7 @@ fn find_targets(hub: &dyn HubBackend, kb: bool, mouse: bool) -> Targets {
         let caps = d.caps();
         if let Some(k) = &caps.keyboard {
             if t.kb.is_none() && k.perf.as_ref().is_some_and(|p| p.live_travel) {
-                // 作動点は発見時に 1 度だけ読む (失敗しても表示は動くので空扱い)。
+                // Read the actuation points only once, on discovery (the display still works if it fails, so treat it as empty).
                 let perf = d.live_key_perf().unwrap_or_default();
                 let actuation = if perf.is_empty() {
                     d.live_actuation().unwrap_or_default()
@@ -120,20 +120,20 @@ fn find_targets(hub: &dyn HubBackend, kb: bool, mouse: bool) -> Targets {
     t
 }
 
-/// 片側の応答がこの回数続けて失敗したらターゲットを捨て、再探索に回す
-/// (抜けたデバイスを掴んだままにしない。連続 ~8 失敗 ≒ 数秒以内の無応答)。
+/// If one side fails to respond this many times in a row, drop the target and go back to searching
+/// (so we do not keep holding an unplugged device; ~8 consecutive failures = no response for a few seconds).
 const FAIL_DROP: u32 = 8;
 
 fn loop_body(shared: &Arc<Mutex<Live>>, stop: &Arc<AtomicBool>) {
     let Ok(hub) = devhub_hid::connect() else {
-        shared.lock().unwrap().status = "HID を開けません".into();
+        shared.lock().unwrap().status = "Cannot open HID".into();
         return;
     };
     let mut targets = find_targets(hub.as_ref(), true, true);
     let mut retry = Instant::now() - Duration::from_secs(10);
     let mut fails = (0u32, 0u32);
     while !stop.load(Ordering::Relaxed) {
-        // 片側でも欠けていれば 2 秒ごとに、欠けている側だけ探し直す (抜き差し対応)。
+        // If either side is missing, search again every 2 seconds, only for the missing side (handles plugging/unplugging).
         if (targets.kb.is_none() || targets.mouse.is_none())
             && retry.elapsed() > Duration::from_secs(2)
         {
@@ -151,13 +151,13 @@ fn loop_body(shared: &Arc<Mutex<Live>>, stop: &Arc<AtomicBool>) {
                 let mut l = shared.lock().unwrap();
                 l.kb = None;
                 l.mouse = None;
-                l.status = "対応デバイスを探しています…".into();
+                l.status = "Searching for supported devices…".into();
                 l.seq += 1;
             }
             std::thread::sleep(Duration::from_millis(50));
             continue;
         }
-        // HID の応答待ちで OBS の描画を止めない。測定結果は最後にまとめて公開する。
+        // Do not stall OBS rendering while waiting for HID responses. Measurement results are published together at the end.
         let mut next = Live::default();
         let mut drop_side = (false, false);
         if let Some((d, name, layout, actuation_travel, actuation, perf)) = &targets.kb {
@@ -176,7 +176,7 @@ fn loop_body(shared: &Arc<Mutex<Live>>, stop: &Arc<AtomicBool>) {
                 Err(_) => {
                     fails.0 += 1;
                     drop_side.0 = fails.0 >= FAIL_DROP;
-                    next.status = format!("{name} から応答がありません");
+                    next.status = format!("No response from {name}");
                 }
             }
         }
@@ -194,11 +194,11 @@ fn loop_body(shared: &Arc<Mutex<Live>>, stop: &Arc<AtomicBool>) {
                 Err(_) => {
                     fails.1 += 1;
                     drop_side.1 = fails.1 >= FAIL_DROP;
-                    next.status = format!("{name} から応答がありません");
+                    next.status = format!("No response from {name}");
                 }
             }
         }
-        // 連続失敗した側を破棄 → 次の周回で再探索に回る。
+        // Discard the side that failed repeatedly; it goes back to searching on the next pass.
         if drop_side.0 {
             targets.kb = None;
             fails.0 = 0;
@@ -227,7 +227,7 @@ pub struct Poller {
 impl Poller {
     pub fn start() -> Self {
         let shared = Arc::new(Mutex::new(Live {
-            status: "起動中…".into(),
+            status: "Starting…".into(),
             ..Live::default()
         }));
         let stop = Arc::new(AtomicBool::new(false));
@@ -240,13 +240,13 @@ impl Poller {
     }
 }
 
-/// 全ソース共有のポーラー (3 ソース登録しても HID ポーリングは 1 本)。
-/// モジュール寿命と同じなので停止はしない。
+/// Poller shared by all sources (HID polling stays at one even with 3 sources registered).
+/// It lives as long as the module, so it is never stopped.
 pub fn shared() -> &'static Mutex<Live> {
     static S: std::sync::OnceLock<Arc<Mutex<Live>>> = std::sync::OnceLock::new();
     S.get_or_init(|| {
         let shared = Arc::new(Mutex::new(Live {
-            status: "起動中…".into(),
+            status: "Starting…".into(),
             ..Live::default()
         }));
         let (s2, st2) = (shared.clone(), Arc::new(AtomicBool::new(false)));

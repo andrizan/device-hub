@@ -1,95 +1,95 @@
-# ライブライティング (DirectDrive) と キーボード UI 改善 — 引き継ぎ (2026-11-15)
+# Live lighting (DirectDrive) and keyboard UI improvements — handoff (2026-11-15)
 
-追加の監査と実装順は [DirectDrive 再監査](DIRECTDRIVE_AUDIT.md) を参照。以下は初回実装と既存の実機確認記録。
+For the additional audit and the implementation order, see the [DirectDrive re-audit](DIRECTDRIVE_AUDIT.md). What follows is the initial implementation and the existing hardware verification records.
 
-フロントエンドは実装済み (担当: フロント)。このファイルの「§3 バックエンドへの依頼」を別エージェントが進める。
-契約 (devhub-core) は**変更していない**。既存の `live_travel` / `direct_drive` / `direct_drive_stop` だけで動く。
+The frontend is implemented (owner: frontend). Another agent should work through "§3 Requests to the backend" in this file.
+The contract (devhub-core) is **unchanged**. It works with only the existing `live_travel` / `direct_drive` / `direct_drive_stop`.
 
-## 1. 何ができるようになったか (公式 HUB に無い機能)
+## 1. What can be done now (features the official HUB does not have)
 
-SU66 Max の「ライブ」タブ。PC が押し込み深さ (mm) を読みながら、キーごとの色を計算して DirectDrive で LED に直接流す。
+The "Live" tab of the SU66 Max. The PC reads the press depth (mm), computes a color per key, and streams it straight to the LEDs with DirectDrive.
 
-| モード | 内容 |
+| Mode | What it does |
 | --- | --- |
-| 押し込み深度 | 深さに比例して明るさと色が連続的に変わる。作動点 (キーごとの `KeyPerf::actuation`) を越えると「作動後の色」へ。磁気スイッチのアナログ値をそのまま光にする |
-| 打鍵ヒートマップ | 作動点の立ち上がりで回数を数え、青→緑→黄→赤で表示。上位キーと総打鍵数を表示、リセット可 |
-| キー強調 | FPS / WASD / MOBA / 数字列のプリセット or クリックで任意のキーだけ点灯。押したキーは光る |
-| 波紋 | 押したキーから波紋が広がる (深く押すほど強く速い)。キー座標 (`LayoutKey` の x/y) から計算 |
+| Press depth | Brightness and color change continuously in proportion to the depth. Past the actuation point (the per-key `KeyPerf::actuation`) it switches to the "after actuation color". The analog value of the magnetic switch becomes light as is |
+| Keystroke heatmap | Counts on the rising edge of the actuation point and shows blue → green → yellow → red. Shows the top keys and the total keystrokes, with a reset |
+| Key highlight | Light only arbitrary keys, by preset (FPS / WASD / MOBA / number row) or by clicking. A pressed key lights up |
+| Ripple | A ripple spreads from the pressed key (stronger and faster the deeper the press). Computed from the key coordinates (x/y of `LayoutKey`) |
 
-共通: 主色 / 押下色 / 背景色 (パレット + 任意色)、背景の明るさ、全体の明るさ、残光 (ms)、
-**ハイブリッド (キーボード側エフェクトを背景に使う)**、**起動時に自動で開始**。
-タブやデバイスを移動しても、最小化しても動き続ける。停止で `direct_drive_stop` → ファームの点灯に戻る。
-ライブ中はライティングタブの「実機でプレビュー」を出さず、二重送信しない。
+Common: main color / pressed color / background color (palette + any color), background brightness, overall brightness, afterglow (ms),
+**hybrid (use the keyboard-side effect as the background)**, **start automatically at launch**.
+It keeps running when you switch tabs or devices, and even when minimized. On stop, `direct_drive_stop` → returns to the firmware lighting.
+While live is running, the Lighting tab's "Preview on device" is not shown, so nothing is sent twice.
 
-ハイブリッドは公式 HUB を超える差別化機能: DirectDrive の flag=0 が「このセルは触らない」なので、
-無効セルを DD に含めないとファームのアニメーションがそのまま背景で動く。押したキー/強調キーだけを
-PC 駆動で重ねられる。実機確認済み (左上 7 セルだけ赤、残りはファームの水色アニメーションが継続)。
+Hybrid is a differentiating feature that goes beyond the official HUB: DirectDrive's flag=0 means "do not touch this cell", so
+if disabled cells are not included in DD, the firmware animation keeps running as the background. Only the pressed / highlighted keys
+can be overlaid under PC control. Verified on hardware (only the 7 cells at the top left red, the rest continuing the firmware's light blue animation).
 
-### 実装の場所
-- `crates/device-hub/src/livefx.rs` — エンジン (純関数・テスト 2 本)。`FxPrefs` は `prefs.json` の `livefx`。
-- `crates/device-hub/src/pages/live.rs` — `fx_start` / `fx_stop` / `fx_tick` と画面。
-- `app.rs` — `Tab::Live` (DirectDrive 対応エリア **かつ** `PerfCaps::live_travel` の機種だけ表示)、30fps ティッカーから `fx_tick`、
-  `stop_device_preview` とライティングタブ離脱時の自動停止は**ライブ中のデバイスを除外**。
-- データの流れ (現状): ワーカー `live_travel` → `Msg::Travel` → UI スレッドで `Engine::frame` → `Hub::dd_frame` → ワーカー `direct_drive`。
+### Where it is implemented
+- `crates/device-hub/src/livefx.rs` — the engine (pure functions, 2 tests). `FxPrefs` is `livefx` in `prefs.json`.
+- `crates/device-hub/src/pages/live.rs` — `fx_start` / `fx_stop` / `fx_tick` and the screen.
+- `app.rs` — `Tab::Live` (shown only for models with a DirectDrive-capable area **and** `PerfCaps::live_travel`), `fx_tick` from the 30fps ticker,
+  and `stop_device_preview` and the automatic stop when leaving the Lighting tab **exclude the device that is live**.
+- Data flow (current): worker `live_travel` → `Msg::Travel` → `Engine::frame` on the UI thread → `Hub::dd_frame` → worker `direct_drive`.
 
-### キーボード UI の改善 (同時に実施)
-- 同じ刻印のキーに L/C/R を付ける (分割スペース ×3 が「Space」3 つに見えていた)。全画面の `keyboard_view` 共通。
-- トリガーマップ: 色の凡例 (浅い min mm → 深い travel mm のグラデーション) と T/R/RT の説明、選択の「反転」ボタン。
+### Keyboard UI improvements (done at the same time)
+- Add L/C/R to keys with the same legend (the 3 split Spaces looked like three "Space"s). Common to the `keyboard_view` of all screens.
+- Trigger map: a color legend (a gradient from shallow min mm → deep travel mm), an explanation of T/R/RT, and an "Invert" button for the selection.
 
-## 2. 確認済み / 未確認
-- Linux + デモで 4 モードとも動作確認 (デモの `live_travel` は WASD を擬似的に押す)。`cargo test -p device-hub --lib livefx` 成功。
-- **実機確認済み (OBS Virtual Camera 目視自動化)**: 30fps DD ストリームで左上 7 セルだけ赤、残りはファーム
-  アニメーション継続 (ハイブリッド)。空集合を送ると追跡ピンが `[5,4]` で解放され、全面ファームに復帰。
-  ピンはストリーム停止後も残る = ファーム側 DD タイムアウトなし。`direct_drive_stop` で全解放確認。
-- **コード確認済み**: `Shell::Drop` → `Hub::dd_stop_all()` で終了時停止、さらに `XsydDriver::Drop` で
-  追跡しているセルの読み戻し・復元を best-effort で試す。復元処理は HID 応答を待つため、
-  通常終了でも完了は保証されない。
-- **部分確認**: 未変化セルと flag=0 のみチャンクは再送しない輻輳対策を追加。実際のタイピング遅延/
-  8K ポーリング取りこぼしはユーザー打鍵でのヒストグラム計測が残る。
-- **実機未確認の残り**: UI 開始→各モード→停止の総合 E2E、最小化中の継続、自動開始、USB 抜き差し後の
-  再接続、実打鍵での入力遅延。
+## 2. Verified / not verified
+- Verified on Linux + demo: all 4 modes work (the demo's `live_travel` simulates pressing WASD). `cargo test -p device-hub --lib livefx` passes.
+- **Verified on hardware (automated visual check via OBS Virtual Camera)**: with a 30fps DD stream only the 7 cells at the top left are red and the rest
+  keep the firmware animation (hybrid). Sending an empty set releases the tracked pins with `[5,4]` and the whole keyboard returns to the firmware.
+  The pins remain after the stream stops = there is no DD timeout on the firmware side. Confirmed that `direct_drive_stop` releases everything.
+- **Verified in code**: `Shell::Drop` → `Hub::dd_stop_all()` stops at exit, and in addition `XsydDriver::Drop` makes a best-effort attempt
+  to read back and restore the tracked cells. The restore waits for HID responses, so
+  completion is not guaranteed even on a normal exit.
+- **Partially verified**: added congestion control that does not resend unchanged cells and chunks with only flag=0. Measuring actual typing latency / dropped
+  8K polling with a histogram of the user's keystrokes remains.
+- **Remaining, not verified on hardware**: the overall E2E of UI start → each mode → stop, continuing while minimized, auto start, reconnection
+  after unplugging/replugging USB, input latency with real keystrokes.
 
-## 3. バックエンドへの依頼 (優先順)
+## 3. Requests to the backend (in priority order)
 
-### P1-a 終了時の DirectDrive 停止 — **実装・実機確認済み**
-- 実機結果: flag=255 ピンは DD ストリーム停止後も残り、ファーム側タイムアウトは見えない。
-- `Shell::Drop` → `Hub::dd_stop_all()` で通常終了時に `DdStop` を全セッションへ送信。
-- `XsydDriver::Drop` で追跡セルを best-effort 復元する経路を追加。クラッシュや強制終了では実行されず、
-  ハンドル破棄時も通信エラーや終了期限によって復元できない場合がある。
-- `direct_drive_stop` は `[5,4]` 全解除 + `[5,2]` 再送で実機の全面復帰を確認。
+### P1-a Stopping DirectDrive at exit — **implemented and verified on hardware**
+- Hardware result: flag=255 pins remain after the DD stream stops, and no firmware-side timeout is visible.
+- `Shell::Drop` → `Hub::dd_stop_all()` sends `DdStop` to all sessions on a normal exit.
+- Added a path where `XsydDriver::Drop` makes a best-effort restore of the tracked cells. It does not run on a crash or forced termination,
+  and even when the handle is dropped, restoring may not be possible because of communication errors or the exit deadline.
+- With `direct_drive_stop`, `[5,4]` release-all + resending `[5,2]` confirmed that the whole keyboard returns on the real device.
 
-### P1-b ライブ中の入力遅延を計測 — **輻輳対策済み・実打鍵計測が残り**
-- `direct_drive` は flag=0 のみチャンクを送らず、ドライバが pin/色を追跡して**新規・変化セルの
-  あるチャンクだけ**送る。静止したハイブリッド画面では実質 0 レポート、数キーの強調なら 1〜2 チャンク。
-- 実際のキー入力 (8K ポーリング) への影響はユーザー打鍵ヒストグラムが必要。`rawinput` 計測経路は
-  `Job::PollRate` 側に既存。
+### P1-b Measure input latency during live — **congestion control done, measuring with real keystrokes remains**
+- `direct_drive` does not send chunks with only flag=0, and the driver tracks pins/colors and sends **only chunks that
+  have new or changed cells**. On a static hybrid screen that is effectively 0 reports, and for highlighting a few keys 1 to 2 chunks.
+- The effect on actual key input (8K polling) needs a histogram of the user's keystrokes. The `rawinput` measurement path already exists
+  on the `Job::PollRate` side.
 
-### P2-a エンジンをワーカー側へ (低遅延化)
-現状は 読み出し→UI→書き込み で 1〜2 フレーム (約 33〜66ms) 遅れる。`livefx::Engine` は純関数なので、
-`store` のワーカーに `Job::LiveFx(FxPrefs)` を足し、同じスレッドで `live_travel` → `frame` → `direct_drive` を 60〜90Hz で回すと
-押した瞬間に光る (probe9 で 87fps 連続送信 OK)。UI はプレビュー用に `Msg::FxFrame` を間引いて受け取るだけにする。
-`store.rs` は他の作業と衝突しやすいので、事前に AUDIT_HANDOFF の担当と調整すること。
+### P2-a Move the engine to the worker side (lower latency)
+Currently the read → UI → write path delays by 1 to 2 frames (about 33 to 66 ms). `livefx::Engine` is a pure function, so
+add `Job::LiveFx(FxPrefs)` to the `store` worker and run `live_travel` → `frame` → `direct_drive` on the same thread at 60 to 90Hz,
+so the key lights the moment it is pressed (continuous sending at 87fps was OK in probe9). The UI only receives `Msg::FxFrame` thinned out for the preview.
+`store.rs` is prone to conflicts with other work, so coordinate in advance with the owner in AUDIT_HANDOFF.
 
-### P2-b 部分上書き (ハイブリッド) — **実機確認・実装済み**
-- 実機確認: DD に含めないセルはファームのエフェクトがそのまま駆動する。DD セルは同時に赤表示できる。
-- 実装: `FxPrefs.hybrid` + Live 画面の「キーボードのエフェクトを背景に使う」。`frame` で無効セル
-  (背景色と同じ) を DD に入れず、ドライバが外れたセルを `[5,4]` 解放する。
-- これは公式 HUB に無い「ファーム背景 + PC ライブ前景」合成。結果を `PROTOCOL_NOTES.md` に追記済み。
+### P2-b Partial overwrite (hybrid) — **verified on hardware and implemented**
+- Hardware verification: cells not included in DD are driven by the firmware's effect as is. The DD cells can show red at the same time.
+- Implementation: `FxPrefs.hybrid` + "Use the keyboard's effect as the background" on the Live screen. In `frame`, disabled cells
+  (same as the background color) are not put into DD, and the driver releases the cells that dropped out with `[5,4]`.
+- This is the "firmware background + PC live foreground" composition that the official HUB does not have. The result has been appended to `PROTOCOL_NOTES.md`.
 
-### P3 新しい光らせ方の入力源 (契約は追加のみで)
-フロントはレイヤーとして受け取る想定。`Engine::frame` に外部信号を渡す口を足すので、データ側を作ってほしい。
+### P3 New input sources for lighting (contract: additions only)
+The frontend is expected to receive them as layers. Since a hook for passing external signals to `Engine::frame` will be added, please build the data side.
 
-| 案 | データ源 | 光り方の例 |
+| Idea | Data source | Example of the lighting |
 | --- | --- | --- |
-| オーディオビジュアライザ | WASAPI loopback (新 crate `devhub-audio`、`cpal` か `windows` crate)、FFT 14 バンド | 列ごとのスペクトラム。TP55 の EQ 後の音でも可 |
-| VALORANT 連携 | Riot クライアントのローカル API (lockfile → `/chat/v4/presences` の自分の presence: `sessionLoopState`, スコア等)。**メモリ読み取りは禁止**、公式ローカル API のみ | 数字列にラウンドスコア、エージェント選択中は色替え、勝敗でフラッシュ |
-| デバイス状態 | 既存の battery (マウス)、Windows の Caps Lock / マイクミュート | マウス電池が低いと数字列を残量バーに、Caps 表示 |
-| 打鍵統計の永続化 | ライブの打鍵数を日別で `%APPDATA%\DeviceHub\stats.json` へ | 「今日のヒートマップ」と長期比較 |
+| Audio visualizer | WASAPI loopback (new crate `devhub-audio`, `cpal` or the `windows` crate), 14-band FFT | a per-column spectrum. Post-EQ sound of the TP55 is also possible |
+| VALORANT integration | The Riot client's local API (lockfile → own presence in `/chat/v4/presences`: `sessionLoopState`, score, etc.). **Reading memory is forbidden**, official local API only | round score on the number row, color change during agent select, flash on win/loss |
+| Device state | Existing battery (mouse), Windows Caps Lock / microphone mute | number row as a remaining-charge bar when the mouse battery is low, Caps display |
+| Persisting keystroke stats | Per-day live keystroke counts into `%APPDATA%\DeviceHub\stats.json` | "today's heatmap" and long-term comparison |
 
-提案する契約 (追加): `pub enum FxSignal { Spectrum(Vec<f32>), Score{ally:u8, enemy:u8}, Phase(String), Battery(u8), Flash(Rgb) }` を
-`Hub` から UI へ流す (`Msg::FxSignal`)。フロントはモードを足すだけにする。
+Proposed contract (addition): `pub enum FxSignal { Spectrum(Vec<f32>), Score{ally:u8, enemy:u8}, Phase(String), Battery(u8), Flash(Rgb) }` is sent from
+`Hub` to the UI (`Msg::FxSignal`). The frontend only adds modes.
 
-## 4. フロント側の次の候補 (参考)
-- レイヤー合成 (例: キー強調 + 波紋 + 状態表示) とレイヤー編集 UI。
-- ゲーム用プリセットとの連動 (プリセット適用時にライブのモードも切り替え)。
-- キー割り当て画面で、押したキーをライブ深度でハイライト (どのキーか探さなくて済む)。
+## 4. Next candidates on the frontend side (for reference)
+- Layer composition (e.g. key highlight + ripple + status display) and a layer editing UI.
+- Linking with game presets (also switch the live mode when a preset is applied).
+- On the Key mapping screen, highlight the pressed key with the live depth (so you do not have to look for which key it is).

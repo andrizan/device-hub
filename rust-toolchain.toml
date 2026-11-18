@@ -1,4 +1,4 @@
 [toolchain]
-# gpui-kit (gpui-pre 0.3.11) は slice::as_array (Rust 1.95+) を使う。
+# gpui-kit (gpui-pre 0.3.11) uses slice::as_array (Rust 1.95+).
 channel = "1.95.0"
 profile = "minimal"

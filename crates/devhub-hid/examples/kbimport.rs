@@ -1,7 +1,7 @@
-//! 公式 configurator (hub.xsyd.top) のエクスポートを実機へ適用する。
+//! Applies an export from the official configurator (hub.xsyd.top) to the real device.
 //! `cargo run -p devhub-hid --example kbimport -- <keyboard_config.json>`
-//! 暗号化済み `{"data": ...}` と復号済み JSON のどちらも受け付ける
-//! (DeviceHub 自前の `{state: DeviceState}` JSON でもよい)。
+//! Accepts both the encrypted `{"data": ...}` and decrypted JSON
+//! (DeviceHub's own `{state: DeviceState}` JSON also works).
 
 use std::path::Path;
 
@@ -33,7 +33,7 @@ fn main() {
         if let Ok(st) = drv.read() {
             if let Some(kb) = &st.keyboard {
                 println!(
-                    "   現在: layers={} adv={} macros={}",
+                    "   current: layers={} adv={} macros={}",
                     kb.keymap.len(),
                     kb.advanced.len(),
                     kb.macros.iter().filter(|m| m.is_some()).count()
@@ -42,9 +42,9 @@ fn main() {
         }
         match drv.run_action("import_config", Some(Path::new(&path))) {
             Ok(o) => {
-                println!("{}", o.message.unwrap_or_else(|| "完了".into()));
+                println!("{}", o.message.unwrap_or_else(|| "Done".into()));
                 applied = true;
-                // 読み戻して要点を表示
+                // Read back and show the key points
                 if let Ok(st) = drv.read() {
                     if let Some(kb) = &st.keyboard {
                         println!(
@@ -69,6 +69,6 @@ fn main() {
         }
     }
     if !applied {
-        println!("適用できるキーボードが見つかりませんでした");
+        println!("No keyboard to apply to was found");
     }
 }

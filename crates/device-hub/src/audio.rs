@@ -1,22 +1,22 @@
-//! オーディオ連動 — WASAPI ループバックで再生音を取り、
-//! Goertzel でバンドレベル (0..1) に分解する。`livefx::FxMode::Audio` の入力。
+//! Audio sync — captures the playback sound via WASAPI loopback and
+//! splits it into band levels (0..1) with Goertzel. Input for `livefx::FxMode::Audio`.
 //!
-//! キャプチャは専用スレッドで走り、最新のバンド列を共有スロットに置く。
-//! 取り出しは `bands()` (Mutex のコピー)。サンプルはモノラル化して
-//! 1024 点ごとに 15 バンド (60Hz..16kHz 対数配分) を計算し、
-//! アタック速め・リリース遅めに平滑する。
+//! Capture runs on a dedicated thread and puts the latest band list into a shared slot.
+//! Read it with `bands()` (a copy of the Mutex contents). Samples are mixed down to mono and
+//! every 1024 samples 15 bands (60Hz..16kHz, log-spaced) are computed,
+//! then smoothed with a fast attack and a slow release.
 
 use std::sync::{Mutex, OnceLock};
 
-/// バンド数 (キーボードの横 15 列に対応)。
+/// Number of bands (matches the keyboard's 15 columns).
 pub const NBANDS: usize = 15;
-/// Goertzel の窓幅 (48kHz で約 21ms)。
+/// Goertzel window width (about 21ms at 48kHz).
 const N: usize = 1024;
 
 static BANDS: OnceLock<Mutex<Vec<f32>>> = OnceLock::new();
 static STARTED: OnceLock<()> = OnceLock::new();
 
-/// 現在のバンドレベル列 (無音・未開始なら 0 列)。
+/// Current band level list (an empty list when silent or not started).
 pub fn bands() -> Vec<f32> {
     BANDS
         .get()
@@ -24,7 +24,7 @@ pub fn bands() -> Vec<f32> {
         .unwrap_or_default()
 }
 
-/// キャプチャスレッドを一度だけ起動する (失敗しても安全に無音)。
+/// Starts the capture thread exactly once (safely stays silent on failure).
 pub fn start() {
     STARTED.get_or_init(|| {
         BANDS.set(Mutex::new(vec![0.; NBANDS])).ok();
@@ -43,7 +43,7 @@ fn put(v: &[f32]) {
     }
 }
 
-/// バンド中心周波数 (60..16000Hz を対数配分)。
+/// Band center frequencies (60..16000Hz, log-spaced).
 fn band_freqs() -> [f32; NBANDS] {
     let mut f = [0f32; NBANDS];
     let lo = 60f32.ln();
@@ -54,7 +54,7 @@ fn band_freqs() -> [f32; NBANDS] {
     f
 }
 
-/// Goertzel — buf の中の freq 成分の正規化強度 (0..1 付近)。
+/// Goertzel — normalized strength (around 0..1) of the freq component in buf.
 fn goertzel(buf: &[f32], sr: f32, freq: f32) -> f32 {
     let w = 2. * std::f32::consts::PI * freq / sr;
     let cw = 2. * w.cos();
@@ -65,7 +65,7 @@ fn goertzel(buf: &[f32], sr: f32, freq: f32) -> f32 {
         s1 = s0;
     }
     let p = (s1 * s1 + s2 * s2 - cw * s1 * s2).sqrt() / (N as f32 * 0.5);
-    // 対数っぽい持ち上げ + クリップ。
+    // Log-like lift + clip.
     (p * 2.4).powf(0.6).clamp(0., 1.)
 }
 
@@ -101,7 +101,7 @@ unsafe fn run() {
     };
     let wfx = &*fmt;
     let sr = wfx.nSamplesPerSec as f32;
-    // float32 か (PCM16 は 0x1、float は 0x3 / WAVE_FORMAT_EXTENSIBLE 0xfffe)。
+    // Whether it is float32 (PCM16 is 0x1, float is 0x3 / WAVE_FORMAT_EXTENSIBLE 0xfffe).
     let tag = wfx.wFormatTag;
     let is_float = if tag == 0x3 {
         true
@@ -142,7 +142,7 @@ unsafe fn run() {
     let freqs = band_freqs();
     let mut acc: Vec<f32> = Vec::with_capacity(N * 2);
     let mut smooth = vec![0f32; NBANDS];
-    // 各バンドの最近ピーク — 小さい音でも振り切る自動正規化。
+    // Recent peak of each band — auto-normalization so that even quiet sounds reach full scale.
     let mut peaks = vec![0.05f32; NBANDS];
     loop {
         std::thread::sleep(std::time::Duration::from_millis(10));
@@ -164,7 +164,7 @@ unsafe fn run() {
                 let n = frames as usize * bpframe;
                 let raw = std::slice::from_raw_parts(data as *const u8, n);
                 for fr in raw.chunks_exact(bpframe) {
-                    // float32 × ch をモノラル化。
+                    // Mix float32 × ch down to mono.
                     let mut s = 0f32;
                     for c in 0..ch {
                         s += f32::from_le_bytes([
@@ -184,10 +184,10 @@ unsafe fn run() {
             let buf: Vec<f32> = acc.drain(..N).collect();
             for (i, &f) in freqs.iter().enumerate() {
                 let v = goertzel(&buf, sr, f);
-                // ピーク追跡: 立ち上がり即・減衰は約7秒で半分、床は 0.03。
+                // Peak tracking: instant rise, decay halves in about 7 s, floor 0.03.
                 peaks[i] = (peaks[i] * 0.995).max(v).max(0.03);
                 let v = (v / peaks[i]).min(1.);
-                // アタック 0.55 / リリース 0.88 の平滑。
+                // Smoothing with attack 0.55 / release 0.88.
                 smooth[i] = if v > smooth[i] {
                     smooth[i] * 0.45 + v * 0.55
                 } else {

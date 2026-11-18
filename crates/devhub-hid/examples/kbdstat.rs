@@ -1,4 +1,4 @@
-//! デバイス状態の即診断 — どのコマンド群が生きているか。
+//! Quick device-state diagnosis — which command groups are alive.
 use hidapi::HidApi;
 use std::time::{Duration, Instant};
 

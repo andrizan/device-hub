@@ -1,15 +1,15 @@
-//! ライブライティング (DirectDrive) エンジン — 公式アプリに無い PC 駆動のキー照明。
+//! Live lighting (DirectDrive) engine — PC-driven key lighting that the official app does not have.
 //!
-//! 磁気キーボードの **押し込み深さ (`live_travel`)** を読み、キーごとの色を計算して
-//! DirectDrive (`DeviceDriver::direct_drive`) で実機 LED に直接流す。
-//! 計算はこのモジュールの純関数 (UI スレッドの 30fps ティッカーから呼ぶ)。
-//! I/O は `store::Hub` (travel 読み出し / dd_frame) が受け持つ。
+//! Reads the **press depth (`live_travel`)** of a magnetic keyboard, computes a color per key, and
+//! streams it directly to the real device's LEDs via DirectDrive (`DeviceDriver::direct_drive`).
+//! The computation is pure functions in this module (called from the UI thread's 30fps ticker).
+//! I/O is handled by `store::Hub` (travel read / dd_frame).
 //!
-//! モード:
-//! - `Depth` … 押し込んだ深さで色と明るさが変わる (アナログ感をそのまま光に)。
-//! - `Heat`  … このセッションの打鍵回数ヒートマップ (よく使うキーほど赤く)。
-//! - `Focus` … 選んだキー (WASD など) だけ点灯、他は暗く。押すと光る。
-//! - `Ripple`… 押したキーから波紋が広がる (深く押すほど強い)。
+//! Modes:
+//! - `Depth` … color and brightness change with how deep the key is pressed (the analog feel, straight into light).
+//! - `Heat`  … keystroke count heatmap for this session (the more a key is used, the redder).
+//! - `Focus` … only the chosen keys (WASD etc.) are lit, the others stay dark. Keys light up when pressed.
+//! - `Ripple`… ripples spread from the pressed key (stronger the deeper the press).
 
 use devhub_core::model::{KeyboardCaps, LayoutKey};
 use devhub_core::Rgb;
@@ -39,26 +39,26 @@ impl FxMode {
     ];
     pub fn label(self) -> &'static str {
         match self {
-            FxMode::Depth => "押し込み深度",
-            FxMode::Heat => "打鍵ヒートマップ",
-            FxMode::Focus => "キー強調",
-            FxMode::Ripple => "波紋",
-            FxMode::Status => "ステータス",
-            FxMode::Audio => "オーディオ",
-            FxMode::AppFocus => "アプリ連携",
+            FxMode::Depth => "Press depth",
+            FxMode::Heat => "Keystroke heatmap",
+            FxMode::Focus => "Key highlight",
+            FxMode::Ripple => "Ripple",
+            FxMode::Status => "Status",
+            FxMode::Audio => "Audio",
+            FxMode::AppFocus => "App sync",
         }
     }
     pub fn desc(self) -> &'static str {
         match self {
             FxMode::Depth => {
-                "押した深さで色と明るさが連続的に変わる。作動点を越えると色が切り替わる"
+                "Color and brightness change continuously with press depth. The color switches past the actuation point"
             }
-            FxMode::Heat => "打鍵回数を数えて色に。よく使うキーほど赤く (リセット可)",
-            FxMode::Focus => "WASD などゲームで使うキーだけ点灯。押すと光る",
-            FxMode::Ripple => "押したキーから波紋が広がる。深く押すほど強く速い",
-            FxMode::Status => "CapsLock やワイヤレス機の電池低下を点灯に重ねる (ハイブリッド推奨)",
-            FxMode::Audio => "再生中の音に合わせてスペクトルをキーボードに表示",
-            FxMode::AppFocus => "前面のアプリを検知して強調するキーを自動で切り替え",
+            FxMode::Heat => "Counts keystrokes and maps them to color. The more a key is used, the redder (resettable)",
+            FxMode::Focus => "Lights only the keys used in games, such as WASD. Keys light up when pressed",
+            FxMode::Ripple => "Ripples spread from the pressed key. The deeper the press, the stronger and faster",
+            FxMode::Status => "Overlays CapsLock and low battery on wireless devices onto the lighting (hybrid recommended)",
+            FxMode::Audio => "Shows a spectrum on the keyboard in sync with the sound being played",
+            FxMode::AppFocus => "Detects the foreground app and switches the highlighted keys automatically",
         }
     }
     pub fn icon(self) -> &'static str {
@@ -74,35 +74,35 @@ impl FxMode {
     }
 }
 
-/// 設定 (prefs.json の `livefx`)。
+/// Settings (`livefx` in prefs.json).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FxPrefs {
     pub mode: FxMode,
-    /// ハイブリッド: 無効セルは DD に送らずキーボード側のエフェクトに
-    /// 任せる (ファームの光を背景に、押下/強調だけ PC 駆動 — 実機確認済み)。
+    /// Hybrid: disabled cells are not sent to DD and are left to the keyboard's own effect
+    /// (the firmware lighting stays as the background, and only presses/highlights are PC-driven — verified on real hardware).
     pub hybrid: bool,
-    /// 背景色と明るさ (0..100)。hybrid では「無効セル」の判定にだけ使う。
+    /// Background color and brightness (0..100). In hybrid it is only used to decide what a "disabled cell" is.
     pub base: Rgb,
     pub base_level: u8,
-    /// 主色 (浅い/強調キー/波紋の色)。
+    /// Primary color (shallow / highlighted keys / ripples).
     pub a: Rgb,
-    /// 副色 (深い/作動後/押下時)。
+    /// Secondary color (deep / after actuation / when pressed).
     pub b: Rgb,
-    /// オーディオモードの感度 (%)。
+    /// Sensitivity of the audio mode (%).
     pub audio_gain: u8,
-    /// 全体の明るさ 0..100。
+    /// Overall brightness 0..100.
     pub brightness: u8,
-    /// 残光 (ms)。0 で即消灯。
+    /// Afterglow (ms). 0 turns off immediately.
     pub decay_ms: u32,
-    /// キー強調で点灯するキー (`LayoutKey::label`)。
+    /// Keys lit by key highlight (`LayoutKey::label`).
     pub focus: Vec<String>,
-    /// アプリ連携: exe 名の部分一致 (小文字) → プリセット名。
-    /// 前面アプリが一致すれば `focus_preset` のキー列で強調する。
+    /// App sync: partial match of the exe name (lowercase) → preset name.
+    /// If the foreground app matches, highlight with the key list of `focus_preset`.
     pub app_map: Vec<(String, String)>,
-    /// 起動時 (このデバイスが見つかったら) 自動で開始。
+    /// Start automatically at launch (when this device is found).
     pub autostart: bool,
-    /// 最後に動かしたデバイス (DeviceId)。
+    /// Last device that was run (DeviceId).
     pub device: Option<String>,
 }
 
@@ -132,8 +132,13 @@ impl Default for FxPrefs {
     }
 }
 
-/// キー強調のプリセット (刻印ラベル)。
-pub const FOCUS_PRESETS: [&str; 4] = ["FPS", "WASD", "MOBA", "数字列"];
+/// Key highlight presets (key legend labels).
+pub const FOCUS_PRESETS: [&str; 4] = ["FPS", "WASD", "MOBA", "Number row"];
+
+/// The Japanese name this preset was saved under before the UI became English
+/// (`prefs.json` stores the preset name). Written as escapes so no Japanese
+/// text stays in the source.
+const LEGACY_NUMBER_ROW: &str = "\u{6570}\u{5B57}\u{5217}";
 
 pub fn focus_preset(name: &str) -> Vec<String> {
     let v: &[&str] = match name {
@@ -141,7 +146,7 @@ pub fn focus_preset(name: &str) -> Vec<String> {
         "MOBA" => &[
             "Q", "W", "E", "R", "D", "F", "1", "2", "3", "4", "5", "6", "B", "Tab",
         ],
-        "数字列" => &["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"],
+        "Number row" | LEGACY_NUMBER_ROW => &["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"],
         _ => &[
             "W", "A", "S", "D", "Q", "E", "R", "F", "C", "X", "G", "Z", "1", "2", "3", "4",
             "Shift", "LShift", "Ctrl", "LCtrl", "Space", "Tab", "Esc",
@@ -150,7 +155,7 @@ pub fn focus_preset(name: &str) -> Vec<String> {
     v.iter().map(|s| s.to_string()).collect()
 }
 
-/// 波紋 1 個。
+/// One ripple.
 #[derive(Clone, Copy, Debug)]
 struct Ripple {
     x: f32,
@@ -159,40 +164,40 @@ struct Ripple {
     power: f32,
 }
 
-/// フレーム計算に使う外部入力 (Shell が 30fps ごとに集めて渡す)。
+/// External inputs used for frame computation (the Shell collects and passes them every 30fps tick).
 #[derive(Clone, Default)]
 pub struct FxEnv {
-    /// Caps Lock が有効か。
+    /// Whether Caps Lock is on.
     pub caps_lock: bool,
-    /// 他デバイスを含む最低のワイヤレス電池 (残量%, 充電中)。無ければ None。
+    /// Lowest wireless battery including other devices (percent, charging). None if there is none.
     pub battery: Option<(u8, bool)>,
-    /// オーディオバンド 0..1 (低音→高音)。`FxMode::Audio` 用。
+    /// Audio bands 0..1 (low → high). For `FxMode::Audio`.
     pub audio: Vec<f32>,
-    /// アプリ連携で解決した強調キー (空なら `cfg.focus` にフォールバック)。
+    /// Highlight keys resolved by app sync (falls back to `cfg.focus` when empty).
     pub app_focus: Vec<String>,
-    /// 前面アプリの exe 名 (表示用)。
+    /// Foreground app's exe name (for display).
     pub fg_app: Option<String>,
 }
 
-/// 実行時状態 (セッション中だけ)。
+/// Runtime state (session only).
 #[derive(Default)]
 pub struct Engine {
-    /// 残光 0..1 (layout index)。
+    /// Afterglow 0..1 (layout index).
     glow: Vec<f32>,
-    /// 作動中か (立ち上がり検出)。
+    /// Whether the key is actuated (for rising-edge detection).
     down: Vec<bool>,
-    /// 打鍵回数。
+    /// Keystroke counts.
     pub heat: Vec<u32>,
     ripples: Vec<Ripple>,
-    /// 最後に作ったフレーム (UI のプレビューと共有)。
+    /// Last frame produced (shared with the UI preview).
     pub last: Vec<Rgb>,
-    /// 総打鍵数。
+    /// Total keystrokes.
     pub presses: u64,
-    /// DirectDrive が一度でも有効になったか (外部停止の検出用)。
+    /// Whether DirectDrive has ever been enabled (to detect an external stop).
     pub armed: bool,
-    /// ライブ測定の再開を最後に試した時刻。
+    /// Time of the last attempt to resume live measurement.
     pub rearm: Option<std::time::Instant>,
-    /// エンジンの経過時間 (点滅・パルス用)。
+    /// Elapsed engine time (for blinking and pulses).
     t: f32,
 }
 
@@ -211,11 +216,11 @@ fn scale(c: Rgb, k: f32) -> Rgb {
     )
 }
 
-/// 「無効セル」の表示色。`frame` の各モードは未作動セルで
-/// `scale(base, brightness/100)` を出すので、ハイブリッドでは
-/// この色と一致するセルを DD に送らずファームのエフェクトに任せる。
-/// (flag=0 = 「触らない」は実機確認済み — ピン留めしていないセルは
-/// ファームがそのまま駆動する)
+/// Display color of a "disabled cell". Each `frame` mode outputs
+/// `scale(base, brightness/100)` for idle cells, so in hybrid mode
+/// cells that match this color are not sent to DD and are left to the firmware effect.
+/// (flag=0 = "don't touch" is verified on real hardware — cells that are not pinned
+/// are simply driven by the firmware)
 pub fn off_color(cfg: &FxPrefs) -> Rgb {
     scale(
         scale(cfg.base, cfg.base_level as f32 / 100.),
@@ -223,7 +228,7 @@ pub fn off_color(cfg: &FxPrefs) -> Rgb {
     )
 }
 
-/// 加算 (飽和)。
+/// Saturating add.
 fn add(a: Rgb, b: Rgb) -> Rgb {
     Rgb::new(
         a.r.saturating_add(b.r),
@@ -232,7 +237,7 @@ fn add(a: Rgb, b: Rgb) -> Rgb {
     )
 }
 
-/// ヒートマップの配色 (0 = 青 → 緑 → 黄 → 赤)。
+/// Heatmap palette (0 = blue → green → yellow → red).
 fn heat_color(t: f32) -> Rgb {
     const STOPS: [(f32, u32); 5] = [
         (0.0, 0x1e3a8a),
@@ -256,7 +261,7 @@ fn center(k: &LayoutKey) -> (f32, f32) {
     (k.x + k.w / 2., k.y + k.h / 2.)
 }
 
-/// 数字キー ("1".."0") → 0..9 のゲージ位置。
+/// Number keys ("1".."0") → gauge position 0..9.
 fn digit_pos(label: &str) -> Option<usize> {
     match label {
         "1" => Some(0),
@@ -279,12 +284,12 @@ impl Engine {
         self.presses = 0;
     }
 
-    /// 1 フレーム計算する。
-    /// - `depths` … 押し込み深さ mm (layout 順。足りなければ 0)。
-    /// - `actuation` … キーごとの作動点 mm (layout 順。足りなければ 1.2)。
-    /// - `full` … 深さの正規化に使う全ストローク mm。
-    /// - `dt` … 前フレームからの秒。
-    /// - `env` … CapsLock / 電池 / オーディオ / 前面アプリ (Status・Audio・AppFocus 用)。
+    /// Computes one frame.
+    /// - `depths` … press depth in mm (layout order; 0 if missing).
+    /// - `actuation` … per-key actuation point in mm (layout order; 1.2 if missing).
+    /// - `full` … full stroke in mm used to normalize depth.
+    /// - `dt` … seconds since the previous frame.
+    /// - `env` … CapsLock / battery / audio / foreground app (for Status, Audio and AppFocus).
     pub fn frame(
         &mut self,
         cfg: &FxPrefs,
@@ -302,14 +307,14 @@ impl Engine {
         self.heat.resize(n, 0);
         self.last.resize(n, Rgb::new(0, 0, 0));
         let full = full.max(0.5);
-        // 残光の減衰係数 (decay_ms で 1/e)。
+        // Afterglow decay factor (1/e over decay_ms).
         let fade = if cfg.decay_ms == 0 {
             0.
         } else {
             (-dt * 1000. / cfg.decay_ms as f32).exp()
         };
         let base = scale(cfg.base, cfg.base_level as f32 / 100.);
-        // 押下の検出 (作動点 + ヒステリシス)
+        // Press detection (actuation point + hysteresis)
         for i in 0..n {
             let d = depths.get(i).copied().unwrap_or(0.).max(0.);
             let act = actuation
@@ -340,13 +345,13 @@ impl Engine {
             let lvl = (d / full).clamp(0., 1.);
             self.glow[i] = (self.glow[i] * fade).max(lvl);
         }
-        // 波紋の更新
+        // Update ripples
         for r in self.ripples.iter_mut() {
             r.age += dt * (0.8 + r.power);
         }
         self.ripples.retain(|r| r.age < 1.6);
         let max_heat = self.heat.iter().copied().max().unwrap_or(0).max(1) as f32;
-        // Audio モードの座標系 (下端 y と左端 x の正規化)。
+        // Coordinate system for Audio mode (normalization of bottom y and left x).
         let xmax = kc
             .layout
             .iter()
@@ -359,7 +364,7 @@ impl Engine {
             .map(|k| k.y + k.h)
             .fold(0f32, f32::max)
             .max(1.);
-        // 電池ゲージの点滅位相 (40% 以下でゆっくり、15% 以下で速く)。
+        // Battery gauge blink phase (slow at 40% or below, fast at 15% or below).
         let batt_pulse = self.t
             * if env.battery.is_some_and(|(p, _)| p <= 15) {
                 6.
@@ -376,7 +381,7 @@ impl Engine {
                 .unwrap_or(1.2);
             let c = match cfg.mode {
                 FxMode::Depth => {
-                    // 浅い→深いのグラデーション。作動点を越えたら副色側へ寄せる。
+                    // Gradient from shallow to deep. Past the actuation point, shift toward the secondary color.
                     let d = depths.get(i).copied().unwrap_or(0.);
                     let t = if self.down[i] || d >= act {
                         0.65 + 0.35 * g
@@ -417,17 +422,17 @@ impl Engine {
                     add(scale(base, 1. - s), scale(ring, s.max(g)))
                 }
                 FxMode::Status => {
-                    // 背景はファーム/ベース色のまま、情報のあるキーだけ重ねる。
+                    // Keep the background as the firmware/base color and overlay only keys that carry information.
                     let mut c = base;
-                    // CapsLock → Caps キーを副色で点灯。
+                    // CapsLock → light the Caps key in the secondary color.
                     if env.caps_lock
                         && (k.label.eq_ignore_ascii_case("caps")
                             || k.label.eq_ignore_ascii_case("capslock"))
                     {
                         c = cfg.b;
                     }
-                    // ワイヤレス機の電池が 40% 以下 → 数字行をゲージに
-                    // (1 キー = 10%、色は残量で赤→黄→緑、点滅で注意喚起)。
+                    // Wireless device battery at 40% or below → the number row becomes a gauge
+                    // (1 key = 10%, color goes red → yellow → green with the charge, blinking draws attention).
                     if let Some((pct, chg)) = env.battery {
                         if pct <= 40 {
                             if let Some(pos) = digit_pos(&k.label) {
@@ -447,8 +452,8 @@ impl Engine {
                     add(scale(c, 1. - g), scale(cfg.b, g * 0.4))
                 }
                 FxMode::Audio => {
-                    // 列ごとのバンドレベルを「下からの高さ」に変換した
-                    // スペクトル。上に行くほど色が副色に近づく。
+                    // Spectrum made by converting each column's band level into a "height from the bottom".
+                    // The higher up, the closer the color is to the secondary color.
                     let nb = env.audio.len();
                     if nb == 0 {
                         base
@@ -457,9 +462,9 @@ impl Engine {
                         let lvl =
                             (env.audio[bi.min(nb - 1)] * cfg.audio_gain as f32 / 100.).min(1.);
                         let h = lvl * ymax;
-                        let depth = ymax - (k.y + k.h); // 下端からの高さ
+                        let depth = ymax - (k.y + k.h); // height from the bottom edge
                         if depth < h {
-                            // 頂点に近いほど副色・明るく。
+                            // The closer to the peak, the more secondary color and the brighter.
                             let top = (1. - (h - depth).abs() / 1.2).clamp(0., 1.);
                             let col = mix(cfg.a, cfg.b, (depth / ymax) * 0.8 + top * 0.4);
                             add(scale(base, 0.4), scale(col, 0.25 + 0.75 * top))
@@ -469,7 +474,7 @@ impl Engine {
                     }
                 }
                 FxMode::AppFocus => {
-                    // 前面アプリに対応するキー (未解決なら手動リスト)。
+                    // Keys for the foreground app (manual list if unresolved).
                     let keys = if env.app_focus.is_empty() {
                         &cfg.focus
                     } else {
@@ -485,7 +490,7 @@ impl Engine {
         &self.last
     }
 
-    /// 打鍵回数の多い順 (刻印, 回数)。
+    /// In descending order of keystroke count (legend, count).
     pub fn top_keys(&self, kc: &KeyboardCaps, n: usize) -> Vec<(String, u32)> {
         let mut v: Vec<(String, u32)> = kc
             .layout
@@ -552,8 +557,8 @@ mod tests {
     fn hybrid_off_cells_match_off_color() {
         let k = kc();
         let mut e = Engine::default();
-        // どのモードでも「何もしていないキー」は off_color と一致する
-        // (= DD に送らずファームに任せる判定が成り立つ)。
+        // In any mode, an "idle key" matches off_color
+        // (= the check for "don't send to DD, leave to the firmware" holds).
         for mode in FxMode::ALL {
             let mut cfg = FxPrefs {
                 mode,
@@ -593,7 +598,7 @@ mod tests {
 
     #[::core::prelude::v1::test]
     fn status_caps_and_battery() {
-        // "Caps"(y=0) と "1"(数字キー) のレイアウトで検証。
+        // Verified with a layout of "Caps"(y=0) and "1"(number key).
         let mut k = kc();
         k.layout[0].label = "Caps".into();
         k.layout[1].label = "1".into();
@@ -604,7 +609,7 @@ mod tests {
             ..Default::default()
         };
         let mut e = Engine::default();
-        // Caps ON + 電池 25% (充電中) → Caps=副色、"1"(pos0) は 25% 内で点灯。
+        // Caps ON + battery 25% (charging) → Caps = secondary color, "1"(pos0) is lit within 25%.
         let env = FxEnv {
             caps_lock: true,
             battery: Some((25, true)),
@@ -613,7 +618,7 @@ mod tests {
         let f = e.frame(&cfg, &k, &[0., 0.], &[], 4., 0.033, &env).to_vec();
         assert_eq!(f[0], cfg.b, "caps on");
         assert_ne!(f[1], Rgb::new(0, 0, 0), "battery gauge lit");
-        // 電池が 50% → ゲージ消灯。Caps も OFF。
+        // Battery at 50% → gauge off. Caps is OFF too.
         let env2 = FxEnv {
             caps_lock: false,
             battery: Some((50, false)),
@@ -626,10 +631,10 @@ mod tests {
 
     #[::core::prelude::v1::test]
     fn audio_column_height() {
-        // 2列 × y0(上) のキー。低バンドしか音が無い → 低バンド列だけ点灯。
+        // Keys in 2 columns × y0 (top). Only the low band has sound → only the low-band column lights.
         let mut k = kc();
         k.layout[0].x = 0.;
-        k.layout[1].x = 10.; // 別バンド列
+        k.layout[1].x = 10.; // a different band column
         let cfg = FxPrefs {
             mode: FxMode::Audio,
             base_level: 0,

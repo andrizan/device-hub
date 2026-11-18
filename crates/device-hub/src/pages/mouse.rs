@@ -1,4 +1,4 @@
-//! マウス: DPI とボタン割り当て。
+//! Mouse: DPI and button assignment.
 
 use crate::app::{Modal, Shell};
 use crate::ui::{self, Btn};
@@ -22,13 +22,13 @@ fn mouse_parts(this: &Shell) -> Option<(MouseCaps, MouseState)> {
     ))
 }
 
-/// DPI 入力欄の確定。
+/// Commit of the DPI input field.
 pub fn commit_dpi_text(this: &mut Shell, v: &str, y_axis: bool, cx: &mut Context<Shell>) {
     let Some((mc, ms)) = mouse_parts(this) else {
         return;
     };
     let Ok(n) = v.trim().parse::<u32>() else {
-        this.toast("数値を入力してください", true, cx);
+        this.toast("Enter a number", true, cx);
         return;
     };
     let n = ui::quantize(
@@ -55,41 +55,41 @@ pub fn commit_dpi_text(this: &mut Shell, v: &str, y_axis: bool, cx: &mut Context
 
 pub fn action_label(a: &ButtonAction, macros: &[Option<MacroDef>]) -> String {
     match a {
-        ButtonAction::Disabled => "無効".into(),
+        ButtonAction::Disabled => "Disabled".into(),
         ButtonAction::Mouse(m) => keys::mouse_fn_name(*m).into(),
-        ButtonAction::Dpi(DpiFn::Cycle) => "DPI 循環".into(),
+        ButtonAction::Dpi(DpiFn::Cycle) => "DPI cycle".into(),
         ButtonAction::Dpi(DpiFn::Up) => "DPI +".into(),
         ButtonAction::Dpi(DpiFn::Down) => "DPI −".into(),
-        ButtonAction::Dpi(DpiFn::Shift(v)) => format!("DPI ロック ({v})"),
+        ButtonAction::Dpi(DpiFn::Shift(v)) => format!("DPI lock ({v})"),
         ButtonAction::Fire {
             button,
             count,
             interval_ms,
         } => {
             format!(
-                "連射: {} ×{count} / {interval_ms}ms",
+                "Rapid fire: {} ×{count} / {interval_ms}ms",
                 keys::mouse_fn_name(*button)
             )
         }
-        ButtonAction::Key(k) => format!("キー: {}", keycode::stroke_label(*k)),
+        ButtonAction::Key(k) => format!("Key: {}", keycode::stroke_label(*k)),
         ButtonAction::Media(m) => keys::media_fn_name(*m).into(),
         ButtonAction::Macro { slot, run } => {
             let n = macros
                 .get(*slot as usize)
                 .and_then(|m| m.as_ref())
                 .map(|m| m.name.clone())
-                .unwrap_or_else(|| format!("マクロ {}", slot + 1));
+                .unwrap_or_else(|| format!("Macro {}", slot + 1));
             let r = match run {
-                MacroRun::Times(t) => format!("{t} 回"),
-                MacroRun::WhileHeld => "押している間".into(),
-                MacroRun::Toggle => "トグル".into(),
+                MacroRun::Times(t) => format!("{t}×"),
+                MacroRun::WhileHeld => "While held".into(),
+                MacroRun::Toggle => "Toggle".into(),
             };
-            format!("マクロ: {n} ({r})")
+            format!("Macro: {n} ({r})")
         }
-        ButtonAction::PollingCycle => "ポーリング切替".into(),
-        ButtonAction::ProfileCycle => "プロファイル切替".into(),
-        ButtonAction::ScrollModeToggle => "上下ロール切替".into(),
-        ButtonAction::Unsupported { ty, .. } => format!("未対応の割当 (type {ty})"),
+        ButtonAction::PollingCycle => "Polling rate cycle".into(),
+        ButtonAction::ProfileCycle => "Profile cycle".into(),
+        ButtonAction::ScrollModeToggle => "Wheel direction toggle".into(),
+        ButtonAction::Unsupported { ty, .. } => format!("Unsupported assignment (type {ty})"),
     }
 }
 
@@ -103,10 +103,10 @@ impl Shell {
         };
         if ms.stages.is_empty() {
             return ui::card()
-                .child(ui::empty_state("crosshair", "DPI ステージがありません", ""))
+                .child(ui::empty_state("crosshair", "No DPI stages", ""))
                 .into_any_element();
         }
-        // 未選択なら現在使用中のステージを初期表示にする (選択したら追従を止める)。
+        // If nothing is selected, show the stage currently in use first (stop following once one is selected).
         if !self.dpi_sel_touch {
             self.dpi_sel = ms.active_stage;
         }
@@ -116,7 +116,7 @@ impl Shell {
         let xy = ms.stages.iter().any(|s| s.y.is_some());
         let (min, max, step) = (mc.dpi_min as f32, mc.dpi_max as f32, mc.dpi_step as f32);
 
-        // 入力欄は選択が変わったら値を入れ替える。
+        // When the selection changes, swap the value in the input fields.
         let key_x = format!("{}:{}", sel, st.x);
         if INPUT_SYNC.with(|c| c.borrow().as_deref() != Some(key_x.as_str())) {
             INPUT_SYNC.with(|c| *c.borrow_mut() = Some(key_x));
@@ -128,7 +128,7 @@ impl Shell {
         let in_x = self.input("dpi_exact", "", "DPI", window, cx);
         let in_y = self.input("dpi_exact_y", "", "Y", window, cx);
 
-        // ---- 上段: 大きな数字
+        // ---- Top: big number
         let shown = motion::spring_with(&format!("dpi-num:{sel}"), st.x as f32, 18.);
         let color = theme::rgb_of(st.color);
         let hero = div()
@@ -141,7 +141,7 @@ impl Shell {
                     .flex()
                     .flex_col()
                     .gap(px(4.))
-                    .child(ui::faint(format!("ステージ {} を編集中", sel + 1)))
+                    .child(ui::faint(format!("Editing stage {}", sel + 1)))
                     .child(
                         div()
                             .flex()
@@ -173,12 +173,12 @@ impl Shell {
                     .items_center()
                     .gap(px(8.))
                     .when(ms.active_stage == sel, |d| {
-                        d.child(ui::chip("使用中", p.ok))
+                        d.child(ui::chip("In use", p.ok))
                     })
                     .when(ms.active_stage != sel, |d| {
                         d.child(ui::button(
                             "use-stage",
-                            "このステージを使う",
+                            "Use this stage",
                             Some("check"),
                             Btn::Glass,
                             cx,
@@ -189,7 +189,7 @@ impl Shell {
                     }),
             );
 
-        // ---- ステージ一覧 (縦棒 + 値)
+        // ---- Stage list (vertical bars + values)
         let maxv = ms
             .stages
             .iter()
@@ -262,7 +262,7 @@ impl Shell {
                     .on_click(cx.listener(move |this, e: &ClickEvent, _, cx| {
                         this.dpi_sel = i;
                         this.dpi_sel_touch = true;
-                        // ダブルクリックでそのステージを使用。
+                        // Double-click to use that stage.
                         if let ClickEvent::Mouse(m) = e {
                             if m.down.click_count >= 2 {
                                 this.apply(Change::ActiveStage(i), cx);
@@ -284,7 +284,7 @@ impl Shell {
             .when(can_add, |d| {
                 d.child(ui::button(
                     "stage-add",
-                    "追加",
+                    "Add",
                     Some("plus"),
                     Btn::Glass,
                     cx,
@@ -313,7 +313,7 @@ impl Shell {
             .when(can_del, |d| {
                 d.child(ui::button(
                     "stage-del",
-                    "削除",
+                    "Delete",
                     Some("trash"),
                     Btn::Ghost,
                     cx,
@@ -335,7 +335,7 @@ impl Shell {
                 ))
             });
 
-        // ---- 編集
+        // ---- Editing
         let stages_x = ms.stages.clone();
         let active = ms.active_stage;
         let slider_x = ui::slider_curve(
@@ -399,7 +399,7 @@ impl Shell {
         }
 
         let mut edit = ui::body().pt(px(4.)).child(ui::row_first(
-            if xy { "X 軸 DPI" } else { "DPI" },
+            if xy { "X-axis DPI" } else { "DPI" },
             None,
             div()
                 .flex()
@@ -412,7 +412,7 @@ impl Shell {
         if xy {
             let stages_y = ms.stages.clone();
             edit = edit.child(ui::row(
-                "Y 軸 DPI",
+                "Y-axis DPI",
                 None,
                 div()
                     .flex()
@@ -438,12 +438,12 @@ impl Shell {
                     .child(div().w(px(96.)).child(Input::new(&in_y))),
             ));
         }
-        edit = edit.child(ui::row("プリセット", None, presets));
+        edit = edit.child(ui::row("Presets", None, presets));
         if mc.xy_split {
             let stages_t = ms.stages.clone();
             edit = edit.child(ui::row(
-                "X / Y を個別に設定",
-                Some("縦と横で感度を変えます"),
+                "Set X / Y separately",
+                Some("Use different sensitivity for vertical and horizontal"),
                 ui::toggle("xy-split", xy, cx, move |this, on, cx| {
                     let s: Vec<DpiStage> = stages_t
                         .iter()
@@ -460,8 +460,8 @@ impl Shell {
             let stages_c = ms.stages.clone();
             let cur = st.color;
             edit = edit.child(ui::row(
-                "インジケーターの色",
-                Some("このステージのとき LED が光る色"),
+                "Indicator color",
+                Some("LED color shown while this stage is active"),
                 div()
                     .id("stage-color")
                     .cursor_pointer()
@@ -470,7 +470,7 @@ impl Shell {
                         let stages_c = stages_c.clone();
                         overlay::pick_color(
                             this,
-                            "インジケーターの色",
+                            "Indicator color",
                             cur,
                             w,
                             cx,
@@ -486,7 +486,7 @@ impl Shell {
         }
 
         let stage_card = ui::card_titled(
-            "DPI ステージ",
+            "DPI stages",
             "crosshair",
             Some(stage_tools.into_any_element()),
         )
@@ -497,11 +497,11 @@ impl Shell {
                 .child(hero)
                 .child(bars)
                 .child(ui::faint(
-                    "クリックで編集 · ダブルクリックでそのステージに切り替え",
+                    "Click to edit · double-click to switch to that stage",
                 )),
         );
         let edit_card = ui::card_titled(
-            &format!("ステージ {} の設定", sel + 1),
+            &format!("Stage {} settings", sel + 1),
             "sliders-horizontal",
             None,
         )
@@ -515,7 +515,7 @@ impl Shell {
             .into_any_element()
     }
 
-    // ================================================================== ボタン
+    // ================================================================== Buttons
 
     pub fn page_buttons(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let p = theme::pal();
@@ -524,7 +524,7 @@ impl Shell {
         };
         let hover_slot = (0..mc.buttons.len()).find(|i| motion::hovered(&format!("btnrow:{i}")));
 
-        // マウスの図。
+        // Mouse figure.
         let mark = |n: usize, x: f32, y: f32, hot: bool| {
             div()
                 .absolute()
@@ -559,7 +559,7 @@ impl Shell {
             .w(px(220.))
             .h(px(300.))
             .child(
-                // 胴体
+                // Body
                 div()
                     .absolute()
                     .left(px(40.))
@@ -586,7 +586,7 @@ impl Shell {
                     .bg(p.hair),
             )
             .child(
-                // ホイール
+                // Wheel
                 div()
                     .absolute()
                     .left(px(103.))
@@ -708,16 +708,16 @@ impl Shell {
         let n = mc.buttons.len();
         let reset = ui::button(
             "btn-reset",
-            "既定に戻す",
+            "Reset to default",
             Some("rotate-ccw"),
             Btn::Ghost,
             cx,
             move |this, _, cx| {
                 let d = defaults.clone();
                 this.confirm(
-                    "ボタン割り当てを既定に戻す",
-                    "すべてのボタンを工場出荷時の割り当てに戻します。",
-                    "戻す",
+                    "Reset button assignments to default",
+                    "Restores all buttons to their factory assignments.",
+                    "Reset",
                     false,
                     std::rc::Rc::new(move |this, _, cx| {
                         for (i, a) in d.iter().enumerate().take(n) {
@@ -749,12 +749,12 @@ impl Shell {
                         .items_center()
                         .gap(px(8.))
                         .child(figure)
-                        .child(ui::faint("上から見た図 · 番号は右の一覧に対応")),
+                        .child(ui::faint("Top view · numbers match the list on the right")),
                 ),
             )
             .child(
                 ui::card_titled(
-                    "ボタン割り当て",
+                    "Button assignment",
                     "mouse-pointer-click",
                     Some(reset.into_any_element()),
                 )

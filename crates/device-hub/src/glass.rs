@@ -1,14 +1,14 @@
-//! Liquid Glass の面。
+//! Liquid Glass surfaces.
 //!
-//! vendor/gpui-pre に足した GPU backdrop-filter (`Window::paint_backdrop`) で、
-//! **面の後ろに実際に描かれたもの** (壁紙・カード・文字) を毎フレーム GPU でぼかし・
-//! 屈折させる (CSS の `backdrop-filter` + 縁のレンズ)。参照実装
-//! `参照実装` と同じ描画順:
+//! With the GPU backdrop-filter added to vendor/gpui-pre (`Window::paint_backdrop`),
+//! **what is actually drawn behind the surface** (wallpaper, cards, text) is blurred and
+//! refracted on the GPU every frame (CSS `backdrop-filter` + edge lens), in the same drawing order as the reference
+//! implementation:
 //!
-//!   backdrop (ぼかし/屈折) → 面の塗り (上→下の勾配) → 上端の光 → 細い縁 → 下端の陰
+//!   backdrop (blur/refraction) → surface fill (top→bottom gradient) → top-edge glow → thin rim → bottom-edge shadow
 //!
-//! 使い方: 親 div を `.relative()` にして、最初の子に `glass::surface(Kind, r)` を置く。
-//! ガラスを切ると (設定 / `DEVHUB_FAST=1`) 不透明な面にフォールバックする。
+//! Usage: make the parent div `.relative()` and put `glass::surface(Kind, r)` as its first child.
+//! Turning glass off (setting / `DEVHUB_FAST=1`) falls back to an opaque surface.
 
 use crate::motion;
 use crate::theme::{self, pal};
@@ -16,22 +16,22 @@ use gpui_kit::*;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Kind {
-    /// 内容を載せるカード。強めの曇り + 縁だけ薄く屈折。
+    /// Card that holds content. Strong frosting; only the edge is refracted lightly.
     Panel,
-    /// 壁紙の上に直接浮く操作部 (タブバー・サイドバー・ツールバー)。鮮明なレンズ。
+    /// Controls floating directly over the wallpaper (tab bar, sidebar, toolbar). Crisp lens.
     Clear,
-    /// カードの上に載る操作部 (ボタン・入力欄)。屈折なし、軽い曇り。
+    /// Controls sitting on a card (buttons, inputs). No refraction, light frosting.
     Frost,
-    /// ポップアップ・ダイアログ。最も強い曇り。
+    /// Popups and dialogs. The strongest frosting.
     Sheet,
 }
 
-/// ガラスの面 (親いっぱいに広がる絶対配置の canvas)。
+/// Glass surface (an absolutely positioned canvas filling its parent).
 pub fn surface(kind: Kind, radius: f32) -> impl IntoElement {
     surface_keyed(kind, radius, None)
 }
 
-/// ホバーで照り返すガラス (`key` は motion のばねのキー)。
+/// Glass that reflects light on hover (`key` is the motion spring key).
 pub fn surface_hover(kind: Kind, radius: f32, key: impl Into<String>) -> impl IntoElement {
     surface_keyed(kind, radius, Some(key.into()))
 }
@@ -57,7 +57,7 @@ fn paint(kind: Kind, radius: f32, key: Option<&str>, bounds: Bounds<Pixels>, win
     let corners = Corners::all(px(r));
     let glass = theme::glass_on();
 
-    // ホバーの照り返し (ばね)。
+    // Hover reflection (spring).
     let energy = key
         .map(|k| {
             let m = window.mouse_position();
@@ -130,7 +130,7 @@ fn paint(kind: Kind, radius: f32, key: Option<&str>, bounds: Bounds<Pixels>, win
         window.paint_backdrop(bounds, corners, filter);
     }
 
-    // 面の塗り。
+    // Surface fill.
     let (top, bot) = match kind {
         Kind::Panel => (p.glass_top, p.glass_bot),
         Kind::Sheet => (
@@ -149,7 +149,7 @@ fn paint(kind: Kind, radius: f32, key: Option<&str>, bounds: Bounds<Pixels>, win
     let (top, bot) = if glass {
         (top, bot)
     } else {
-        // 不透明フォールバック。
+        // Opaque fallback.
         let base = match kind {
             Kind::Frost => theme::mix(p.solid, p.fg, 0.06 + energy * 0.04),
             _ => theme::mix(p.solid, p.fg, if p.light { 0.0 } else { 0.03 }),
@@ -165,7 +165,7 @@ fn paint(kind: Kind, radius: f32, key: Option<&str>, bounds: Bounds<Pixels>, win
         border_style: BorderStyle::default(),
     });
 
-    // 上端の光 (角丸の弧を避けて直線部だけ)。
+    // Top-edge glow (only the straight part, avoiding the rounded-corner arcs).
     if glass && h >= 14. {
         let inset = (r * 0.8).min(w / 3.);
         let lw = (w - inset * 2.).max(0.);
@@ -189,7 +189,7 @@ fn paint(kind: Kind, radius: f32, key: Option<&str>, bounds: Bounds<Pixels>, win
     }
 }
 
-/// 縁の光沢リム (rim width, whiteness, key light, fill light)。
+/// Glossy rim on the edge (rim width, whiteness, key light, fill light).
 fn rim(light: bool, small: f32) -> [f32; 4] {
     let w = if small <= 72. { 1.4 } else { 2.2 };
     if light {
@@ -199,7 +199,7 @@ fn rim(light: bool, small: f32) -> [f32; 4] {
     }
 }
 
-/// 丸いレンズ (トグルのつまみ・スライダーのつまみ)。押している間だけ泡のように膨らむ。
+/// Round lens (toggle knob, slider knob). Swells like a bubble only while pressed.
 pub fn bubble(bounds: Bounds<Pixels>, r: f32, window: &mut Window) {
     if !theme::glass_on() {
         return;

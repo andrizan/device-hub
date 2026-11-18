@@ -1,6 +1,6 @@
-//! ダイナミックエフェクト動作中に [5,3] readback の全セル生データをダンプする。
-//! 公式 HUB はこの readback を全セル描画してライブプレビューにしている
-//! (非カスタムセルにもライブ色が乗るか実機確認)。
+//! Dumps the raw data of all cells from the [5,3] readback while a dynamic effect is running.
+//! The official HUB draws all cells from this readback as a live preview
+//! (checking on the real device whether live colors also appear on non-custom cells).
 use hidapi::HidApi;
 use std::time::{Duration, Instant};
 
@@ -58,13 +58,13 @@ fn main() {
     let dev = api.open_path(&di.expect("su66 not found")).unwrap();
     dev.set_blocking_mode(false).unwrap();
 
-    // 現在のベース状態を読む
+    // Read the current base state
     let r = cmd(&dev, &[5, 1, 0, 0]);
     println!(
         "base: open={} mode={} bri={} spd={} dir={} sel={}",
         r[4], r[5], r[6], r[7], r[8], r[9]
     );
-    // mode1 + sel0 (ファーム虹) をセット
+    // Set mode1 + sel0 (firmware rainbow)
     let w = cmd(&dev, &[5, 2, 0, 0, 3, 1, r[6], r[7], r[8], 0]);
     println!("write mode1 sel0: {:02x}", w[0]);
     std::thread::sleep(Duration::from_secs(1));

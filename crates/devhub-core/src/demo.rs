@@ -1,9 +1,9 @@
-//! デモ用バックエンド — 実機なしで UI のすべての画面を動かす。
+//! Demo backend — drives every screen of the UI without real hardware.
 //!
-//! **ドライバ実装者への見本も兼ねる**: `mouse_caps` / `keyboard_caps` は
-//! mouse.fit (G-Wolves HTS Plus Pro) と hub.xsyd.top (SU66 Max) の Web 版にある
-//! 機能をそのまま宣言している。実ドライバはこれと同じ形の caps を返せばよい
-//! (値の範囲・選択肢は実機/JS バンドルで確認して差し替える)。
+//! **Also a sample for driver implementers**: `mouse_caps` / `keyboard_caps` declare
+//! the features of the web versions of mouse.fit (G-Wolves HTS Plus Pro) and hub.xsyd.top (SU66 Max)
+//! as they are. A real driver only needs to return caps of the same shape
+//! (confirm value ranges and options on the real device / JS bundle and substitute them).
 
 use crate::backend::*;
 use crate::keys;
@@ -75,7 +75,7 @@ impl Default for DemoHub {
     }
 }
 
-/// watch で受け取った通知先 (デモは 1 プロセス 1 ハブなので static で足りる)。
+/// Destination of notifications received via watch (the demo has one hub per process, so a static is enough).
 type Sink = Box<dyn Fn(HubEvent) + Send + Sync>;
 static SINK: Mutex<Option<Sink>> = Mutex::new(None);
 
@@ -98,7 +98,7 @@ impl HubBackend for DemoHub {
 
     fn driver(&self, id: &DeviceId) -> HubResult<Arc<dyn DeviceDriver>> {
         if *id == self.unsupported.id {
-            return Err(HubError::NotImplemented("ATK F1 Ultimate のプロトコル"));
+            return Err(HubError::NotImplemented("ATK F1 Ultimate protocol"));
         }
         self.drivers
             .iter()
@@ -112,16 +112,16 @@ impl HubBackend for DemoHub {
     }
 }
 
-// ====================================================================== ドライバ
+// ====================================================================== Driver
 
 pub struct DemoDriver {
     info: DeviceInfo,
     caps: Capabilities,
     state: Mutex<DeviceState>,
-    /// 構成 (オンボードプロファイル) ごとの退避状態 — 実機と同じく
-    /// 構成を切り替えると設定の中身もまるごと入れ替わる。
+    /// Saved state per profile (onboard profile) — as on a real device,
+    /// switching the profile swaps out the whole contents of the settings.
     saved: Mutex<std::collections::BTreeMap<u8, DeviceState>>,
-    /// 一度も触っていない構成を開いたときの初期値。
+    /// Initial value when a profile that has never been touched is opened.
     factory: DeviceState,
     born: Instant,
 }
@@ -198,8 +198,8 @@ impl DemoDriver {
         }
     }
 
-    /// peq.szwalkplay.com (WalkPlay TP55) 相当の USB DAC。
-    /// LAMZU MAYA X V2 (8K レシーバー経由) — 公式 Aurora と同じ caps (`crate::lamzu`)。
+    /// A USB DAC equivalent to peq.szwalkplay.com (WalkPlay TP55).
+    /// LAMZU MAYA X V2 (via the 8K receiver) — the same caps as the official Aurora (`crate::lamzu`).
     fn lamzu() -> Self {
         let model = &crate::lamzu::MODELS[0];
         let caps = crate::lamzu::caps(model, Transport::Wireless24G, 4);
@@ -279,7 +279,7 @@ impl DeviceDriver for DemoDriver {
     }
 
     fn apply(&self, change: &Change) -> HubResult<()> {
-        // 実機の HID 往復っぽい遅延。
+        // A delay that feels like a real-device HID round trip.
         std::thread::sleep(std::time::Duration::from_millis(12));
         let mut s = self.state.lock().unwrap_or_else(|p| p.into_inner());
         match change.clone() {
@@ -291,8 +291,8 @@ impl DeviceDriver for DemoDriver {
             }
             Change::Profile(p) => {
                 if p != s.profile.active {
-                    // 実機と同じく構成ごとに設定の中身が入れ替わる — 現在の構成を
-                    // 退避してから切替先を読み出す (未訪問の構成は工場状態)。
+                    // As on a real device, the contents of the settings swap per profile — save the current
+                    // profile, then read out the destination (a profile not yet visited is in the factory state).
                     let mut saved = self.saved.lock().unwrap_or_else(|e| e.into_inner());
                     saved.insert(s.profile.active, s.clone());
                     let mut next = saved
@@ -430,17 +430,17 @@ impl DeviceDriver for DemoDriver {
                 };
                 *self.state.lock().unwrap_or_else(|p| p.into_inner()) = fresh;
                 return Ok(ActionOutcome {
-                    message: Some("初期設定に戻しました (デモ)".into()),
+                    message: Some("Reset to defaults (demo)".into()),
                     reload: true,
                 });
             }
-            "pair" => "ペアリングモードに入りました (デモ)".to_string(),
+            "pair" => "Entered pairing mode (demo)".to_string(),
             "calibrate" => {
-                "キャリブレーションを開始しました。全キーを底まで押してください (デモ)".to_string()
+                "Calibration started. Press every key all the way down (demo)".to_string()
             }
-            "calibrate_finish" => "キャリブレーションを保存しました (デモ)".to_string(),
+            "calibrate_finish" => "Calibration saved (demo)".to_string(),
             "eq_def" => {
-                // walkplay と同じ DEF プリセット 8 バンド分。
+                // 8 bands of the same DEF preset as walkplay.
                 const DEF_FREQS: [u16; 8] = [50, 200, 500, 1000, 2500, 5000, 10000, 15000];
                 let mut st = self.state.lock().unwrap_or_else(|p| p.into_inner());
                 if let Some(peq) = st.peq.as_mut() {
@@ -456,7 +456,7 @@ impl DeviceDriver for DemoDriver {
                     }
                 }
                 return Ok(ActionOutcome {
-                    message: Some("DEF プリセットを適用しました (デモ)".into()),
+                    message: Some("Applied the DEF preset (demo)".into()),
                     reload: true,
                 });
             }
@@ -464,7 +464,7 @@ impl DeviceDriver for DemoDriver {
                 for i in 0..=20 {
                     emit(HubEvent::Progress {
                         id: self.info.id.clone(),
-                        label: "ファームウェア書き込み (デモ)".into(),
+                        label: "Writing firmware (demo)".into(),
                         fraction: Some(i as f32 / 20.),
                         done: false,
                     });
@@ -477,7 +477,7 @@ impl DeviceDriver for DemoDriver {
                     done: true,
                 });
                 format!(
-                    "ファームウェア更新はデモでは行いません: {}",
+                    "Firmware update is not performed in the demo: {}",
                     file.map(|p| p.display().to_string()).unwrap_or_default()
                 )
             }
@@ -493,7 +493,7 @@ impl DeviceDriver for DemoDriver {
         self.info.battery.ok_or(HubError::Unsupported("battery"))
     }
 
-    /// DirectDrive 対応アリの caps を出すので no-op で成功を返す (送信先が無いだけ)。
+    /// Returns success as a no-op, since the caps it exposes support DirectDrive (there is just no destination to send to).
     fn direct_drive(&self, _area: u8, _cells: &BTreeMap<usize, Rgb>) -> HubResult<()> {
         Ok(())
     }
@@ -510,7 +510,7 @@ impl DeviceDriver for DemoDriver {
             .map(|k| k.layout.len())
             .unwrap_or(0);
         let t = self.born.elapsed().as_secs_f32();
-        // WASD がリズムよく沈む擬似データ。
+        // Pseudo data in which WASD sink rhythmically.
         Ok((0..n)
             .map(|i| {
                 let phase = match i {
@@ -579,7 +579,7 @@ impl DeviceDriver for DemoDriver {
     }
 }
 
-// ====================================================================== マウス (mouse.fit 相当)
+// ====================================================================== Mouse (equivalent to mouse.fit)
 
 fn opts(v: &[(i64, &str)]) -> Vec<ChoiceOpt> {
     v.iter().map(|(a, b)| ChoiceOpt::new(*a, *b)).collect()
@@ -591,9 +591,9 @@ fn macro_caps_mouse() -> MacroCaps {
         max_events: 70,
         max_delay_ms: 65_535,
         modes: opts(&[
-            (0, "指定回数実行"),
-            (1, "離すまで繰り返す"),
-            (2, "もう一度押すまで繰り返す"),
+            (0, "Run specified count"),
+            (1, "Repeat until released"),
+            (2, "Repeat until pressed again"),
         ]),
         repeat_modes: vec![0],
         names: true,
@@ -607,7 +607,7 @@ pub fn mouse_caps(wireless: bool, magnetic: bool) -> Capabilities {
     let mut settings = vec![SettingSpec::choice(
         "polling_wired",
         PERFORMANCE,
-        "ポーリングレート (有線)",
+        "Polling rate (wired)",
         opts(&[
             (125, "125"),
             (250, "250"),
@@ -618,13 +618,13 @@ pub fn mouse_caps(wireless: bool, magnetic: bool) -> Capabilities {
             (8000, "8K"),
         ]),
     )
-    .help("マウスがPCへ位置を報告する頻度 (Hz)")];
+    .help("How often the mouse reports its position to the PC (Hz)")];
     if wireless {
         settings.push(
             SettingSpec::choice(
                 "polling_wireless",
                 PERFORMANCE,
-                "ポーリングレート (無線)",
+                "Polling rate (wireless)",
                 opts(&[
                     (125, "125"),
                     (250, "250"),
@@ -635,20 +635,20 @@ pub fn mouse_caps(wireless: bool, magnetic: bool) -> Capabilities {
                     (8000, "8K"),
                 ]),
             )
-            .help("使用中のレシーバー (1K / 4K / 8K) で選べる値が変わります"),
+            .help("The selectable values change with the receiver in use (1K / 4K / 8K)"),
         );
     }
     settings.extend([
-        SettingSpec::toggle("hyper_mode", PERFORMANCE, "高速モード")
-            .help("性能を優先します。消費電力が増えます (2K/4K/8K と併用可)"),
-        SettingSpec::toggle("competitive", PERFORMANCE, "競技モード")
-            .help("センサーを常時最高性能で動かします"),
-        SettingSpec::toggle("long_distance", PERFORMANCE, "長距離モード")
-            .help("レシーバーとの距離が離れていても安定させます"),
+        SettingSpec::toggle("hyper_mode", PERFORMANCE, "High-speed mode")
+            .help("Prioritizes performance. Uses more power (can be combined with 2K/4K/8K)"),
+        SettingSpec::toggle("competitive", PERFORMANCE, "Competitive mode")
+            .help("Runs the sensor at maximum performance all the time"),
+        SettingSpec::toggle("long_distance", PERFORMANCE, "Long-distance mode")
+            .help("Keeps the connection stable even when far from the receiver"),
         SettingSpec::choice(
             "lod",
             SENSOR,
-            "リフトオフ距離",
+            "Lift-off distance",
             opts(&[
                 (7, "0.7mm"),
                 (9, "0.9mm"),
@@ -657,33 +657,33 @@ pub fn mouse_caps(wireless: bool, magnetic: bool) -> Capabilities {
                 (16, "1.6mm"),
             ]),
         )
-        .help("マウスを持ち上げたとき反応しなくなる高さ"),
-        SettingSpec::toggle("motion_sync", SENSOR, "モーション同期").help(
-            "ポインタとマウスの動きを同期させ、軌跡を滑らかにします (わずかに遅延が増えます)",
+        .help("The height at which the mouse stops responding when lifted"),
+        SettingSpec::toggle("motion_sync", SENSOR, "Motion sync").help(
+            "Syncs the pointer with mouse movement for smoother trajectories (adds a slight delay)",
         ),
-        SettingSpec::toggle("angle_snap", SENSOR, "直線補正").help("移動のブレを直線に補正します"),
-        SettingSpec::toggle("ripple", SENSOR, "リップル制御").help("高DPI時の細かい揺れを抑えます"),
-        SettingSpec::slider("sensor_angle", SENSOR, "センサー角度", -30., 30., 1., "°")
-            .help("持ち方に合わせて座標軸を回転させます"),
+        SettingSpec::toggle("angle_snap", SENSOR, "Angle snapping").help("Corrects wobble in movement into straight lines"),
+        SettingSpec::toggle("ripple", SENSOR, "Ripple control").help("Suppresses fine jitter at high DPI"),
+        SettingSpec::slider("sensor_angle", SENSOR, "Sensor angle", -30., 30., 1., "°")
+            .help("Rotates the coordinate axes to match your grip"),
         SettingSpec::toggle("sensor_fps_20k", SENSOR, "20K FPS")
-            .help("センサーのフレームレートを 20000 に固定します"),
-        SettingSpec::toggle("sensor_center", SENSOR, "センサー仮想中心")
-            .help("センサー位置を本体中央として扱います"),
+            .help("Fixes the sensor frame rate at 20000"),
+        SettingSpec::toggle("sensor_center", SENSOR, "Virtual sensor center")
+            .help("Treats the sensor position as the center of the body"),
         SettingSpec::slider(
             "debounce_press",
             CLICK,
-            "クリックデバウンス (押下)",
+            "Click debounce (press)",
             0.,
             50.,
             1.,
             "ms",
         )
-        .help("短くすると反応が速く、長くすると誤クリックを防ぎます")
-        .confirm("0ms にするとダブルクリックが発生する場合があります。続けますか?"),
+        .help("A shorter value responds faster; a longer one prevents accidental clicks")
+        .confirm("Setting 0ms may cause double clicks. Continue?"),
         SettingSpec::slider(
             "debounce_release",
             CLICK,
-            "クリックデバウンス (解放)",
+            "Click debounce (release)",
             0.,
             50.,
             1.,
@@ -692,26 +692,26 @@ pub fn mouse_caps(wireless: bool, magnetic: bool) -> Capabilities {
         SettingSpec::slider(
             "wheel_debounce",
             CLICK,
-            "ホイールデバウンス",
+            "Wheel debounce",
             0.,
             245.,
             5.,
             "ms",
         ),
         SettingSpec::toggle("spdt_left", CLICK, "Left SPDT")
-            .help("光学/機械スイッチの SPDT 方式でチャタリングを防ぎます"),
+            .help("Prevents chattering with the SPDT method of optical/mechanical switches"),
         SettingSpec::toggle("spdt_right", CLICK, "Right SPDT"),
-        SettingSpec::toggle("liftoff_debounce", CLICK, "ボタン誤操作防止")
-            .help("持ち上げた瞬間のクリックを無視します"),
-        SettingSpec::toggle("combine_key", CLICK, "組み合わせキー機能")
-            .help("本体のボタン同時押しで設定を変更します。オフにするとペアリング切替も無効"),
+        SettingSpec::toggle("liftoff_debounce", CLICK, "Accidental click prevention")
+            .help("Ignores the click at the moment the mouse is lifted"),
+        SettingSpec::toggle("combine_key", CLICK, "Key combination function")
+            .help("Changes settings by pressing buttons on the mouse together. Turning it off also disables pairing switching"),
     ]);
     if magnetic {
         settings.extend([
             SettingSpec::slider(
                 "mag_left_trigger",
                 MAGNETIC,
-                "Left トリガー位置",
+                "Left trigger position",
                 0.1,
                 1.0,
                 0.05,
@@ -720,14 +720,15 @@ pub fn mouse_caps(wireless: bool, magnetic: bool) -> Capabilities {
             SettingSpec::slider(
                 "mag_right_trigger",
                 MAGNETIC,
-                "Right トリガー位置",
+                "Right trigger position",
                 0.1,
                 1.0,
                 0.05,
                 "mm",
             ),
-            SettingSpec::toggle("mag_quick_trigger", MAGNETIC, "クイックトリガー")
-                .help("出荷時の校正値です。変更すると連打/取りこぼしの原因になることがあります"),
+            SettingSpec::toggle("mag_quick_trigger", MAGNETIC, "Quick trigger").help(
+                "The factory calibration value. Changing it may cause repeated or missed clicks",
+            ),
         ]);
     }
     if wireless {
@@ -735,58 +736,58 @@ pub fn mouse_caps(wireless: bool, magnetic: bool) -> Capabilities {
             SettingSpec::choice(
                 "sleep_min",
                 POWER,
-                "スリープまでの時間",
+                "Time until sleep",
                 opts(&[
-                    (1, "1分"),
-                    (2, "2分"),
-                    (3, "3分"),
-                    (5, "5分"),
-                    (10, "10分"),
-                    (15, "15分"),
-                    (30, "30分"),
+                    (1, "1 min"),
+                    (2, "2 min"),
+                    (3, "3 min"),
+                    (5, "5 min"),
+                    (10, "10 min"),
+                    (15, "15 min"),
+                    (30, "30 min"),
                 ]),
             )
-            .help("この時間動かさないとスリープします"),
+            .help("Goes to sleep when left idle for this long"),
         );
     }
     settings.push(
-        SettingSpec::toggle("dpi_indicator", POWER, "DPI インジケーター")
-            .help("DPI 切替時に LED で知らせます"),
+        SettingSpec::toggle("dpi_indicator", POWER, "DPI indicator")
+            .help("Signals DPI changes with the LED"),
     );
     settings.push(
         SettingSpec::choice(
             "dpi_led_effect",
             POWER,
-            "インジケーター表示",
-            opts(&[(0, "常時点灯"), (1, "呼吸"), (2, "切替時のみ")]),
+            "Indicator display",
+            opts(&[(0, "Always on"), (1, "Breathing"), (2, "On switch only")]),
         )
         .when("dpi_indicator", Bool(true)),
     );
 
     let mut actions = vec![
-        ActionSpec::new("reset_profile", section::SYSTEM, "設定をリセット")
-            .help("このプロファイルの設定を初期値に戻します")
-            .danger("現在の設定を初期値に戻します。よろしいですか?"),
+        ActionSpec::new("reset_profile", section::SYSTEM, "Reset settings")
+            .help("Restores this profile's settings to their initial values")
+            .danger("Restores the current settings to their initial values. Are you sure?"),
     ];
     if wireless {
         actions.push(
-            ActionSpec::new("pair", section::CONNECTION, "レシーバーとペアリング")
-                .help("レシーバーを挿し、マウス底面のスイッチを 2.4G にしてから実行")
-                .confirm("ペアリングモードに入ります。"),
+            ActionSpec::new("pair", section::CONNECTION, "Pair with receiver")
+                .help("Insert the receiver, set the switch on the bottom of the mouse to 2.4G, then run")
+                .confirm("Entering pairing mode."),
         );
     }
     if magnetic {
         actions.push(
-            ActionSpec::new("calibrate", section::MAGNETIC, "L/R ボタンの校正")
-                .help("有線で接続し、L/R ボタンを底まで押して 2 秒保持 → 離す")
-                .confirm("校正を開始します。L/R ボタンを触らずに待ってください。"),
+            ActionSpec::new("calibrate", section::MAGNETIC, "Calibrate L/R buttons")
+                .help("Connect by wire, press the L/R buttons all the way down and hold for 2 seconds → release")
+                .confirm("Calibration will start. Wait without touching the L/R buttons."),
         );
     }
     actions.push(
-        ActionSpec::new("firmware", section::SYSTEM, "ファームウェア更新")
-            .help(".bin を選んで書き込みます")
+        ActionSpec::new("firmware", section::SYSTEM, "Firmware update")
+            .help("Choose a .bin file and write it")
             .file(&["bin"])
-            .danger("書き込み中はケーブルを抜かないでください。続けますか?"),
+            .danger("Do not unplug the cable while writing. Continue?"),
     );
 
     Capabilities {
@@ -805,9 +806,9 @@ pub fn mouse_caps(wireless: bool, magnetic: bool) -> Capabilities {
             buttons: [
                 "Left",
                 "Right",
-                "ホイールクリック",
-                "サイド (戻る)",
-                "サイド (進む)",
+                "Wheel click",
+                "Side (Back)",
+                "Side (Forward)",
             ]
             .iter()
             .map(|n| ButtonSlot { name: (*n).into() })
@@ -892,7 +893,7 @@ fn mouse_state(caps: &Capabilities) -> DeviceState {
                     vec![None; m.macros.as_ref().map(|c| c.slots as usize).unwrap_or(0)];
                 if let Some(first) = v.first_mut() {
                     *first = Some(MacroDef {
-                        name: "ジャンプ投げ".into(),
+                        name: "Jump throw".into(),
                         events: vec![
                             MacroEvent {
                                 input: MacroInput::Key(0x2C),
@@ -924,10 +925,10 @@ fn mouse_state(caps: &Capabilities) -> DeviceState {
     }
 }
 
-// ====================================================================== キーボード (hub.xsyd.top 相当)
+// ====================================================================== Keyboard (equivalent to hub.xsyd.top)
 
-/// xsyd のキーコード空間 (keyTip_* の番号) に合わせた候補表。
-/// 基本キーは HID usage をそのまま使う (xsyd も下位 16bit が usage)。
+/// A candidate table matched to the xsyd key-code space (the numbers of keyTip_*).
+/// Basic keys use the HID usage as is (xsyd also has the usage in the lower 16 bits).
 pub fn xsyd_catalog() -> Vec<KeyGroup> {
     let g = |name: &str, v: &[(u32, &str, &str)]| KeyGroup {
         name: name.into(),
@@ -943,74 +944,74 @@ pub fn xsyd_catalog() -> Vec<KeyGroup> {
     vec![
         keys::basic_group(),
         g(
-            "マウス",
+            "Mouse",
             &[
-                (16640, "マウス左", "M左"),
-                (16896, "マウス右", "M右"),
-                (17152, "マウス中", "M中"),
-                (17408, "マウス進む", "M進"),
-                (17664, "マウス戻る", "M戻"),
-                (18945, "ホイール上", "W↑"),
-                (19201, "ホイール下", "W↓"),
-                (17920, "カーソル左", "M←"),
-                (18176, "カーソル右", "M→"),
-                (18432, "カーソル上", "M↑"),
-                (18688, "カーソル下", "M↓"),
+                (16640, "Mouse left", "ML"),
+                (16896, "Mouse right", "MR"),
+                (17152, "Mouse middle", "MM"),
+                (17408, "Mouse forward", "MF"),
+                (17664, "Mouse back", "MB"),
+                (18945, "Wheel up", "W↑"),
+                (19201, "Wheel down", "W↓"),
+                (17920, "Cursor left", "M←"),
+                (18176, "Cursor right", "M→"),
+                (18432, "Cursor up", "M↑"),
+                (18688, "Cursor down", "M↓"),
             ],
         ),
         g(
-            "メディア",
+            "Media",
             &[
-                (0x20CD, "再生/一時停止", "⏯"),
-                (8373, "次の曲", "⏭"),
-                (8374, "前の曲", "⏮"),
-                (0x20E9, "音量 +", "🔊"),
-                (0x20EA, "音量 −", "🔉"),
-                (8418, "ミュート", "🔇"),
-                (8303, "画面 明るさ +", "☀+"),
-                (8304, "画面 明るさ −", "☀−"),
-                (8586, "メール", "Mail"),
-                (8596, "マイコンピューター", "PC"),
-                (8739, "ブラウザ", "Web"),
+                (0x20CD, "Play/Pause", "⏯"),
+                (8373, "Next track", "⏭"),
+                (8374, "Previous track", "⏮"),
+                (0x20E9, "Volume +", "🔊"),
+                (0x20EA, "Volume −", "🔉"),
+                (8418, "Mute", "🔇"),
+                (8303, "Screen brightness +", "☀+"),
+                (8304, "Screen brightness −", "☀−"),
+                (8586, "Mail", "Mail"),
+                (8596, "My Computer", "PC"),
+                (8739, "Browser", "Web"),
             ],
         ),
         g(
-            "ライティング",
+            "Lighting",
             &[
-                (62208, "ライティングモード切替", "L模"),
-                (62214, "前のライティングモード", "L前"),
-                (62209, "ライティング色切替", "L色"),
-                (62210, "明るさ +", "L+"),
-                (62211, "明るさ −", "L−"),
-                (62212, "速度 +", "S+"),
-                (62213, "速度 −", "S−"),
-                (62215, "ライト ON/OFF", "L⏻"),
-                (62216, "ライティング方向", "L⇄"),
-                (62224, "デコライト モード切替", "D模"),
-                (62231, "デコライト ON/OFF", "D⏻"),
+                (62208, "Switch lighting mode", "LM"),
+                (62214, "Previous lighting mode", "LP"),
+                (62209, "Switch lighting color", "LC"),
+                (62210, "Brightness +", "L+"),
+                (62211, "Brightness −", "L−"),
+                (62212, "Speed +", "S+"),
+                (62213, "Speed −", "S−"),
+                (62215, "Light ON/OFF", "L⏻"),
+                (62216, "Lighting direction", "L⇄"),
+                (62224, "Switch deco light mode", "DM"),
+                (62231, "Deco light ON/OFF", "D⏻"),
             ],
         ),
         g(
-            "レイヤー",
+            "Layers",
             &[
-                (61696, "メインレイヤーへ", "L0"),
-                (61697, "Fn1 レイヤーへ", "Fn1"),
-                (61698, "Fn2 レイヤーへ", "Fn2"),
-                (61699, "Fn3 レイヤーへ", "Fn3"),
+                (61696, "To main layer", "L0"),
+                (61697, "To Fn1 layer", "Fn1"),
+                (61698, "To Fn2 layer", "Fn2"),
+                (61699, "To Fn3 layer", "Fn3"),
             ],
         ),
         g(
-            "システム",
+            "System",
             &[
-                (61957, "構成 1 に切替", "P1"),
-                (61958, "構成 2 に切替", "P2"),
-                (61959, "構成 3 に切替", "P3"),
-                (61960, "構成 4 に切替", "P4"),
-                (61961, "Win キーロック", "WinL"),
-                (61953, "Windows 配列 (長押し)", "Win"),
-                (61954, "Mac 配列 (長押し)", "Mac"),
-                (61955, "磁軸キャリブレーション (長押し)", "Cal"),
-                (61952, "初期化 (長押し)", "Rst"),
+                (61957, "Switch to profile 1", "P1"),
+                (61958, "Switch to profile 2", "P2"),
+                (61959, "Switch to profile 3", "P3"),
+                (61960, "Switch to profile 4", "P4"),
+                (61961, "Win key lock", "WinL"),
+                (61953, "Windows layout (hold)", "Win"),
+                (61954, "Mac layout (hold)", "Mac"),
+                (61955, "Magnetic switch calibration (hold)", "Cal"),
+                (61952, "Reset (hold)", "Rst"),
             ],
         ),
     ]
@@ -1019,34 +1020,34 @@ pub fn xsyd_catalog() -> Vec<KeyGroup> {
 pub fn keyboard_caps() -> Capabilities {
     use section::*;
     let layout = registry::su66max_layout();
-    // xsyd.rs と同一 (実機カメラ検証済みの対応 — docs/PROTOCOL_NOTES.md)。
+    // Same as xsyd.rs (a mapping verified with a real-device camera — docs/PROTOCOL_NOTES.md).
     let effects = vec![
-        LightEffect::new(0, "固定色").color().still(),
-        LightEffect::new(1, "虹の横ながれ").color().dir(),
-        LightEffect::new(2, "ゆっくり変色").color(),
-        LightEffect::new(3, "すばやく変色").color(),
-        LightEffect::new(4, "虹の市松").color(),
-        LightEffect::new(5, "虹のめぐり").color(),
-        LightEffect::new(6, "虹の明滅").color(),
-        LightEffect::new(7, "ほのかな窓").color().dir(),
-        LightEffect::new(8, "ゆるやか変形").color(),
-        LightEffect::new(9, "色帯シフト").color().dir(),
-        LightEffect::new(10, "虹のうねり").color().dir(),
-        LightEffect::new(11, "斜めの光帯").color().dir(),
-        LightEffect::new(12, "コンフェッティ").color(),
-        LightEffect::new(13, "虹のモザイク").color(),
-        LightEffect::new(14, "光の雨").color().dir(),
-        LightEffect::new(15, "跳ねる光").color(),
-        LightEffect::new(16, "カスタム").per_key(),
-        LightEffect::new(17, "押下・まわり").color(),
-        LightEffect::new(18, "押下・行").color(),
-        LightEffect::new(19, "押下・広域").color(),
+        LightEffect::new(0, "Solid color").color().still(),
+        LightEffect::new(1, "Rainbow flow").color().dir(),
+        LightEffect::new(2, "Slow color change").color(),
+        LightEffect::new(3, "Fast color change").color(),
+        LightEffect::new(4, "Rainbow checker").color(),
+        LightEffect::new(5, "Rainbow cycle").color(),
+        LightEffect::new(6, "Rainbow pulse").color(),
+        LightEffect::new(7, "Soft window").color().dir(),
+        LightEffect::new(8, "Gentle morph").color(),
+        LightEffect::new(9, "Color band shift").color().dir(),
+        LightEffect::new(10, "Rainbow wave").color().dir(),
+        LightEffect::new(11, "Diagonal light band").color().dir(),
+        LightEffect::new(12, "Confetti").color(),
+        LightEffect::new(13, "Rainbow mosaic").color(),
+        LightEffect::new(14, "Light rain").color().dir(),
+        LightEffect::new(15, "Bouncing light").color(),
+        LightEffect::new(16, "Custom").per_key(),
+        LightEffect::new(17, "Press: around").color(),
+        LightEffect::new(18, "Press: row").color(),
+        LightEffect::new(19, "Press: wide").color(),
     ];
     let decor = vec![
-        LightEffect::new(0, "スタティック").color().still(),
-        LightEffect::new(1, "呼吸").color(),
-        LightEffect::new(2, "スペクトラム"),
-        LightEffect::new(3, "流れる").dir(),
+        LightEffect::new(0, "Static").color().still(),
+        LightEffect::new(1, "Breathing").color(),
+        LightEffect::new(2, "Spectrum"),
+        LightEffect::new(3, "Flow").dir(),
     ];
     let polling = opts(&[
         (8000, "8K"),
@@ -1059,12 +1060,12 @@ pub fn keyboard_caps() -> Capabilities {
     ]);
     Capabilities {
         settings: vec![
-            SettingSpec::choice("polling", PERFORMANCE, "ポーリングレート", polling)
-                .help("キー入力をPCへ報告する頻度 (Hz)"),
+            SettingSpec::choice("polling", PERFORMANCE, "Polling rate", polling)
+                .help("How often key input is reported to the PC (Hz)"),
             SettingSpec::choice(
                 "usb_mode",
                 PERFORMANCE,
-                "USB モード",
+                "USB mode",
                 opts(&[
                     (0, "USB 2.0"),
                     (1, "USB 3.0 · 8K"),
@@ -1072,56 +1073,57 @@ pub fn keyboard_caps() -> Capabilities {
                     (3, "USB 3.0 · 32K"),
                 ]),
             )
-            .help("3.0 モードは専用ドライバが必要です")
-            .confirm("USB モードを変更するとキーボードが再接続されます。続けますか?"),
+            .help("3.0 mode requires a dedicated driver")
+            .confirm("Changing the USB mode reconnects the keyboard. Continue?"),
             SettingSpec::choice(
                 "system_type",
                 KEYBOARD,
-                "OS 配列",
+                "OS layout",
                 opts(&[(0, "Windows"), (1, "macOS")]),
             ),
-            SettingSpec::toggle("win_lock", KEYBOARD, "Win キーロック")
-                .help("ゲーム中の Win キー誤爆を防ぎます"),
-            SettingSpec::toggle("shake_opt", KEYBOARD, "チャタリング防止最適化")
-                .help("無効にすると極端な設定でキーが意図せず反応する場合があります")
-                .confirm("無効にすると誤入力が起きる場合があります。続けますか?"),
-            SettingSpec::toggle("compat_mode", KEYBOARD, "互換モード")
-                .help("BIOS や一部の環境で認識されないときに使います"),
+            SettingSpec::toggle("win_lock", KEYBOARD, "Win key lock")
+                .help("Prevents accidental Win key presses during games"),
+            SettingSpec::toggle("shake_opt", KEYBOARD, "Anti-chatter optimization")
+                .help("Disabling it may make keys react unintentionally with extreme settings")
+                .confirm("Disabling it may cause mistyped input. Continue?"),
+            SettingSpec::toggle("compat_mode", KEYBOARD, "Compatibility mode").help(
+                "Use it when the keyboard is not recognized in the BIOS or some environments",
+            ),
             SettingSpec::choice(
                 "light_sleep",
                 LIGHTING,
-                "ライティング自動消灯",
+                "Lighting auto-off",
                 opts(&[
-                    (0, "しない"),
-                    (1, "1分"),
-                    (3, "3分"),
-                    (5, "5分"),
-                    (10, "10分"),
-                    (30, "30分"),
+                    (0, "Never"),
+                    (1, "1 min"),
+                    (3, "3 min"),
+                    (5, "5 min"),
+                    (10, "10 min"),
+                    (30, "30 min"),
                 ]),
             ),
-            SettingSpec::toggle("light_link", LIGHTING, "ライティング連動")
-                .help("本体とデコレーションライトを同じエフェクトにします"),
+            SettingSpec::toggle("light_link", LIGHTING, "Lighting link")
+                .help("Gives the main unit and the decoration light the same effect"),
         ],
         actions: vec![
-            ActionSpec::new("calibrate", section::KEYBOARD, "磁軸キャリブレーション")
-                .help("開始後、すべてのキーを 1 回ずつ底まで押してください"),
             ActionSpec::new(
-                "calibrate_finish",
+                "calibrate",
                 section::KEYBOARD,
-                "キャリブレーションを保存",
-            ),
-            ActionSpec::new("reset_perf", section::SYSTEM, "トリガー設定を初期化")
-                .danger("全キーのトリガー設定を初期値に戻します。"),
-            ActionSpec::new("reset_keymap", section::SYSTEM, "キー割り当てを初期化")
-                .danger("全レイヤーのキー割り当てを初期値に戻します。"),
-            ActionSpec::new("reset_lighting", section::SYSTEM, "ライティングを初期化")
-                .danger("ライティングを初期値に戻します。"),
-            ActionSpec::new("factory_reset", section::SYSTEM, "工場出荷状態に戻す")
-                .danger("すべての構成・マクロ・キャリブレーションが消去されます。よろしいですか?"),
-            ActionSpec::new("firmware", section::SYSTEM, "ファームウェア更新")
+                "Magnetic switch calibration",
+            )
+            .help("After starting, press every key all the way down once"),
+            ActionSpec::new("calibrate_finish", section::KEYBOARD, "Save calibration"),
+            ActionSpec::new("reset_perf", section::SYSTEM, "Reset trigger settings")
+                .danger("Restores the trigger settings of all keys to their initial values."),
+            ActionSpec::new("reset_keymap", section::SYSTEM, "Reset key mapping")
+                .danger("Restores the key assignments of all layers to their initial values."),
+            ActionSpec::new("reset_lighting", section::SYSTEM, "Reset lighting")
+                .danger("Restores lighting to its initial values."),
+            ActionSpec::new("factory_reset", section::SYSTEM, "Restore factory state")
+                .danger("All profiles, macros and calibration will be erased. Are you sure?"),
+            ActionSpec::new("firmware", section::SYSTEM, "Firmware update")
                 .file(&["bin"])
-                .danger("更新中は接続を切らないでください。続けますか?"),
+                .danger("Do not disconnect during the update. Continue?"),
         ],
         profiles: Some(ProfileCaps {
             count: 4,
@@ -1130,7 +1132,7 @@ pub fn keyboard_caps() -> Capabilities {
         mouse: None,
         keyboard: Some(KeyboardCaps {
             layout,
-            layers: vec!["メイン".into(), "Fn".into()],
+            layers: vec!["Main".into(), "Fn".into()],
             catalog: xsyd_catalog(),
             combos: true,
             perf: Some(PerfCaps {
@@ -1143,9 +1145,9 @@ pub fn keyboard_caps() -> Capabilities {
                 deadzones: true,
                 continuous_rt: true,
                 switch_types: vec![
-                    "既定 (磁軸 A)".into(),
-                    "磁軸 B (軽)".into(),
-                    "磁軸 C (リニア長)".into(),
+                    "Default (magnetic A)".into(),
+                    "Magnetic B (light)".into(),
+                    "Magnetic C (long linear)".into(),
                 ],
                 switch_ids: vec![],
                 per_key: true,
@@ -1165,10 +1167,10 @@ pub fn keyboard_caps() -> Capabilities {
                 max_events: 128,
                 max_delay_ms: 32_768,
                 modes: opts(&[
-                    (0, "クリックで指定回数実行"),
-                    (1, "押している間リピート (離すと即停止)"),
-                    (2, "押している間リピート (完了後に停止)"),
-                    (3, "クリックで開始 / もう一度で停止"),
+                    (0, "Click to run a set number of times"),
+                    (1, "Repeat while held (stops immediately on release)"),
+                    (2, "Repeat while held (stops after completing)"),
+                    (3, "Click to start / click again to stop"),
                 ]),
                 repeat_modes: vec![0],
                 names: false,
@@ -1178,24 +1180,24 @@ pub fn keyboard_caps() -> Capabilities {
         lighting: vec![
             LightArea {
                 id: 0,
-                name: "メインキーボード".into(),
+                name: "Main keyboard".into(),
                 effects,
                 brightness_max: 4,
                 speed_max: 4,
-                directions: vec!["正方向".into(), "逆方向".into()],
+                directions: vec!["Forward".into(), "Reverse".into()],
                 switchable: true,
-                zones: vec!["上部ライト".into(), "下部ライト".into()],
+                zones: vec!["Upper light".into(), "Lower light".into()],
                 per_key: true,
                 direct_drive: true,
                 live_readback: false,
             },
             LightArea {
                 id: 1,
-                name: "デコレーションライト".into(),
+                name: "Decoration light".into(),
                 effects: decor,
                 brightness_max: 4,
                 speed_max: 4,
-                directions: vec!["正方向".into(), "逆方向".into()],
+                directions: vec!["Forward".into(), "Reverse".into()],
                 switchable: true,
                 zones: vec![],
                 per_key: false,
@@ -1212,7 +1214,7 @@ pub fn keyboard_caps() -> Capabilities {
 fn keyboard_state(caps: &Capabilities) -> DeviceState {
     let k = caps.keyboard.as_ref().expect("keyboard caps");
     let n = k.layout.len();
-    // 刻印 → HID usage (既定キーマップ)。
+    // Legend → HID usage (default keymap).
     let label_usage = |label: &str| -> KeyAction {
         let special = match label {
             "Esc" => Some(0x29),
@@ -1241,7 +1243,7 @@ fn keyboard_state(caps: &Capabilities) -> DeviceState {
             .unwrap_or(KeyAction::None)
     };
     let main: Vec<KeyAction> = k.layout.iter().map(|l| label_usage(&l.label)).collect();
-    // Fn レイヤー: 数字段 → F1..F12、矢印 → Home/End/PgUp/PgDn、他は透過。
+    // Fn layer: number row → F1..F12, arrows → Home/End/PgUp/PgDn, the rest transparent.
     let fnl: Vec<KeyAction> = k
         .layout
         .iter()
@@ -1273,7 +1275,7 @@ fn keyboard_state(caps: &Capabilities) -> DeviceState {
         })
         .collect();
     let mut perf = vec![KeyPerf::default(); n];
-    // WASD は RT の見本。
+    // WASD is a sample of RT.
     for (i, l) in k.layout.iter().enumerate() {
         if matches!(l.label.as_str(), "W" | "A" | "S" | "D") {
             perf[i] = KeyPerf {
@@ -1352,8 +1354,8 @@ fn keyboard_state(caps: &Capabilities) -> DeviceState {
             active: 0,
             names: vec![
                 "VALORANT".into(),
-                "FPS 汎用".into(),
-                "タイピング".into(),
+                "FPS general".into(),
+                "Typing".into(),
                 String::new(),
             ],
         },
@@ -1391,7 +1393,7 @@ fn keyboard_state(caps: &Capabilities) -> DeviceState {
     }
 }
 
-// ====================================================================== USB DAC (peq.szwalkplay.com 相当)
+// ====================================================================== USB DAC (equivalent to peq.szwalkplay.com)
 
 fn dac_caps() -> Capabilities {
     Capabilities {
@@ -1399,7 +1401,7 @@ fn dac_caps() -> Capabilities {
             SettingSpec::choice(
                 "dac_filter",
                 section::AUDIO,
-                "DAC デジタルフィルター",
+                "DAC digital filter",
                 opts(&[
                     (0, "FAST-LL"),
                     (1, "FAST-PC"),
@@ -1411,49 +1413,43 @@ fn dac_caps() -> Capabilities {
             SettingSpec::choice(
                 "dac_work_mode",
                 section::AUDIO,
-                "DAC ワークモード",
+                "DAC work mode",
                 opts(&[(0, "Class-H"), (1, "Class-AB")]),
             ),
             SettingSpec::choice(
                 "output_gain",
                 section::AUDIO,
-                "出力ゲインモード",
+                "Output gain mode",
                 opts(&[(0, "Low"), (1, "High")]),
             ),
             SettingSpec::slider(
                 "channel_balance",
                 section::AUDIO,
-                "チャンネルバランス",
+                "Channel balance",
                 -127.,
                 127.,
                 1.,
                 "",
             )
-            .help("正 = 右に寄せる (左を減衰)。0 で中央。"),
-            SettingSpec::slider(
-                "eq_volume",
-                section::AUDIO,
-                "EQ ボリューム",
-                -16.,
-                6.,
-                1.,
-                "dB",
-            ),
+            .help("Positive = shift to the right (attenuate the left). 0 is center."),
+            SettingSpec::slider("eq_volume", section::AUDIO, "EQ volume", -16., 6., 1., "dB"),
             SettingSpec::slider(
                 "mic_offset",
                 section::AUDIO,
-                "マイクオフセット",
+                "Mic offset",
                 -15.,
                 15.,
                 1.,
                 "",
             ),
         ],
-        actions: vec![
-            ActionSpec::new("eq_def", section::AUDIO, "EQ を工場出荷値 (DEF) に戻す")
-                .help("8 バンドの公式 DEF プリセットを書き込みます")
-                .confirm("EQ を DEF プリセットに戻します。よろしいですか?"),
-        ],
+        actions: vec![ActionSpec::new(
+            "eq_def",
+            section::AUDIO,
+            "Reset EQ to factory values (DEF)",
+        )
+        .help("Writes the official 8-band DEF preset")
+        .confirm("Resets the EQ to the DEF preset. Are you sure?")],
         profiles: None,
         mouse: None,
         keyboard: None,
@@ -1517,7 +1513,7 @@ fn dac_state(caps: &Capabilities) -> DeviceState {
     }
 }
 
-// ====================================================================== LAMZU (公式 Aurora 相当)
+// ====================================================================== LAMZU (equivalent to the official Aurora)
 
 fn lamzu_state(caps: &Capabilities) -> DeviceState {
     let mut settings = BTreeMap::new();

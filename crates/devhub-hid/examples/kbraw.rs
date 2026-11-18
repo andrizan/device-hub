@@ -35,7 +35,7 @@ fn main() {
     }
     let dev = api.open_path(&di.expect("su66 not found")).unwrap();
     dev.set_blocking_mode(false).unwrap();
-    // RT 精度 [2,12,0] → r[3]/1000
+    // RT precision [2,12,0] → r[3]/1000
     let r = cmd(&dev, &[2, 12, 0]);
     println!(
         "rt_precision: r[3]={} -> step={}mm",

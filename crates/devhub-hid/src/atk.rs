@@ -1,24 +1,24 @@
-//! ATK HUB (hub.atk.pro) 系マウス — 16B report-8 + EEPROM プロトコル。
+//! ATK HUB (hub.atk.pro) family mice — 16B report-8 + EEPROM protocol.
 //!
-//! 公式 ATK HUB (hub-v3) の解析 + F1 V3 ULTIMATE+ (373b:12a7) 実機で検証。
-//! ワイヤ形式は mouse.fit 系と同じ系列:
+//! Based on analysis of the official ATK HUB (hub-v3); verified on a real F1 V3 ULTIMATE+ (373b:12a7).
+//! The wire format is in the same family as mouse.fit:
 //!
-//! - 設定コレクション usage_page 0xFF02 / usage 2、output/input report id 8。
-//! - 要求  `[cmd, 0, addrHi, addrLo, len, data…]` (16B、17 バイト目に cksum)
-//! - 応答  `[rid=8, cmd echo, status, addrHi, addrLo, len, data…, cksum]` (17B)
-//! - cksum = `0x55 - (全バイト和 & 0xff)` (17B 合計 ≡ 0x55)
-//! - EEPROM: 読み cmd8、書き cmd7 (10B チャンク)。スカラは (v, 0x55-v) ペア。
+//! - Settings collection usage_page 0xFF02 / usage 2, output/input report id 8.
+//! - Request  `[cmd, 0, addrHi, addrLo, len, data…]` (16B, cksum in the 17th byte)
+//! - Response  `[rid=8, cmd echo, status, addrHi, addrLo, len, data…, cksum]` (17B)
+//! - cksum = `0x55 - (sum of all bytes & 0xff)` (17B total ≡ 0x55)
+//! - EEPROM: read cmd8, write cmd7 (10B chunks). Scalars are (v, 0x55-v) pairs.
 //!
-//! EEPROM マップ (実機 + 公式 JS `y.Address`):
-//! ReportRate ブロック @0 (10B: rate,maxDpi,currentDpi,bhop,btnOpMode + 各crc)、
-//! LOD @10、DPI色 @44 (4B×8)、キー割当 @96 (4B×16)、MotionSync @171、
-//! CloseLedTime @173、直線補正 @175、リップル @177、Sensor系 @181/183/185、
-//! RfTxTime @187、WheelDebounce @227、Shortcut @256 (32B×16)、
-//! Macro @768 (384B×16)、PAW3955 DPI @6912 (6B×8)、DynamicSensitivity @6960。
+//! EEPROM map (real device + official JS `y.Address`):
+//! ReportRate block @0 (10B: rate,maxDpi,currentDpi,bhop,btnOpMode + a crc for each),
+//! LOD @10, DPI color @44 (4B×8), key assignment @96 (4B×16), MotionSync @171,
+//! CloseLedTime @173, angle snapping @175, ripple @177, Sensor group @181/183/185,
+//! RfTxTime @187, WheelDebounce @227, Shortcut @256 (32B×16),
+//! Macro @768 (384B×16), PAW3955 DPI @6912 (6B×8), DynamicSensitivity @6960.
 //!
-//! その他 cmd: 3=online, 4=battery, 5/6=pair, 9=factory, 14/15=configID,
-//! 16=CID/MID (F1 V3 = "1,62"), 18=FW, 22/23=長距離, 29=dongle FW。
-//! CID=1 系は全機種この 16B 方式と思われる (CID=2 系は別世代)。
+//! Other cmds: 3=online, 4=battery, 5/6=pair, 9=factory, 14/15=configID,
+//! 16=CID/MID (F1 V3 = "1,62"), 18=FW, 22/23=long range, 29=dongle FW.
+//! CID=1 models all appear to use this 16B scheme (CID=2 models are a different generation).
 
 use devhub_core::backend::*;
 use devhub_core::model::*;
@@ -40,20 +40,20 @@ mod ee {
     pub const KEY_FUNCTION: u16 = 96;
     pub const DEBOUNCE: u16 = 169;
     pub const MOTION_SYNC: u16 = 171;
-    /// スリープ時間 — 公式 closeLedTime。wire 値は 10 秒単位 (6 = 60s = 1分)。
+    /// Sleep time — official closeLedTime. The wire value is in 10-second units (6 = 60s = 1 min).
     pub const CLOSE_LED: u16 = 173;
     pub const ANGLE_SNAP: u16 = 175;
     pub const RIPPLE: u16 = 177;
-    /// 移動中 LED 消灯 (moveCloseLights)。
+    /// LED off while moving (moveCloseLights).
     pub const MOVE_LED: u16 = 179;
-    /// ボタン別ショートカット領域 — 32B × slot (slot index = 物理ボタン)。
+    /// Per-button shortcut area — 32B × slot (slot index = physical button).
     pub const SHORTCUT: u16 = 256;
     pub const WHEEL_DEBOUNCE: u16 = 227;
     pub const DPI_3955: u16 = 6912;
 }
 
-/// cmd16 応答 (data[0]=CID, data[1]=MID) → (表示名, model id)。
-/// ドングル経由でも中継されるため、受信機名のままにしない。
+/// cmd16 response (data[0]=CID, data[1]=MID) → (display name, model id).
+/// It is relayed through the dongle too, so don't keep the receiver's name.
 fn mid_name(cid: u8, mid: u8) -> Option<(&'static str, &'static str)> {
     match (cid, mid) {
         (1, 62) => Some(("ATK F1 V3 ULTIMATE+", "atk-f1v3u")),
@@ -61,14 +61,14 @@ fn mid_name(cid: u8, mid: u8) -> Option<(&'static str, &'static str)> {
     }
 }
 
-// ==================================================================== 構造
+// ==================================================================== structure
 
 pub struct AtkDriver {
     dev: Mutex<hidapi::HidDevice>,
     info: Mutex<DeviceInfo>,
     caps: Capabilities,
     events: Option<std::sync::Arc<dyn Fn(HubEvent) + Send + Sync>>,
-    /// CID/MID で機種確定済みか (ドングル経由で休眠中は未確定のまま)。
+    /// Whether the model has been determined from CID/MID (stays undetermined while asleep behind a dongle).
     detected: Mutex<bool>,
 }
 
@@ -85,21 +85,21 @@ pub fn open(
         events,
         detected: Mutex::new(false),
     };
-    // CID/MID で機種確定 (応答があれば名を差し替える)。
+    // Determine the model from CID/MID (replace the name if a response arrives).
     d.maybe_detect();
     Ok(d)
 }
 
 impl AtkDriver {
-    /// `info` の変更を UI へ通知。
+    /// Notifies the UI of a change to `info`.
     fn emit_info(&self, i: DeviceInfo) {
         if let Some(ev) = &self.events {
             ev(HubEvent::Info(i.id.clone(), Box::new(i)));
         }
     }
 
-    /// CID/MID 未確定なら cmd16 を試し、取れれば機種名を差し替える。
-    /// ドングル経由でマウス休眠中は失敗するので、覚醒後の呼び出しで確定する。
+    /// If CID/MID is not yet determined, try cmd16 and, if it succeeds, replace the model name.
+    /// This fails while the mouse is asleep behind a dongle, so it is settled by a call after wake-up.
     fn maybe_detect(&self) {
         if *self.detected.lock().unwrap_or_else(|p| p.into_inner()) {
             return;
@@ -131,7 +131,7 @@ impl AtkDriver {
         }
     }
 
-    /// 休眠フラグの更新 (ドングル経由のみ意味を持つ)。
+    /// Updates the asleep flag (only meaningful behind a dongle).
     fn set_asleep(&self, asleep: bool) {
         let mut i = self.info.lock().unwrap_or_else(|p| p.into_inner());
         if i.transport != Transport::Wireless24G || i.asleep == asleep {
@@ -143,7 +143,7 @@ impl AtkDriver {
         self.emit_info(info);
     }
 
-    /// 16B コマンド → 17B 応答 (cmd echo を拾う。最大 3 回)。
+    /// 16B command → 17B response (picks up the cmd echo; up to 3 tries).
     fn cmd_raw(&self, cmd: u8, addr: u16, data: &[u8]) -> HubResult<Vec<u8>> {
         let mut f = [0u8; 17];
         f[0] = RID;
@@ -175,18 +175,18 @@ impl AtkDriver {
             }
             sleep(Duration::from_millis(20));
         }
-        // ドングル経由で応答が無い = マウス休眠中とみなす。
+        // No response behind a dongle = treated as the mouse being asleep.
         self.set_asleep(true);
         Err(HubError::Protocol("atk: response timeout".into()))
     }
 
-    /// EEPROM 読み出し (10B チャンク、内部結合)。データは resp[6..]。
+    /// EEPROM read (10B chunks, joined internally). Data is resp[6..].
     fn ee_read(&self, addr: u16, len: u16) -> HubResult<Vec<u8>> {
         let mut out = Vec::with_capacity(len as usize);
         let mut a = addr;
         while (out.len() as u16) < len {
             let want = (len - out.len() as u16).min(CHUNK) as u8;
-            // GetEEPROM: len は要求の [4] (=data.len()=0 ではなく len フィールド)。
+            // GetEEPROM: len is the request's [4] (the len field, not data.len()=0).
             let mut f = [0u8; 17];
             f[0] = RID;
             f[1] = 8;
@@ -232,7 +232,7 @@ impl AtkDriver {
         Ok(out)
     }
 
-    /// EEPROM 書き込み (SetEEPROM cmd7、10B チャンク)。
+    /// EEPROM write (SetEEPROM cmd7, 10B chunks).
     fn ee_write(&self, addr: u16, data: &[u8]) -> HubResult<()> {
         for (i, chunk) in data.chunks(CHUNK as usize).enumerate() {
             self.cmd_raw(7, addr + (i * CHUNK as usize) as u16, chunk)?;
@@ -241,12 +241,12 @@ impl AtkDriver {
         Ok(())
     }
 
-    /// スカラ (v, 0x55-v) ペア書き込み。
+    /// Scalar (v, 0x55-v) pair write.
     fn ee_write_val(&self, addr: u16, val: u8) -> HubResult<()> {
         self.ee_write(addr, &[val, 85u8.wrapping_sub(val)])
     }
 
-    /// スカラ読み出し。ペア検証付き。
+    /// Scalar read, with pair verification.
     fn ee_u8(&self, addr: u16) -> HubResult<u8> {
         let b = self.ee_read(addr, 2)?;
         if (b[0] as u16 + b[1] as u16) & 0xff == 85 {
@@ -256,7 +256,7 @@ impl AtkDriver {
         }
     }
 
-    /// @0 の 10B ブロックを読み、byte idx (=偶数 offset) を差し替えて書き戻す。
+    /// Reads the 10B block at @0, replaces byte idx (= even offset) and writes it back.
     fn cfg_byte(&self, idx: usize, val: u8) -> HubResult<()> {
         let mut b = self.ee_read(0, 10)?;
         b[idx] = val;
@@ -268,7 +268,7 @@ impl AtkDriver {
         85u8.wrapping_sub(b[..b.len() - 1].iter().map(|&x| x as u32).sum::<u32>() as u8)
     }
 
-    /// 3955 DPI レコード (6B): [xLo,xHi,yLo,yHi,flags,crc]、raw+1 = dpi。
+    /// 3955 DPI record (6B): [xLo,xHi,yLo,yHi,flags,crc], raw+1 = dpi.
     fn parse_stage(b: &[u8]) -> (u32, u32) {
         let f = b[4] as u32;
         let mut x = b[0] as u32 | ((b[1] as u32) << 8) | (((f >> 2) & 3) << 16);
@@ -299,8 +299,8 @@ impl AtkDriver {
         b
     }
 
-    /// KeyFunction @96 4B レコード → ButtonAction。type5=ShortcutKey は
-    /// ボタンごとの領域 (@256+slot*32) を別途読む。
+    /// KeyFunction @96 4B record → ButtonAction. type5=ShortcutKey reads the
+    /// per-button area (@256+slot*32) separately.
     fn decode_keyfn(&self, slot: usize, b: &[u8]) -> ButtonAction {
         match b[0] {
             1 => ButtonAction::Mouse(match b[1] {
@@ -341,24 +341,24 @@ impl AtkDriver {
         }
     }
 
-    /// ShortcutKey 領域 (@256 + slot*32) を読む。
-    /// 形式: [count, entry…, sum] — entry = {keyState, v1, v2}、
-    /// keyState = 0x80(押下)|0x40(解放) + keyType (1=Keyboard 2=Fire 3=Combination 4=Macro)。
-    /// sum = 0x55 - (count + 全 entry bytes)。
+    /// Reads the ShortcutKey area (@256 + slot*32).
+    /// Format: [count, entry…, sum] — entry = {keyState, v1, v2},
+    /// keyState = 0x80 (press) | 0x40 (release) + keyType (1=Keyboard 2=Fire 3=Combination 4=Macro).
+    /// sum = 0x55 - (count + all entry bytes).
     fn read_shortcut(&self, slot: usize) -> Option<ButtonAction> {
         let b = self.ee_read(ee::SHORTCUT + (slot * 32) as u16, 32).ok()?;
         let n = *b.first()? as usize;
         if n == 0 || n > 10 {
             return None;
         }
-        // 最初の「押下」エントリのキーを代表表示に使う。
+        // Use the key of the first "press" entry as the representative display.
         for i in 0..n {
             let e = &b[1 + i * 3..1 + i * 3 + 3];
             let (state, ty) = (e[0], e[0] & 0x3f);
             if state & 0x80 == 0 || ty != 1 {
                 continue;
             }
-            // keyType=Keyboard: v1 = 使用コード (公式は独自キー表)。修飾は v2 側。
+            // keyType=Keyboard: v1 = usage code (the official app uses its own key table). Modifiers are on the v2 side.
             return Some(ButtonAction::Key(KeyStroke {
                 mods: e[2],
                 usage: e[1] as u16,
@@ -367,7 +367,7 @@ impl AtkDriver {
         None
     }
 
-    /// ButtonAction::Key → ShortcutKey 領域 (押下+解放の 2 エントリ)。
+    /// ButtonAction::Key → ShortcutKey area (2 entries: press + release).
     fn encode_shortcut(&self, k: &KeyStroke) -> Vec<u8> {
         let mut b = vec![
             2,
@@ -384,7 +384,7 @@ impl AtkDriver {
         b
     }
 
-    /// ButtonAction → KeyFunction 4B レコード。
+    /// ButtonAction → KeyFunction 4B record.
     fn encode_keyfn(&self, a: &ButtonAction) -> HubResult<[u8; 4]> {
         use ButtonAction::*;
         let rec = |ty: u8, ph: u8, pl: u8| {
@@ -424,7 +424,7 @@ impl AtkDriver {
                 rec(6, *s + 1, t)
             }
             PollingCycle => rec(7, 0, 0),
-            // ShortcutKey — 本体の割当は別領域 (@256+slot*32) に書く。
+            // ShortcutKey — the on-device assignment is written to a separate area (@256+slot*32).
             Key(_) => rec(5, 0, 0),
             Media(_) => return Err(HubError::Unsupported("media button")),
             ProfileCycle => return Err(HubError::Unsupported("profile cycle")),
@@ -447,7 +447,7 @@ fn build_caps() -> Capabilities {
             SettingSpec::choice(
                 "polling_wireless",
                 PERFORMANCE,
-                "ポーリングレート",
+                "Polling rate",
                 opts(&[
                     (125, "125"),
                     (250, "250"),
@@ -458,11 +458,11 @@ fn build_caps() -> Capabilities {
                     (8000, "8K"),
                 ]),
             )
-            .help("マウスの報告頻度 (Hz)"),
+            .help("Mouse report frequency (Hz)"),
             SettingSpec::choice(
                 "lod",
                 SENSOR,
-                "リフトオフ距離",
+                "Lift-off distance",
                 opts(&[
                     (7, "0.7mm"),
                     (8, "0.8mm"),
@@ -477,41 +477,41 @@ fn build_caps() -> Capabilities {
                     (17, "1.7mm"),
                 ]),
             )
-            .help("持ち上げて反応しなくなる高さ — PAW3955 は 0.7–1.7mm・0.1mm 刻み"),
-            SettingSpec::toggle("motion_sync", SENSOR, "モーション同期")
-                .help("ポインタとマウスの動きを同期させ、軌跡を滑らかにします"),
-            SettingSpec::toggle("angle_snap", SENSOR, "直線補正")
-                .help("移動のブレを直線に補正します"),
-            SettingSpec::toggle("ripple", SENSOR, "リップル制御")
-                .help("高DPI時の細かい揺れを抑えます"),
-            SettingSpec::slider("wheel_debounce", CLICK, "ホイール遅延", 0., 60., 1., "ms")
-                .help("ホイールの入力遅延 (実機初期値 30)"),
-            SettingSpec::slider("debounce", CLICK, "クリックデバウンス", 0., 32., 1., "ms")
-                .help("ボタンのチャタリング防止 (@169 stabilizationTime)"),
+            .help("Height at which the mouse stops tracking when lifted — PAW3955 supports 0.7–1.7mm in 0.1mm steps"),
+            SettingSpec::toggle("motion_sync", SENSOR, "Motion sync")
+                .help("Syncs pointer and mouse movement to smooth the trajectory"),
+            SettingSpec::toggle("angle_snap", SENSOR, "Angle snapping")
+                .help("Straightens out wobble in movement"),
+            SettingSpec::toggle("ripple", SENSOR, "Ripple control")
+                .help("Reduces fine jitter at high DPI"),
+            SettingSpec::slider("wheel_debounce", CLICK, "Wheel delay", 0., 60., 1., "ms")
+                .help("Wheel input delay (device default: 30)"),
+            SettingSpec::slider("debounce", CLICK, "Click debounce", 0., 32., 1., "ms")
+                .help("Prevents button chatter (@169 stabilizationTime)"),
             SettingSpec::choice(
                 "sleep_min",
                 POWER,
-                "スリープまでの時間",
+                "Time until sleep",
                 opts(&[
-                    (1, "1 分"),
-                    (2, "2 分"),
-                    (3, "3 分"),
-                    (5, "5 分"),
-                    (10, "10 分"),
-                    (30, "30 分"),
-                    (60, "60 分"),
+                    (1, "1 min"),
+                    (2, "2 min"),
+                    (3, "3 min"),
+                    (5, "5 min"),
+                    (10, "10 min"),
+                    (30, "30 min"),
+                    (60, "60 min"),
                 ]),
             )
-            .help("無操作でスリープするまでの時間 (@173、10秒単位で保持)"),
-            SettingSpec::toggle("move_close_led", LIGHTING, "移動中 LED 消灯")
-                .help("操作している間は LED を消します (@179)"),
-            SettingSpec::slider("bhop", CLICK, "ホイール誤操作防止", 0., 25., 1., "")
-                .help("スクロール誤検知の抑止時間 (0=無効、公式は time/10 で保持)"),
+            .help("Idle time before the mouse goes to sleep (@173, stored in 10-second units)"),
+            SettingSpec::toggle("move_close_led", LIGHTING, "LED off while moving")
+                .help("Turns the LED off while you are using the mouse (@179)"),
+            SettingSpec::slider("bhop", CLICK, "Wheel misfire prevention", 0., 25., 1., "")
+                .help("Suppression time for false scroll detection (0 = off; the official app stores time/10)"),
         ],
         actions: vec![
-            ActionSpec::new("factory_reset", SYSTEM, "工場出荷状態に戻す")
-                .help("全設定を初期値に戻します (cmd9)")
-                .danger("このデバイスの全設定が消去されます"),
+            ActionSpec::new("factory_reset", SYSTEM, "Restore factory defaults")
+                .help("Resets all settings to their defaults (cmd9)")
+                .danger("All settings on this device will be erased"),
         ],
         profiles: Some(ProfileCaps {
             count: 4,
@@ -529,9 +529,9 @@ fn build_caps() -> Capabilities {
             buttons: [
                 "Left",
                 "Right",
-                "ホイールクリック",
-                "サイド (戻る)",
-                "サイド (進む)",
+                "Wheel click",
+                "Side (back)",
+                "Side (forward)",
             ]
             .iter()
             .map(|n| ButtonSlot { name: (*n).into() })
@@ -564,7 +564,7 @@ impl DeviceDriver for AtkDriver {
     fn info(&self) -> DeviceInfo {
         self.maybe_detect();
         let mut i = self.info.lock().unwrap_or_else(|p| p.into_inner()).clone();
-        // ドングル経由: cmd29 はドングル自身が応答 (マウス休眠中も返る)。
+        // Behind a dongle: cmd29 is answered by the dongle itself (it responds even while the mouse is asleep).
         if i.transport == Transport::Wireless24G {
             if let Ok(r) = self.cmd_raw(29, 0, &[]) {
                 if r[2] != 1 && (r[6] != 0 || r[7] != 0) {
@@ -572,7 +572,7 @@ impl DeviceDriver for AtkDriver {
                 }
             }
         }
-        // cmd18 が通らなければマウスは休眠中。
+        // If cmd18 does not get through, the mouse is asleep.
         match self.cmd_raw(18, 0, &[]) {
             Ok(r) => {
                 i.asleep = false;
@@ -598,7 +598,7 @@ impl DeviceDriver for AtkDriver {
 
     fn read(&self) -> HubResult<DeviceState> {
         self.maybe_detect();
-        // @0 ブロック: rate, stage数, active。
+        // @0 block: rate, stage count, active.
         let blk = self.ee_read(0, 10)?;
         let rate_code = blk[0];
         let stage_n = (blk[2] as usize).clamp(1, 8);
@@ -621,7 +621,7 @@ impl DeviceDriver for AtkDriver {
                 enabled: true,
             });
         }
-        // ボタン key0..4 @96。
+        // Buttons key0..4 @96.
         let keys = self.ee_read(ee::KEY_FUNCTION, 20)?;
         let buttons = (0..5)
             .map(|i| self.decode_keyfn(i, &keys[i * 4..i * 4 + 4]))
@@ -640,7 +640,7 @@ impl DeviceDriver for AtkDriver {
         };
         settings.insert("polling_wireless".into(), SettingValue::Choice(rate));
         if let Ok(v) = self.ee_u8(ee::LOD) {
-            // @10 = LOD レベル 1–11 → 0.7–1.7mm (PAW3955 "Ultimate" 系)。
+            // @10 = LOD level 1–11 → 0.7–1.7mm (PAW3955 "Ultimate" family).
             let mm10 = (v.clamp(1, 11) + 6) as i64;
             settings.insert("lod".into(), SettingValue::Choice(mm10));
         }
@@ -660,18 +660,18 @@ impl DeviceDriver for AtkDriver {
             settings.insert("debounce".into(), SettingValue::Num(v as f32));
         }
         if let Ok(v) = self.ee_u8(ee::CLOSE_LED) {
-            // wire = 10 秒単位 → 分に変換 (6 → 1分)。
+            // wire = 10-second units → convert to minutes (6 → 1 min).
             let min = ((v as u32 * 10) / 60).max(1) as i64;
             settings.insert("sleep_min".into(), SettingValue::Choice(min));
         }
         if let Ok(v) = self.ee_u8(ee::MOVE_LED) {
             settings.insert("move_close_led".into(), SettingValue::Bool(v != 0));
         }
-        // @0 byte6 = bhop (ホイール誤操作防止、time/10)。
+        // @0 byte6 = bhop (wheel misfire prevention, time/10).
         settings.insert("bhop".into(), SettingValue::Num(blk[6] as f32));
-        // 注: cmd22/23 の長距離モードはドングル側機能 — 有線では cmd22 は ACK するが
-        // cmd23 は常に 0 を返す (実機確認) ので設定には出さない。
-        // オンボードプロファイル: cmd14 GetCurrentConfig → data[0] = index。
+        // Note: the cmd22/23 long-range mode is a dongle-side feature — on wired, cmd22 ACKs but
+        // cmd23 always returns 0 (confirmed on a real device), so it is not exposed as a setting.
+        // Onboard profile: cmd14 GetCurrentConfig → data[0] = index.
         let profile = self
             .cmd_raw(14, 0, &[])
             .ok()
@@ -721,7 +721,7 @@ impl DeviceDriver for AtkDriver {
                 }
                 "debounce" => self.ee_write_val(ee::DEBOUNCE, value.as_num().clamp(0., 255.) as u8),
                 "sleep_min" => {
-                    // 分 → 10 秒単位 (1分→6)。
+                    // Minutes → 10-second units (1 min → 6).
                     self.ee_write_val(ee::CLOSE_LED, (value.as_choice().clamp(1, 42) * 6) as u8)
                 }
                 "move_close_led" => self.ee_write_val(ee::MOVE_LED, value.as_bool() as u8),
@@ -749,7 +749,7 @@ impl DeviceDriver for AtkDriver {
                     return Err(HubError::Invalid("button slot".into()));
                 }
                 let rec = self.encode_keyfn(action)?;
-                // ShortcutKey は本体領域を先に書いてから keyfn を指す。
+                // For ShortcutKey, write the on-device area first, then point keyfn at it.
                 if let ButtonAction::Key(k) = action {
                     self.ee_write(ee::SHORTCUT + (*slot * 32) as u16, &self.encode_shortcut(k))?;
                 }
@@ -765,7 +765,7 @@ impl DeviceDriver for AtkDriver {
             "factory_reset" => {
                 self.cmd_raw(9, 0, &[])?;
                 Ok(ActionOutcome {
-                    message: Some("工場出荷状態に戻しました".into()),
+                    message: Some("Restored factory defaults".into()),
                     reload: true,
                 })
             }
@@ -774,7 +774,7 @@ impl DeviceDriver for AtkDriver {
     }
 
     fn battery(&self) -> HubResult<Battery> {
-        // cmd4: data[0]=percent, data[1]=chargingStatus。
+        // cmd4: data[0]=percent, data[1]=chargingStatus.
         let r = self.cmd_raw(4, 0, &[])?;
         Ok(Battery {
             percent: Some(r.get(6).copied().unwrap_or(0).min(100)),

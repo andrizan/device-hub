@@ -1,4 +1,4 @@
-//! G-Wolves ドングル ff02 の自発レポート観測 — マウスを動かし続けること。
+//! Observing unsolicited reports from the G-Wolves dongle ff02 — keep moving the mouse.
 use devhub_hid::transport;
 use std::time::Instant;
 fn main() {

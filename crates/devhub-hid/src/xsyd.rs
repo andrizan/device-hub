@@ -1,20 +1,20 @@
-//! XSYD プロトコル (hub.xsyd.top / Sparklink SDK) — SU66 Max 等ホール効果キーボード。
+//! XSYD protocol (hub.xsyd.top / Sparklink SDK) — Hall effect keyboards such as the SU66 Max.
 //!
-//! 実機解析済み (1ca6:3009, usage_page 0xFFB0 / usage 1):
-//! - report id なし 64B output report + 64B input report
-//! - フレーム: `[group][sub][args...]` → 応答 `[group][sub][data...]`
+//! Analyzed on a real device (1ca6:3009, usage_page 0xFFB0 / usage 1):
+//! - 64B output report + 64B input report, no report id
+//! - Frame: `[group][sub][args...]` → response `[group][sub][data...]`
 //! - group: Device=1, Global=2, LayoutAndKey=3, Performance=4, Lighting=5,
 //!   HigherKey=6, Macro=7, CustomCommand=10, Displayer=12, ThreeMode=13
-//! - 応答 `sub==0xFF` は「未対応コマンド」を意味する (実機確認済み)
+//! - A response with `sub==0xFF` means "unsupported command" (confirmed on a real device)
 //!
-//! # 検証状況
-//! - **実機検証済み**: `1,2` device info, `1,3` feature (レイヤー数), `3,1` キーマップ読み,
-//!   `3,4` キー単体書き, `5,1`/`5,2` ライティング読み書き, `4,1`/`4,2` キー性能,
-//!   `4,3` axis data (route/calibrate), `2,3` 構成, `2,4` OS, `2,5` ポーリング,
-//!   `2,8` ライト領域, `2,12` RT精度, `2,13` スリープ, `2,14` マクロ領域,
-//!   `2,16` 防チャタ, `6,1` 高度キー読み, `7,1`/`7,3` マクロ読み。
-//! - フレームの一次資料: dshk.xsyd.top の SDK バンドル (リポジトリの `xsyd-sdk.js`)。
-//!   全値の u16 はリトルエンディアン (`q`/`ee`)、mm は ×1000 の u16。
+//! # Verification status
+//! - **Verified on a real device**: `1,2` device info, `1,3` feature (layer count), `3,1` keymap read,
+//!   `3,4` single key write, `5,1`/`5,2` lighting read/write, `4,1`/`4,2` per-key performance,
+//!   `4,3` axis data (route/calibrate), `2,3` config, `2,4` OS, `2,5` polling rate,
+//!   `2,8` light areas, `2,12` RT precision, `2,13` sleep, `2,14` macro area,
+//!   `2,16` debounce, `6,1` advanced key read, `7,1`/`7,3` macro read.
+//! - Primary source for the frames: the SDK bundle of dshk.xsyd.top (`xsyd-sdk.js` in the repository).
+//!   Every u16 value is little-endian (`q`/`ee`); mm is a u16 scaled by ×1000.
 
 use crate::transport::Channel;
 use devhub_core::backend::*;
@@ -27,11 +27,11 @@ use std::time::{Duration, Instant};
 
 const POLL_MS: i32 = 60;
 const DEADLINE_MS: u64 = 700;
-/// この回数連続でタイムアウトしたらデッド判定 (read() 全体を止めない)。
+/// Declared dead after this many consecutive timeouts (so a full read() does not stall).
 const FAIL_FAST_AFTER: u32 = 4;
-/// デッド判定中に実コマンドで生存確認する間隔。
+/// Interval for checking liveness with a real command while declared dead.
 const PROBE_MS: u64 = 1500;
-/// デッド判定中のプローブ用タイムアウト。
+/// Timeout for the probe while declared dead.
 const PROBE_WAIT_MS: u64 = 120;
 
 mod grp {
@@ -50,39 +50,39 @@ mod sub {
     pub const SETTING: u8 = 2;
     pub const DEVICE_INFO: u8 = 2;
     pub const GET_BASIC_INFO: u8 = 1;
-    /// device feature `[1,3]` — 機能ビットマスク: r[2]=axisType(機種 enum),
-    /// r[3]=接続方式, r[4]={rgb,knob}, r[5]={画面,haptic,numpad,dotMatrix}。
+    /// device feature `[1,3]` — feature bitmask: r[2]=axisType (model enum),
+    /// r[3]=connection type, r[4]={rgb,knob}, r[5]={screen,haptic,numpad,dotMatrix}.
     #[allow(dead_code)]
     pub const FEATURE: u8 = 3;
     pub const GET_KEY_LAYOUT: u8 = 1;
-    /// 推測: 行単位のキーマップ書き込み。read の鏡。
+    /// Guess: row-wise keymap write. Mirror of read.
     pub const SET_KEY_LAYOUT: u8 = 2;
-    /// group 3: キー 1 個の読み/書き (SDK の GetKeyCode/SetKeyCode)。
+    /// group 3: read/write of a single key (SDK GetKeyCode/SetKeyCode).
     #[allow(dead_code)]
     pub const GET_KEY_CODE: u8 = 3;
     pub const SET_KEY_CODE: u8 = 4;
-    /// group 3: 物理レイアウト記述 `[3,5,page]` (u16LE {row:5,col:7,ratio:4} の
-    /// セルを最大 ~15 個/ページ)。工場キーマップ `[3,6,(sys<<4)|fn,row]`。
+    /// group 3: physical layout description `[3,5,page]` (up to ~15 cells per page of
+    /// u16LE {row:5,col:7,ratio:4}). Factory keymap `[3,6,(sys<<4)|fn,row]`.
     #[allow(dead_code)]
     pub const GET_KEY_LAYOUT_STYLE: u8 = 5;
     pub const GET_KEY_LAYOUT_DEFAULT: u8 = 6;
-    /// group 4 subs (SDK $a): GetPerformance=1, SetPerformance=2, AxisData=3。
+    /// group 4 subs (SDK $a): GetPerformance=1, SetPerformance=2, AxisData=3.
     pub const GET_PERF: u8 = 1;
     pub const SET_PERF: u8 = 2;
     pub const AXIS_DATA: u8 = 3;
-    /// group 5 subs: 照明基本の読み書きは READ/SETTING を共用。
-    /// カスタム色: ReadBack=3, Custom=4, DirectDrive=5, Caps=6 (SDK enum 確定)。
+    /// group 5 subs: basic lighting read/write shares READ/SETTING.
+    /// Custom color: ReadBack=3, Custom=4, DirectDrive=5, Caps=6 (SDK enum confirmed).
     pub const LIGHT_READBACK: u8 = 3;
     pub const LIGHT_CUSTOM: u8 = 4;
-    /// DirectDrive — per-LED ライブ書き込み、応答なし (SDK sendDataNoResponse)。
+    /// DirectDrive — per-LED live write, no response (SDK sendDataNoResponse).
     pub const LIGHT_DIRECTDRIVE: u8 = 5;
-    /// group 7 subs (SDK Xa): GetMacroMode=1, SetMacroMode=2, GetMacro=3, SetMacro=4。
+    /// group 7 subs (SDK Xa): GetMacroMode=1, SetMacroMode=2, GetMacro=3, SetMacro=4.
     pub const GET_MACRO_MODE: u8 = 1;
     pub const SET_MACRO_MODE: u8 = 2;
     pub const GET_MACRO: u8 = 3;
     pub const SET_MACRO: u8 = 4;
 }
-/// group 2 (Global) の sub (SDK Wa)。
+/// subs of group 2 (Global) (SDK Wa).
 mod gfs {
     pub const RESET_FACTORY: u8 = 1;
     pub const SAVE_PARAM: u8 = 2;
@@ -103,7 +103,7 @@ mod gfs {
     pub const MACRO_SPACE: u8 = 14;
     pub const SHAKE_OPT: u8 = 16;
 }
-/// SaveParam / ResetFactory のスコープ (SDK qo/Qo)。
+/// Scope of SaveParam / ResetFactory (SDK qo/Qo).
 mod scope {
     pub const ALL: u8 = 0;
     pub const CALIBRATION: u8 = 1;
@@ -115,7 +115,7 @@ mod scope {
     #[allow(dead_code)]
     pub const AXIS: u8 = 7;
 }
-/// AxisData (4,3) の第2引数 (SDK Qa)。
+/// Second argument of AxisData (4,3) (SDK Qa).
 mod axis {
     #[allow(dead_code)]
     pub const ADC: u8 = 0;
@@ -125,7 +125,7 @@ mod axis {
     #[allow(dead_code)]
     pub const KEY_STATUS: u8 = 3;
 }
-/// 高度キー種別 (SDK ja)。wire の mode バイト。
+/// Advanced key kind (SDK ja). The mode byte on the wire.
 mod hk {
     pub const NONE: u8 = 0;
     pub const DKS: u8 = 1;
@@ -137,31 +137,31 @@ mod hk {
     pub const RS: u8 = 7;
 }
 
-/// open 時に一度だけ問い合わせるデバイス定数。
+/// Device constants queried once at open.
 struct XsydInfo {
     layers: u8,
-    /// RT 精度 (mm)。`2,12` 応答 r[3]/1000。取得失敗時 0.01。
+    /// RT precision (mm). `2,12` response r[3]/1000. 0.01 if the query fails.
     rt_step: f32,
-    /// 全ストローク (mm)。route の axisRangeMax 最大値 /1000。取得失敗時 4.0。
+    /// Full stroke (mm). Max axisRangeMax of the route /1000. 4.0 if the query fails.
     travel: f32,
-    /// ポーリング選択肢 (wire code → Hz)。
+    /// Polling rate options (wire code → Hz).
     polling: Vec<(u8, &'static str)>,
-    /// 構成 (プロファイル) 数。`2,3` list 応答 r[3]。
+    /// Config (profile) count. `2,3` list response r[3].
     configs: u8,
-    /// ライティング領域 index 一覧 (0=キーボード, 1..=デコレーション)。
+    /// Lighting area index list (0=keyboard, 1..=decoration).
     light_areas: Vec<u8>,
-    /// マクロ (スロット数, 1本の最大イベント数)。
+    /// Macro (slot count, max events per macro).
     macro_space: Option<(u8, u16)>,
-    /// 軸ライブラリ (u16 id 一覧)。空なら switch_types を出さない。
+    /// Axis library (list of u16 ids). If empty, switch_types is not shown.
     axes: Vec<u16>,
-    /// DoubleLighting (上下 2 ゾーン) か。`2,10,0` 応答 r[3]==1。
+    /// Whether it is DoubleLighting (2 zones, upper and lower). `2,10,0` response r[3]==1.
     double_lighting: bool,
 }
 
-/// セル番号 → 確認済みの BGR。書き込み失敗で適用が不確かなセルは None。
+/// Cell number → confirmed BGR. None for cells whose application is uncertain because the write failed.
 type DdPins = BTreeMap<usize, Option<[u8; 3]>>;
 
-/// 軸フレームキャッシュの型: (kind,row) → (取得時刻, 30 セル)。
+/// Type of the axis frame cache: (kind,row) → (capture time, 30 cells).
 type AxisCache = Mutex<HashMap<(u8, u8), (Instant, [u16; 30])>>;
 
 pub struct XsydDriver {
@@ -169,36 +169,36 @@ pub struct XsydDriver {
     ch: Channel,
     xs: XsydInfo,
     caps: Capabilities,
-    /// 連続コマンドタイムアウト数。閾値を超えたら即 Disconnected を返し、
-    /// 定期的に 1 回だけ実コマンドを通して復帰を検出する。
-    /// (応答しないデバイスに read() の全コマンドが 700ms ずつ待つのを防ぐ)
+    /// Number of consecutive command timeouts. Once it exceeds the threshold, immediately return Disconnected,
+    /// and periodically pass one real command through, only once, to detect recovery.
+    /// (prevents every command of read() from waiting 700ms each on an unresponsive device)
     fails: AtomicU32,
     dead_since: Mutex<Option<Instant>>,
-    /// DirectDrive で現在ピン留め中の LED セルと最後に送った色
-    /// (area → cell → BGR)。次フレームで集合から外れたセルは `[5,4]` で
-    /// isCustom を落としてファーム駆動に戻す (DD の flag=0 は「触らない」
-    /// であって解放ではない)。同じ色のままのセルも再送しない —
-    /// ピンはストリーム停止後も残るので、変化分だけで表示が保たれる。
+    /// LED cells currently pinned by DirectDrive and the color last sent
+    /// (area → cell → BGR). Cells that drop out of the set in the next frame are returned to
+    /// firmware control by clearing isCustom with `[5,4]` (DD's flag=0 means "don't touch",
+    /// not release). Cells that keep the same color are not resent either —
+    /// pins remain after the stream stops, so the display holds with only the changes.
     dd_pins: Mutex<BTreeMap<u8, DdPins>>,
-    /// DD セッション開始前にユーザーカスタム (isCustom=255) だったセルと色
-    /// (area → cell → BGR)。DD 解放時に flag=255+保存色で戻すために退避する —
-    /// DD とユーザーカスタムは同じ isCustom フラグを共有するので、
-    /// 区別しないと DD がユーザーのカスタムを巻き込んで消す。
+    /// Cells and colors that were user custom (isCustom=255) before the DD session started
+    /// (area → cell → BGR). Saved aside so DD release can restore them with flag=255 + the saved color —
+    /// DD and user custom share the same isCustom flag,
+    /// so without telling them apart DD would take the user's custom down with it.
     dd_pre: Mutex<BTreeMap<u8, BTreeMap<usize, [u8; 3]>>>,
-    /// 軸フレームのキャッシュ: (kind,row) → (取得時刻, 30 セル)。
-    /// 入力キューは全オープンハンドルへ扇出されるので、公式 HUB 等
-    /// 他ツールの要求が起こしたフレームも拾える (相乗り受動化)。
+    /// Axis frame cache: (kind,row) → (capture time, 30 cells).
+    /// The input queue fans out to every open handle, so frames triggered by
+    /// requests from other tools such as the official HUB can also be picked up (passive piggyback).
     axis_cache: AxisCache,
-    /// 自分が直近で投げた `[4,3,kind,row]` の時刻 — 外部トラフィック検出用。
+    /// Time of the `[4,3,kind,row]` I sent most recently — for detecting external traffic.
     axis_self: Mutex<HashMap<(u8, u8), Instant>>,
-    /// 自分が直近で投げたコマンド (grp,sub) の時刻 — 非軸フレームが
-    /// 「他人の応答」か「自分の応答」かを区別するために使う。
+    /// Time of the command (grp,sub) I sent most recently — used to tell whether a non-axis frame is
+    /// "someone else's response" or "my own response".
     cmd_self: Mutex<HashMap<(u8, u8), Instant>>,
-    /// 外部トラフィックを検出したら要求を休む期限 (受動モード)。
+    /// Deadline until which requests are held back after detecting external traffic (passive mode).
     axis_passive: Mutex<Instant>,
 }
 
-/// `2,5` ポーリング wire code → ラベル (SDK Fn)。
+/// `2,5` polling rate wire code → label (SDK Fn).
 fn polling_label(code: u8) -> &'static str {
     match code {
         0 => "8000 Hz",
@@ -243,30 +243,30 @@ pub fn open(dev: hidapi::HidDevice, info: DeviceInfo) -> HubResult<XsydDriver> {
         cmd_self: Mutex::new(HashMap::new()),
         axis_passive: Mutex::new(Instant::now() - Duration::from_secs(1)),
     };
-    // [1,3] DeviceFeature: r[2]=axisType(機種バリアント enum、磁気=2), r[3]=接続,
-    // r[4]={rgb,knob}, r[5]={画面,haptic,numpad,dotMatrix}。レイヤー数ではない。
-    // キーマップ層は SDK 同様 fn0..3 固定 (実機 layer4 は全 0 を返す)。
+    // [1,3] DeviceFeature: r[2]=axisType (model variant enum, magnetic=2), r[3]=connection,
+    // r[4]={rgb,knob}, r[5]={screen,haptic,numpad,dotMatrix}. Not the layer count.
+    // Keymap layers are fixed to fn0..3 as in the SDK (on the real device layer4 returns all 0).
     drv.xs.layers = 4;
-    // FW バージョンを開いた時点で拾って名札に載せる。
+    // Read the FW version at open time and put it on the device name tag.
     let mut info = drv.info.clone();
     if let Ok(r) = drv.cmd(grp::DEVICE, sub::DEVICE_INFO, &[]) {
         info.firmware = parse_fw(&r);
-        // 配布 API の引数: board_id = r[4..8] BE u32, appVersion = r[8..12] "." 結合。
+        // Arguments of the distribution API: board_id = r[4..8] BE u32, appVersion = r[8..12] joined with ".".
         info.board_id = Some(u32::from_be_bytes([r[4], r[5], r[6], r[7]]));
         info.firmware = Some(format!("{}.{}.{}.{}", r[8], r[9], r[10], r[11]));
     }
     info.supported = true;
     drv.info = info;
 
-    // ---- 定数の一括問い合わせ (失敗は全部無視して既定値) ----
-    // RT 精度: [2,12,0] → r[3]/1000
+    // ---- Batch query of constants (all failures are ignored and defaults are used) ----
+    // RT precision: [2,12,0] → r[3]/1000
     if let Ok(r) = drv.cmd(grp::GLOBAL, gfs::RT_PRECISION, &[0]) {
         let step = r[3] as f32 / 1000.0;
         if step > 0.0 {
             drv.xs.rt_step = step;
         }
     }
-    // ポーリング選択肢: [2,5,0] → r[3]=total, r[4..] = codes
+    // Polling rate options: [2,5,0] → r[3]=total, r[4..] = codes
     if let Ok(r) = drv.cmd(grp::GLOBAL, gfs::REPORT_RATE, &[0]) {
         let n = (r[3] as usize).min(7);
         let v: Vec<_> = (0..n)
@@ -276,11 +276,11 @@ pub fn open(dev: hidapi::HidDevice, info: DeviceInfo) -> HubResult<XsydDriver> {
             drv.xs.polling = v;
         }
     }
-    // 構成数: [2,3,0] → r[3]=total
+    // Config count: [2,3,0] → r[3]=total
     if let Ok(r) = drv.cmd(grp::GLOBAL, gfs::CONFIG_SWITCH, &[0]) {
         drv.xs.configs = r[3].clamp(0, 10);
     }
-    // ライト領域: [2,8,0] → r[3]=total, r[4+4i]=index
+    // Light areas: [2,8,0] → r[3]=total, r[4+4i]=index
     if let Ok(r) = drv.cmd(grp::GLOBAL, gfs::EFFECT_AREA, &[0]) {
         let n = (r[3] as usize).min(14);
         let areas: Vec<u8> = (0..n).map(|i| r[4 + i * 4]).collect();
@@ -288,25 +288,25 @@ pub fn open(dev: hidapi::HidDevice, info: DeviceInfo) -> HubResult<XsydDriver> {
             drv.xs.light_areas = areas;
         }
     }
-    // マクロ領域: [2,14,0] → r[3]=スロット数, r[4,5]=最大イベント数
+    // Macro area: [2,14,0] → r[3]=slot count, r[4,5]=max events
     if let Ok(r) = drv.cmd(grp::GLOBAL, gfs::MACRO_SPACE, &[0]) {
         if r[3] > 0 {
             drv.xs.macro_space = Some((r[3], u16::from_le_bytes([r[4], r[5]])));
         }
     }
-    // 軸ライブラリ: [2,7,0] → r[3]=total, r[4..]=u16 id
+    // Axis library: [2,7,0] → r[3]=total, r[4..]=u16 id
     if let Ok(r) = drv.cmd(grp::GLOBAL, gfs::AXIS_LIB, &[0]) {
         let n = (r[3] as usize).min(30);
         drv.xs.axes = (0..n)
             .map(|i| u16::from_le_bytes([r[4 + i * 2], r[5 + i * 2]]))
             .collect();
     }
-    // DoubleLighting: [2,10,0] → r[3]==1 で上下 2 ゾーン (SDK GFSDoubleLighting)。
+    // DoubleLighting: [2,10,0] → r[3]==1 means 2 zones, upper and lower (SDK GFSDoubleLighting).
     if let Ok(r) = drv.cmd(grp::GLOBAL, gfs::DOUBLE_LIGHT, &[0]) {
         drv.xs.double_lighting = r[3] == 1;
     }
-    // 全ストローク: 任意 1 キーの perf 応答 r[23,24] (axisRangeMax) /1000。
-    // 末尾順は v2Id(2) + rangeMax(2) + coef(2) — r[25,26] は係数なので読まない。
+    // Full stroke: r[23,24] (axisRangeMax) /1000 of the perf response of any 1 key.
+    // Tail order is v2Id(2) + rangeMax(2) + coef(2) — r[25,26] is the coefficient, so it is not read.
     if let Some(k) = registry::su66max_layout().first() {
         let (row, col) = registry::su66max_matrix_pos(k.id);
         if let Ok(r) = drv.cmd(grp::PERFORMANCE, sub::GET_PERF, &[row, col]) {
@@ -321,10 +321,10 @@ pub fn open(dev: hidapi::HidDevice, info: DeviceInfo) -> HubResult<XsydDriver> {
 }
 
 impl XsydDriver {
-    /// group/sub フレーム → 64B 応答。sub==0xFF (未対応) は Unsupported。
+    /// group/sub frame → 64B response. sub==0xFF (unsupported) is Unsupported.
     fn cmd(&self, group: u8, sub: u8, args: &[u8]) -> HubResult<[u8; 64]> {
-        // fail-fast: 連続タイムアウト中は即 Disconnected。PROBE_MS ごとに
-        // 1 回だけ実コマンドを通して復帰を確認する (デッド状態でも永続化しない)。
+        // fail-fast: while consecutive timeouts continue, return Disconnected immediately. Every PROBE_MS,
+        // pass one real command through, only once, to check recovery (do not persist even in the dead state).
         let probing = self.fails.load(Ordering::Relaxed) >= FAIL_FAST_AFTER;
         if probing {
             let mut ds = self.dead_since.lock().unwrap_or_else(|p| p.into_inner());
@@ -341,7 +341,7 @@ impl XsydDriver {
         let n = args.len().min(62);
         w[2..2 + n].copy_from_slice(&args[..n]);
         self.ch.send(&w)?;
-        // 自分の送信を記録 — drain で「他人の応答」と区別するために使う。
+        // Record my own send — used by drain to tell it apart from "someone else's response".
         self.cmd_self
             .lock()
             .unwrap_or_else(|p| p.into_inner())
@@ -377,12 +377,12 @@ impl XsydDriver {
         Err(HubError::Protocol("xsyd: response timeout".into()))
     }
 
-    /// ドライバ破棄時の保険 — DD の isCustom ピンは無期限に残る (実機確認:
-    /// ストリーム停止後も固まったまま) ので、ハンドルが閉じる前に追跡中の
-    /// ピンだけ解放する。DD を一度も使っていなければ何も送らない (以前は
-    /// 全チャンクにゼロペイロードを送り、ユーザーのカスタム色ごと消していた)。
-    /// (`direct_drive_stop` 側が通常経路で完全な停止を行うので、
-    /// ここではベストエフォートのピン解除だけ行う)
+    /// Safety net on driver drop — DD's isCustom pins remain indefinitely (confirmed on a real device:
+    /// they stay stuck even after the stream stops), so only the tracked pins are released
+    /// before the handle closes. If DD was never used, nothing is sent (it used to
+    /// send a zero payload to every chunk, wiping the user's custom colors too).
+    /// (`direct_drive_stop` does the complete stop on the normal path,
+    /// so here only a best-effort pin release is done)
     fn release_dd_pins(&self) {
         let pins = self.dd_pins.lock().map(|p| p.clone()).unwrap_or_default();
         for (area, cells) in pins {
@@ -394,9 +394,9 @@ impl XsydDriver {
         }
     }
 
-    /// DD セッション開始前に `[5,3]` でユーザーカスタム (isCustom=255) の
-    /// セル+色を退避する。DD 解放時に `release_cells` が flag=255+保存色で
-    /// 戻すために使う。
+    /// Saves aside the cells + colors of user custom (isCustom=255) with `[5,3]` before a DD session
+    /// starts. Used by `release_cells` to restore with flag=255 + the saved color
+    /// when DD is released.
     fn capture_dd_pre(&self, area: u8) -> HubResult<()> {
         let mut pre = BTreeMap::new();
         for c in 0..9u8 {
@@ -427,11 +427,11 @@ impl XsydDriver {
         Ok(r)
     }
 
-    /// `cells` の DD ピンを `[5,4]` で解放する。チャンクごとに `[5,3]` で
-    /// 読み戻して対象セルだけ直すので、ユーザーのカスタムや他のピンは温存
-    /// される。対象セルが `dd_pre` にあれば DD 前のカスタム色+flag=255 で
-    /// 復帰し、無ければ flag=0 で解放 (色バイトは保持)。
-    /// 戻り値: 書き込みに失敗したチャンク集合。
+    /// Releases the DD pins of `cells` with `[5,4]`. For each chunk, reads back with `[5,3]`
+    /// and fixes only the target cells, so the user's custom and other pins are preserved.
+    /// If a target cell is in `dd_pre`, it is restored with the pre-DD custom color + flag=255,
+    /// otherwise it is released with flag=0 (the color byte is kept).
+    /// Return value: the set of chunks whose write failed.
     fn release_cells(
         &self,
         area: u8,
@@ -472,8 +472,8 @@ impl XsydDriver {
         failed
     }
 
-    /// デバイスがデッド判定中なら Err(Disconnected)。read()/apply() の節目で
-    /// 呼んで、応答しないデバイスへの全コマンド掃射を早めに止める。
+    /// Returns Err(Disconnected) if the device is declared dead. Call it at breakpoints of read()/apply()
+    /// to stop the sweep of every command to an unresponsive device early.
     fn alive(&self) -> HubResult<()> {
         if self.fails.load(Ordering::Relaxed) >= FAIL_FAST_AFTER {
             Err(HubError::Disconnected)
@@ -482,8 +482,8 @@ impl XsydDriver {
         }
     }
 
-    /// レイヤーのキーストリームを読む: `[3,1,layer,row]` → r[4..64] = 30×u16 LE。
-    /// stream 上の位置は row*30+col。
+    /// Reads the key stream of a layer: `[3,1,layer,row]` → r[4..64] = 30×u16 LE.
+    /// Position in the stream is row*30+col.
     fn read_keymap(&self, layer: u8) -> HubResult<Vec<u16>> {
         let mut stream = vec![0u16; 8 * 30];
         let mut got_any = false;
@@ -507,7 +507,7 @@ impl XsydDriver {
         Ok(stream)
     }
 
-    /// キー 1 個の書き込み `[3,4,layer,row,col,codeLE]` (SDK の SetKeyCode)。
+    /// Writes a single key `[3,4,layer,row,col,codeLE]` (SDK SetKeyCode).
     fn write_key(&self, layer: u8, layout_index: u16, code: u16) -> HubResult<()> {
         let (row, col) = registry::su66max_matrix_pos(layout_index);
         let mut args = vec![layer, row, col];
@@ -516,7 +516,7 @@ impl XsydDriver {
         Ok(())
     }
 
-    /// ストリーム全体を行単位で書き込む。
+    /// Writes the whole stream row by row.
     fn write_stream(&self, layer: u8, stream: &[u16]) -> HubResult<()> {
         for row in 0..8u8 {
             let mut args = vec![layer, row];
@@ -528,8 +528,8 @@ impl XsydDriver {
         Ok(())
     }
 
-    /// 工場出荷キーマップ `[3,6,(system<<4)|fn,row]` → 30×u16 のストリーム。
-    /// Fn 層の工場値 (数字行→F1-F12 等) が取れる。失敗した行は 0 のまま。
+    /// Factory keymap `[3,6,(system<<4)|fn,row]` → 30×u16 stream.
+    /// Gets the factory values of the Fn layer (number row → F1-F12 etc.). Rows that fail stay 0.
     fn factory_stream(&self, layer: u8) -> Option<Vec<u16>> {
         let sys = match self.read_setting("system_type") {
             Some(SettingValue::Choice(v)) => v.clamp(0, 1) as u8,
@@ -555,7 +555,7 @@ impl XsydDriver {
         got_any.then_some(stream)
     }
 
-    /// caps の settings id → 現在値。失敗は None (出さない)。
+    /// settings id of caps → current value. None on failure (not shown).
     fn read_setting(&self, id: &str) -> Option<SettingValue> {
         match id {
             // [2,5,1] → r[3] = wire code
@@ -568,12 +568,12 @@ impl XsydDriver {
                 .cmd(grp::GLOBAL, gfs::SYSTEM_SETTING, &[1])
                 .ok()
                 .map(|r| SettingValue::Choice(r[3] as i64)),
-            // [2,16,1] → r[3] = status (1=有効)
+            // [2,16,1] → r[3] = status (1=enabled)
             "shake_opt" => self
                 .cmd(grp::GLOBAL, gfs::SHAKE_OPT, &[1])
                 .ok()
                 .map(|r| SettingValue::Bool(r[3] == 1)),
-            // [2,13,1] → r[3,4] u16 分
+            // [2,13,1] → r[3,4] u16 minutes
             "light_sleep" => self
                 .cmd(grp::GLOBAL, gfs::SLEEP_TIME, &[1])
                 .ok()
@@ -602,7 +602,7 @@ impl XsydDriver {
         Ok(())
     }
 
-    /// 現在の構成 index `[2,3,1]` → r[3]。
+    /// Current config index `[2,3,1]` → r[3].
     fn read_profile(&self) -> HubResult<ProfileState> {
         let r = self.cmd(grp::GLOBAL, gfs::CONFIG_SWITCH, &[1])?;
         let active = r[3].min(self.xs.configs.saturating_sub(1));
@@ -622,25 +622,25 @@ impl XsydDriver {
         Ok(ProfileState { active, names })
     }
 
-    /// SaveParam `[2,2,scope]` — 書き込み後のフラッシュ保存。
-    /// 実機は save 直後の読み戻しに古い値を返すことがあるため、反映を待ってから返る。
+    /// SaveParam `[2,2,scope]` — flash save after writing.
+    /// The real device sometimes returns an old value when read back right after save, so this waits for it to take effect before returning.
     fn save(&self, scope: u8) -> HubResult<()> {
         self.cmd(grp::GLOBAL, gfs::SAVE_PARAM, &[scope])?;
         std::thread::sleep(Duration::from_millis(80));
         Ok(())
     }
 
-    /// 範囲指定ファクトリーリセット `[2,1,scope]`。
+    /// Factory reset by scope `[2,1,scope]`.
     fn reset_scope(&self, scope: u8, label: &str) -> HubResult<ActionOutcome> {
         self.cmd(grp::GLOBAL, gfs::RESET_FACTORY, &[scope])?;
         Ok(ActionOutcome {
-            message: Some(format!("{label}を初期値に戻しました")),
+            message: Some(format!("{label} reset to defaults")),
             reload: true,
         })
     }
 
-    /// perf 応答 (r[4..]) → KeyPerf。u16 値は mm×1000 の LE。
-    /// mode: 0=Normal, 1=RT (連続 RT), 2=IntervalRT (非連続 RT) — 公式 enum vn 準拠。
+    /// perf response (r[4..]) → KeyPerf. u16 values are mm×1000 LE.
+    /// mode: 0=Normal, 1=RT (continuous RT), 2=IntervalRT (non-continuous RT) — follows the official enum vn.
     fn decode_perf(r: &[u8; 64]) -> KeyPerf {
         let mm = |i: usize| u16::from_le_bytes([r[i], r[i + 1]]) as f32 / 1000.0;
         KeyPerf {
@@ -661,10 +661,10 @@ impl XsydDriver {
         }
     }
 
-    /// `[4,1,row,col]` → KeyPerf + 追従フィールド (axis/calib/axisV2Id/coef/rangeMax)。
-    /// write 時に保持が要るフィールドは生応答を残しておく。
-    /// 応答は r[2]=row, r[3]=col のエコー。live travel 等で混入した他 sub の
-    /// group-4 応答 (axis データ) を取り違えないよう照合し、ずれていれば 1 回読み直す。
+    /// `[4,1,row,col]` → KeyPerf + trailing fields (axis/calib/axisV2Id/coef/rangeMax).
+    /// Keeps the raw response for fields that must be preserved at write time.
+    /// The response echoes r[2]=row, r[3]=col. To avoid mistaking a group-4 response of another sub
+    /// (axis data) mixed in by live travel etc., it is matched, and if it is off it is read again once.
     fn read_perf(&self, row: u8, col: u8) -> HubResult<(KeyPerf, [u8; 64])> {
         let mut r = self.cmd(grp::PERFORMANCE, sub::GET_PERF, &[row, col])?;
         if r[2] != row || r[3] != col {
@@ -673,16 +673,16 @@ impl XsydDriver {
         Ok((Self::decode_perf(&r), r))
     }
 
-    /// `[4,2,row,col,...]` — SDK のレイアウト:
-    /// mode, nP, nR, rtFirst, rtPress, rtRelease, pDead, rDead (各 u16 LE mm×1000),
-    /// axis, calibrate, axisV2Id, axisRangeMax, axisCoefficient (後者 3 つは読み値を維持)。
+    /// `[4,2,row,col,...]` — SDK layout:
+    /// mode, nP, nR, rtFirst, rtPress, rtRelease, pDead, rDead (each u16 LE mm×1000),
+    /// axis, calibrate, axisV2Id, axisRangeMax, axisCoefficient (the last 3 keep the read values).
     fn write_perf(&self, row: u8, col: u8, p: &KeyPerf) -> HubResult<()> {
-        let (_, cur) = self.read_perf(row, col)?; // axis 系フィールドを保持するため先読み
+        let (_, cur) = self.read_perf(row, col)?; // read first to preserve the axis fields
         let mm = |v: f32| (v * 1000.0).round().clamp(0.0, 65535.0) as u16;
         let mut args = vec![
             row,
             col,
-            // 公式 vn: Normal=0, RT(連続)=1, IntervalRT(非連続)=2
+            // Official vn: Normal=0, RT (continuous)=1, IntervalRT (non-continuous)=2
             match p.mode {
                 TriggerMode::Normal => 0,
                 TriggerMode::Rapid if p.continuous => 1,
@@ -701,17 +701,17 @@ impl XsydDriver {
             args.extend_from_slice(&v.to_le_bytes());
         }
         args.push(p.switch_type); // axis
-                                  // 公式レイアウト: axis + calibrate + axisV2Id(2) + axisRangeMax(2) + axisCoefficient(2)。
-                                  // calibrate は公式が常に 0 を送る (calibration 中フラグを残さない)。
-                                  // v2Id/rangeMax/coef は読み値を維持する。
+                                  // Official layout: axis + calibrate + axisV2Id(2) + axisRangeMax(2) + axisCoefficient(2).
+                                  // The official app always sends calibrate as 0 (no calibration-in-progress flag is left).
+                                  // v2Id/rangeMax/coef keep the read values.
         args.push(0);
         args.extend_from_slice(&cur[21..27]);
         self.cmd(grp::PERFORMANCE, sub::SET_PERF, &args)?;
         Ok(())
     }
 
-    /// `[4,3,kind,row]` フレームならキャッシュに入れて true を返す。
-    /// フレーム内容は 30×u16 LE。
+    /// If it is a `[4,3,kind,row]` frame, puts it in the cache and returns true.
+    /// The frame content is 30×u16 LE.
     fn note_axis_frame(&self, b: &[u8]) -> bool {
         if b.len() >= 64 && b[0] == grp::PERFORMANCE && b[1] == sub::AXIS_DATA {
             let mut out = [0u16; 30];
@@ -728,14 +728,14 @@ impl XsydDriver {
         }
     }
 
-    /// 入力キューを軽くドレインして流れている軸フレームをキャッシュする。
-    /// HID 入力レポートは全オープンハンドルへ扇出されるので、公式 HUB 等の
-    /// 別プロセスが投げた要求の応答もここに届く — 相乗りすれば自分は要求を
-    /// 出さずに済み、公式 HUB 側の応答キューに他人のフレームを混ぜない。
-    /// 「自分が最近要求していない軸フレームだけ」が流れているか、
-    /// 軸以外の既知 group フレーム (= 他人のコマンド応答 — 公式はエコー検証
-    /// せず最初のフレームを応答とみなすので混入は致命的) が流れていれば
-    /// 外部トラフィック中と判定し、受動モードを延長する (戻り値 = 外部検出)。
+    /// Lightly drains the input queue and caches the axis frames that are flowing.
+    /// HID input reports fan out to every open handle, so the responses to requests sent by another process
+    /// such as the official HUB arrive here too — by piggybacking, we need not issue requests ourselves,
+    /// and we do not mix other people's frames into the official HUB's response queue.
+    /// If only "axis frames that I have not requested recently" are flowing,
+    /// or known non-axis group frames (= responses to someone else's commands — the official app
+    /// does not verify the echo and takes the first frame as the response, so mixing is fatal) are flowing,
+    /// it is judged as external traffic and passive mode is extended (return value = external detected).
     fn drain_axis(&self, budget_ms: u64) -> bool {
         let deadline = Instant::now() + Duration::from_millis(budget_ms);
         let mut saw_any = false;
@@ -752,17 +752,17 @@ impl XsydDriver {
                     .is_some_and(|t| t.elapsed() < Duration::from_millis(500));
                 saw_ours |= ours;
             } else if self.is_foreign_cmd(&b) {
-                // 軸フレーム以外の他人のコマンド応答 (自分の最近の
-                // 送信に対応するものは除外済み)。
+                // Another's command response that is not an axis frame (those matching my recent
+                // sends are already excluded).
                 saw_foreign = true;
             }
             if Instant::now() >= deadline {
                 break;
             }
         }
-        // 外部検出で受動化。デバイス側のストリームは他人のコマンドが既に
-        // 解除している (任意の非軸コマンドで止まる) ので、こちらからは
-        // 何も送らない — 送ればその応答が公式のキューに混ざって逆効果。
+        // Go passive on external detection. The device-side stream has already been stopped by
+        // the other's command (any non-axis command stops it), so we send
+        // nothing from our side — sending would mix its response into the official queue, which backfires.
         if saw_foreign || (saw_any && !saw_ours) {
             self.note_foreign();
             return true;
@@ -770,8 +770,8 @@ impl XsydDriver {
         false
     }
 
-    /// 非軸フレームが「他人のコマンド応答」か。既知 group・エラー応答
-    /// 以外・かつ自分が最近送った同 (grp,sub) の応答ではないもの。
+    /// Whether a non-axis frame is "someone else's command response": a known group, not an error response,
+    /// and not a response to the same (grp,sub) that I sent recently.
     fn is_foreign_cmd(&self, b: &[u8]) -> bool {
         (1..=13).contains(&b[0])
             && b.get(1) != Some(&0xFF)
@@ -784,18 +784,18 @@ impl XsydDriver {
                 .is_none_or(|t| t.elapsed() > Duration::from_millis(800))
     }
 
-    /// 外部トラフィックを記録して受動モードを延長する。
+    /// Records external traffic and extends passive mode.
     fn note_foreign(&self) {
         *self.axis_passive.lock().unwrap_or_else(|p| p.into_inner()) =
             Instant::now() + Duration::from_secs(8);
     }
 
-    /// `[4,3,kind,row]` → 30×u16 LE (mm×1000)。kind: axis::* (ADC=0,Route=1,Calibrate=2,KeyStatus=3)。
-    /// 実機は live 軸データを `[4,3,kind,row]` フレームで自律ストリーム配信する
-    /// (全 kind×row 組を ~16ms で巡回)。cmd() の「最初の group-4 パケットを応答と
-    /// みなす」受信だと別 kind/別行のフレームを拾って値がずれる (ADC 値が
-    /// status/route 欄に混入し OBS オーバーレイが点滅していた原因)。
-    /// → エコー (r[2]=kind, r[3]=row) が一致するフレームまで読み続ける。
+    /// `[4,3,kind,row]` → 30×u16 LE (mm×1000). kind: axis::* (ADC=0,Route=1,Calibrate=2,KeyStatus=3).
+    /// The real device autonomously streams live axis data as `[4,3,kind,row]` frames
+    /// (cycling through every kind×row pair in ~16ms). With cmd()'s receive that "treats the first group-4 packet as
+    /// the response", a frame of another kind/row is picked up and the values drift (the cause of ADC values
+    /// leaking into the status/route fields and the OBS overlay flickering).
+    /// → Keep reading until a frame whose echo (r[2]=kind, r[3]=row) matches.
     fn axis_row(&self, row: u8, kind: u8) -> HubResult<[u16; 30]> {
         let probing = self.fails.load(Ordering::Relaxed) >= FAIL_FAST_AFTER;
         if probing {
@@ -809,7 +809,7 @@ impl XsydDriver {
         }
         self.ch
             .send(&[grp::PERFORMANCE, sub::AXIS_DATA, kind, row])?;
-        // 自分の要求を記録 — drain で外部トラフィックと区別するために使う。
+        // Record my own request — used by drain to tell it apart from external traffic.
         self.axis_self
             .lock()
             .unwrap_or_else(|p| p.into_inner())
@@ -819,8 +819,8 @@ impl XsydDriver {
         while Instant::now() < deadline {
             match self.ch.recv(POLL_MS) {
                 Ok(b) => {
-                    // 軸フレームはエコー外でもキャッシュに入れる
-                    // (要求した 1 枚で他行/他 kind のフレームも流れるため)。
+                    // Axis frames go into the cache even if they are not the echo
+                    // (the one requested also makes frames of other rows/kinds flow).
                     if self.note_axis_frame(&b) {
                         if b[2] == kind && b[3] == row {
                             self.fails.store(0, Ordering::Relaxed);
@@ -841,8 +841,8 @@ impl XsydDriver {
                         return Err(HubError::Unsupported("command"));
                     }
                     if self.is_foreign_cmd(&b) {
-                        // 他人のコマンド応答 → 受動化 (デバイス側はその
-                        // コマンドで既に解除済み、こちらからは送らない)。
+                        // Someone else's command response → go passive (the device side was already released by
+                        // that command; we send nothing).
                         self.note_foreign();
                     }
                 }
@@ -858,7 +858,7 @@ impl XsydDriver {
         Err(HubError::Protocol("xsyd: axis response timeout".into()))
     }
 
-    /// 高度キー読み `[6,1,row,col,0]` → mode!=NONE なら Advanced をデコード。
+    /// Advanced key read `[6,1,row,col,0]` → decodes Advanced if mode!=NONE.
     fn read_higher(&self, layout_index: usize) -> HubResult<Option<Advanced>> {
         let key = &registry::su66max_layout()[layout_index];
         let (row, col) = registry::su66max_matrix_pos(key.id);
@@ -866,8 +866,8 @@ impl XsydDriver {
         Ok(decode_higher(&r))
     }
 
-    /// 高度キー書き `[6,2,row,col,mode,...]`。SOCD/RS は 2 パケット。
-    /// `binding=None` で解除 (mode=NONE)。
+    /// Advanced key write `[6,2,row,col,mode,...]`. SOCD/RS take 2 packets.
+    /// `binding=None` clears it (mode=NONE).
     fn write_higher(&self, layout_index: usize, binding: Option<&Advanced>) -> HubResult<()> {
         let key = &registry::su66max_layout()[layout_index];
         let (row, col) = registry::su66max_matrix_pos(key.id);
@@ -877,7 +877,7 @@ impl XsydDriver {
         Ok(())
     }
 
-    /// マクロモード `[7,1,id]` → (valid, actNum, repNum, mode)。
+    /// Macro mode `[7,1,id]` → (valid, actNum, repNum, mode).
     fn read_macro_mode(&self, id: u8) -> HubResult<(bool, u16, u16, u8)> {
         let r = self.cmd(grp::MACRO, sub::GET_MACRO_MODE, &[id])?;
         Ok((
@@ -888,7 +888,7 @@ impl XsydDriver {
         ))
     }
 
-    /// マクロデータ `[7,3,id,offset]` — offset 単位で 15 イベントずつ取得。
+    /// Macro data `[7,3,id,offset]` — fetches 15 events at a time, by offset.
     fn read_macro_events(&self, id: u8, count: u16) -> HubResult<Vec<MacroEvent>> {
         let mut out = Vec::new();
         let mut offset = 0u8;
@@ -918,13 +918,13 @@ impl XsydDriver {
             }
             offset += 1;
             if r[3] != offset - 1 {
-                break; // offset 不一致 = データ終端
+                break; // offset mismatch = end of data
             }
         }
         Ok(out)
     }
 
-    /// マクロ書き込み。mode パケット → data パケット (15 イベントずつ) の順。
+    /// Macro write. Mode packet → data packets (15 events at a time), in that order.
     fn write_macro(&self, slot: u8, def: Option<&MacroDef>) -> HubResult<()> {
         match def {
             None => {
@@ -957,7 +957,7 @@ impl XsydDriver {
         Ok(())
     }
 
-    /// 全ストローク内の route 値 (mm) を layout index 順に並べる。
+    /// Lays out the route values (mm) within the full stroke in layout index order.
     fn route_mm(&self) -> HubResult<Vec<f32>> {
         let layout = registry::su66max_layout();
         let mut out = vec![0.0f32; layout.len()];
@@ -978,16 +978,16 @@ impl XsydDriver {
         Ok(out)
     }
 
-    /// `[5,1,area,0]` → 照明基本 (SDK lightingBaseData): r[4]=open, r[5]=mode
-    /// (0=固定色, 1..16=ダイナミック = Y1 enum), r[6]=輝度 0-100,
-    /// r[7]=速度 0-100, r[8]=方向 (0=Forward,1=Backward), r[9]=選択パレット色。
-    /// open は DoubleLighting 機では jo enum (0=Close,1=OpenDown,2=OpenUp,3=Open)、
-    /// SingleLighting では真偽 (0=Close, 非0=Open)。どちらでも非0=点灯として読む。
-    /// 固定色色はパレット `[5,1,area,1]` の選択スロットから取る。
+    /// `[5,1,area,0]` → basic lighting (SDK lightingBaseData): r[4]=open, r[5]=mode
+    /// (0=solid color, 1..16=dynamic = Y1 enum), r[6]=brightness 0-100,
+    /// r[7]=speed 0-100, r[8]=direction (0=Forward,1=Backward), r[9]=selected palette color.
+    /// open is the jo enum on DoubleLighting devices (0=Close,1=OpenDown,2=OpenUp,3=Open),
+    /// and a boolean on SingleLighting (0=Close, nonzero=Open). Either way nonzero is read as lit.
+    /// The solid color is taken from the selected slot of the palette `[5,1,area,1]`.
     fn read_lighting(&self, area: u8) -> HubResult<LightingState> {
         let r = self.cmd(grp::LIGHTING, sub::READ, &[area, 0])?;
         let sel = (r[9] as usize).min(7);
-        // パレット: [5,1,area,1] → r[4+4i..] = [B,G,R,H]×8
+        // Palette: [5,1,area,1] → r[4+4i..] = [B,G,R,H]×8
         let palette: Vec<Rgb> = self
             .cmd(grp::LIGHTING, sub::READ, &[area, 1])
             .map(|p| {
@@ -997,14 +997,14 @@ impl XsydDriver {
             })
             .unwrap_or_default();
         let color = palette.get(sel).copied().unwrap_or(Rgb::new(255, 255, 255));
-        // 彩度 (ColorCorrection): [5,1,area,2] → r[4,5,6] = R,G,B (公式 LightingSaturation)。
+        // Saturation (ColorCorrection): [5,1,area,2] → r[4,5,6] = R,G,B (official LightingSaturation).
         let color_correction = self
             .cmd(grp::LIGHTING, sub::READ, &[area, 2])
             .ok()
             .map(|c| Rgb::new(c[4], c[5], c[6]));
         let mut per_key = BTreeMap::new();
         if area == 0 {
-            // [5,3,0,chunk] → 15 セル×4B (B,G,R,isCustom)。9 チャンク=135 セル。
+            // [5,3,0,chunk] → 15 cells×4B (B,G,R,isCustom). 9 chunks=135 cells.
             let layout = registry::su66max_layout();
             let mut cell_key = [usize::MAX; 135];
             for (i, k) in layout.iter().enumerate() {
@@ -1014,7 +1014,7 @@ impl XsydDriver {
                     }
                 }
             }
-            // DD ピンの読み戻しにはプレビュー色しかない。本来のカスタム色は退避から読む。
+            // The readback of DD pins only has the preview color. The real custom color is read from the saved copy.
             let ddp = self
                 .dd_pins
                 .lock()
@@ -1027,9 +1027,9 @@ impl XsydDriver {
                 .get(&area)
                 .cloned()
                 .unwrap_or_default();
-            // 全チャンク必須 — 1 チャンクでも落ちたら「その範囲にカスタム色が
-            // 無い」ではなく読み出し失敗。部分読み出しを完全な状態として返すと
-            // 後の write_per_key (未指定セルは isCustom=0 消去) が実機の色を消す。
+            // All chunks are required — if even 1 chunk drops, it is a read failure, not "there is no custom color
+            // in that range". Returning a partial read as a complete state would make the later write_per_key
+            // (unspecified cells are erased with isCustom=0) wipe the colors on the real device.
             for c in 0..9u8 {
                 let rb = match self.read_dd_chunk(0, c) {
                     Ok(rb) => rb,
@@ -1050,8 +1050,8 @@ impl XsydDriver {
                 }
             }
         }
-        // open バイト: DoubleLighting 機の Keyboard → jo {0=Close,1=OpenDown,2=OpenUp,3=Open}、
-        // それ以外は真偽。どちらでも非 0 = 点灯として読む。
+        // open byte: Keyboard on DoubleLighting devices → jo {0=Close,1=OpenDown,2=OpenUp,3=Open},
+        // otherwise boolean. Either way nonzero is read as lit.
         let open = r[4];
         let zone_on = if area == 0 && self.xs.double_lighting {
             vec![open == 2 || open == 3, open == 1 || open == 3]
@@ -1060,7 +1060,7 @@ impl XsydDriver {
         };
         Ok(LightingState {
             on: open != 0,
-            // mode バイトはモード一覧のインデックスそのまま (0..19)。
+            // The mode byte is the index into the mode list as is (0..19).
             effect: r[5].min(19),
             color,
             brightness: r[6].min(100),
@@ -1074,13 +1074,13 @@ impl XsydDriver {
         })
     }
 
-    /// `[5,4,0,chunk,…15セル×4B]` — カスタム色を書き込む。
-    /// `per_key` に含まれるセルは isCustom=255、それ以外は isCustom=0 で書く
-    /// (カスタム状態は `per_key` が絶対状態 — 未指定セルはクリアされる。
-    /// 公式と同じく色バイトは既存値を保持し、フラグだけ変える)。
+    /// `[5,4,0,chunk,…15 cells×4B]` — writes custom colors.
+    /// Cells included in `per_key` are written with isCustom=255, others with isCustom=0
+    /// (`per_key` is the absolute custom state — unspecified cells are cleared.
+    /// As in the official app, color bytes keep the existing values and only the flag changes).
     fn write_per_key(&self, per_key: &BTreeMap<usize, Rgb>) -> HubResult<()> {
         let layout = registry::su66max_layout();
-        // 現行 135 セルを読み込む (未指定セルの色バイト保持 + 変更検出のため)
+        // Read the current 135 cells (to keep the color bytes of unspecified cells + detect changes)
         let mut cells = [[0u8; 4]; 135];
         for c in 0..9u8 {
             if let Ok(rb) = self.cmd(grp::LIGHTING, sub::LIGHT_READBACK, &[0, c]) {
@@ -1102,7 +1102,7 @@ impl XsydDriver {
                 }
             }
         }
-        // 変化した chunk だけ送信する
+        // Send only the chunks that changed
         for c in 0..9u8 {
             let lo = c as usize * 15;
             let hi = lo + 15;
@@ -1118,17 +1118,17 @@ impl XsydDriver {
         Ok(())
     }
 
-    /// `[5,2,area,0, open, mode, 輝度, 速度, 方向, パレット選択]` (SDK setLightingBase)。
-    /// mode はモード一覧のインデックス (0..19)。カスタム色はモードではなく
-    /// isCustom セルのオーバーレイなので mode には触れない。
-    /// open: Keyboard (area 0) は DoubleLighting — jo enum で上/下ゾーンを
-    /// 個別に開閉する (`zone_on = [上, 下]` → 両方=3, 上のみ=2, 下のみ=1, 両方閉=0)。
-    /// `zone_on` が無い状態では on → 3 (両ゾーン点灯)。それ以外のエリアは真偽 (0/1)。
-    /// 色はパレット — `palette_sel` を選択スロットとして書き、`palette` が
-    /// 渡されていれば全スロットを、さもなければ選択スロットに `color` を適用する。
-    /// open バイトを状態から組み立てる。Keyboard (area 0) + DoubleLighting は
-    /// jo enum (`zone_on=[上,下]` → 両方=3, 上のみ=2, 下のみ=1, 閉=0)、
-    /// `zone_on` が無ければ on→3。それ以外のエリアは真偽 (0/1)。
+    /// `[5,2,area,0, open, mode, brightness, speed, direction, palette selection]` (SDK setLightingBase).
+    /// mode is an index into the mode list (0..19). Custom color is not a mode but an overlay of
+    /// isCustom cells, so mode is not touched.
+    /// open: Keyboard (area 0) is DoubleLighting — the upper/lower zones are opened and closed
+    /// individually with the jo enum (`zone_on = [upper, lower]` → both=3, upper only=2, lower only=1, both closed=0).
+    /// Without `zone_on`, on → 3 (both zones lit). Other areas use a boolean (0/1).
+    /// Color is a palette — writes `palette_sel` as the selected slot, and if `palette` is
+    /// passed, applies all slots, otherwise applies `color` to the selected slot.
+    /// Builds the open byte from the state. Keyboard (area 0) + DoubleLighting uses
+    /// the jo enum (`zone_on=[upper,lower]` → both=3, upper only=2, lower only=1, closed=0),
+    /// on→3 if there is no `zone_on`. Other areas use a boolean (0/1).
     fn compose_open(&self, area: u8, s: &LightingState) -> u8 {
         if area == 0 && self.xs.double_lighting {
             if s.zone_on.len() >= 2 {
@@ -1153,7 +1153,7 @@ impl XsydDriver {
     fn write_lighting(&self, area: u8, s: &LightingState) -> HubResult<()> {
         let cur = self.cmd(grp::LIGHTING, sub::READ, &[area, 0])?;
         let open = self.compose_open(area, s);
-        // 現行と同じベースなら書き込まない (書いた分だけ HID 往復を減らす)。
+        // Do not write if the base is the same as the current one (fewer HID round trips by the amount not written).
         let base = [
             open,
             s.effect.min(19),
@@ -1167,8 +1167,8 @@ impl XsydDriver {
             args.extend_from_slice(&base);
             self.cmd(grp::LIGHTING, sub::SETTING, &args)?;
         }
-        // パレット ([B,G,R,H]×8): 選択スロットに s.color、また s.palette に
-        // スロットごとの色があればそれも反映。現行と同じなら書き込まない。
+        // Palette ([B,G,R,H]×8): s.color goes into the selected slot, and the per-slot colors
+        // of s.palette are reflected too if present. Do not write if the same as the current one.
         if let Ok(pal) = self.cmd(grp::LIGHTING, sub::READ, &[area, 1]) {
             let mut bytes = pal[4..36].to_vec();
             for (i, c) in s.palette.iter().take(8).enumerate() {
@@ -1186,7 +1186,7 @@ impl XsydDriver {
                 self.cmd(grp::LIGHTING, sub::SETTING, &args)?;
             }
         }
-        // 彩度 (ColorCorrection): [5,2,area,2,R,G,B]。現行と同じなら書かない。
+        // Saturation (ColorCorrection): [5,2,area,2,R,G,B]. Do not write if the same as the current one.
         if let Some(cc) = s.color_correction {
             if let Ok(cur) = self.cmd(grp::LIGHTING, sub::READ, &[area, 2]) {
                 if cur[4] != cc.r || cur[5] != cc.g || cur[6] != cc.b {
@@ -1201,12 +1201,12 @@ impl XsydDriver {
         Ok(())
     }
 
-    /// `import_config` — DeviceState を丸ごと書き戻す (各節は既存の
-    /// write_* を使い、節ごとに save)。プロファイル切替は行わない。
+    /// `import_config` — writes the whole DeviceState back (each section uses the existing
+    /// write_*, saving per section). Profile switching is not performed.
     fn import_state(&self, st: &DeviceState) -> HubResult<()> {
         let layout = registry::su66max_layout();
         if let Some(kb) = &st.keyboard {
-            // キーマップ: レイヤーごとに stream を組み立てて一括書き込み。
+            // Keymap: build the stream per layer and write in bulk.
             for (layer, actions) in kb.keymap.iter().enumerate().take(self.xs.layers.into()) {
                 let mut stream = vec![1u16; 8 * 30];
                 for (i, a) in actions.iter().enumerate() {
@@ -1217,21 +1217,21 @@ impl XsydDriver {
                 self.write_stream(layer as u8, &stream)?;
             }
             self.save(scope::LAYOUT)?;
-            // キーごと性能。
+            // Per-key performance.
             for (i, p) in kb.perf.iter().enumerate() {
                 let Some(k) = layout.get(i) else { break };
                 let (row, col) = registry::su66max_matrix_pos(k.id);
                 self.write_perf(row, col, p)?;
             }
             self.save(scope::PERFORMANCE)?;
-            // 高度キー: 絶対状態 (ファイルに無いキーは解除)。
+            // Advanced keys: absolute state (keys absent from the file are cleared).
             let bound: BTreeMap<usize, &Advanced> =
                 kb.advanced.iter().map(|a| (a.key, &a.binding)).collect();
             for i in 0..layout.len() {
                 self.write_higher(i, bound.get(&i).copied())?;
             }
             self.save(scope::HIGHER_KEY)?;
-            // マクロ。
+            // Macros.
             for (i, m) in kb.macros.iter().enumerate() {
                 self.write_macro(i as u8, m.as_ref())?;
             }
@@ -1253,11 +1253,11 @@ impl XsydDriver {
         Ok(())
     }
 
-    /// 公式 configurator (hub.xsyd.top) のエクスポート `keyboard_config.json`。
-    /// `{"data": "<base64>"}` は CryptoJS `AES.encrypt(json, passphrase)` —
-    /// OpenSSL `Salted__` 形式の AES-256-CBC + EVP_BytesToKey(MD5)。
-    /// パスフレーズは公式 SDK バンドルにハードコードされている。
-    /// `keyboards` を持つ平文 JSON はそのまま返す。
+    /// Export `keyboard_config.json` of the official configurator (hub.xsyd.top).
+    /// `{"data": "<base64>"}` is CryptoJS `AES.encrypt(json, passphrase)` —
+    /// AES-256-CBC in OpenSSL `Salted__` format + EVP_BytesToKey(MD5).
+    /// The passphrase is hardcoded in the official SDK bundle.
+    /// Plain JSON that has `keyboards` is returned as is.
     fn official_plain(&self, v: &serde_json::Value) -> HubResult<serde_json::Value> {
         use aes::cipher::{block_padding::Pkcs7, BlockDecryptMut, KeyIvInit};
         use base64::Engine;
@@ -1267,11 +1267,11 @@ impl XsydDriver {
         };
         let raw = base64::engine::general_purpose::STANDARD
             .decode(b64.trim())
-            .map_err(|e| HubError::Invalid(format!("暗号化データ: {e}")))?;
+            .map_err(|e| HubError::Invalid(format!("encrypted data: {e}")))?;
         if raw.len() < 48 || &raw[..8] != b"Salted__" {
-            return Err(HubError::Invalid("暗号化データの形式が違います".into()));
+            return Err(HubError::Invalid("Encrypted data format is invalid".into()));
         }
-        // EVP_BytesToKey: D_i = MD5(D_{i-1} | pass | salt) 連結 → key 32B + iv 16B
+        // EVP_BytesToKey: D_i = MD5(D_{i-1} | pass | salt) concatenated → key 32B + iv 16B
         use md5::{Digest, Md5};
         let mut keyiv = Vec::with_capacity(48);
         let mut prev: Vec<u8> = Vec::new();
@@ -1287,31 +1287,32 @@ impl XsydDriver {
         let pt = cbc::Decryptor::<aes::Aes256>::new_from_slices(&keyiv[..32], &keyiv[32..48])
             .map_err(|e| HubError::Invalid(format!("AES: {e}")))?
             .decrypt_padded_mut::<Pkcs7>(&mut ct)
-            .map_err(|_| HubError::Invalid("復号に失敗しました".into()))?;
-        serde_json::from_slice(pt).map_err(|e| HubError::Invalid(format!("復号 JSON: {e}")))
+            .map_err(|_| HubError::Invalid("Decryption failed".into()))?;
+        serde_json::from_slice(pt).map_err(|e| HubError::Invalid(format!("decrypted JSON: {e}")))
     }
 
-    /// 公式エクスポート → DeviceState (書き込みは `import_state` に任せる)。
-    /// ・キーマップ: `customKeys.win.fn{L}.bindKeyValue` → レイヤー L (wire code そのまま)
-    /// ・高度キー: `advancedKeys.advancedType` → Advanced
-    /// ・性能: `performance` をキーごとにそのまま (公式も全キーに書く)
-    /// ・ライト: `v2light.{Keyboard,DecorateN}` — パレット色等の未指定項目は現行値を保持
-    /// ・マクロ: `macro.v2list` (無効スロットはクリア)
-    /// ・設定: `system.rateOfReturn`/`currentKeyboardSystem`
-    /// MAC 側キーマップは書かない (ファイルの mac セクションはテンプレート値)。
+    /// Official export → DeviceState (the write is left to `import_state`).
+    /// - Keymap: `customKeys.win.fn{L}.bindKeyValue` → layer L (wire code as is)
+    /// - Advanced keys: `advancedKeys.advancedType` → Advanced
+    /// - Performance: `performance` as is for each key (the official app also writes all keys)
+    /// - Lighting: `v2light.{Keyboard,DecorateN}` — unspecified items such as palette colors keep the current values
+    /// - Macros: `macro.v2list` (invalid slots are cleared)
+    /// - Settings: `system.rateOfReturn`/`currentKeyboardSystem`
+    ///
+    /// The MAC-side keymap is not written (the file's mac section holds template values).
     fn official_to_state(&self, v: &serde_json::Value) -> HubResult<DeviceState> {
         let layout = registry::su66max_layout();
-        // pid/vid 照合 — 別モデルのファイルを書き込まない (公式も同じ検査をする)
+        // pid/vid check — do not write a file of a different model (the official app does the same check)
         if let Some(s) = v.get("system") {
             let num = |k: &str| s.get(k).and_then(|x| x.as_u64()).unwrap_or(0) as u32;
             let (vid, pid) = (num("vid"), num("pid"));
             if (vid, pid) != (self.info.vid as u32, self.info.pid as u32) {
                 return Err(HubError::Invalid(format!(
-                    "このファイルは別モデルのキーボード用です ({vid:04x}:{pid:04x})"
+                    "This file is for a different keyboard model ({vid:04x}:{pid:04x})"
                 )));
             }
         }
-        // (row, col) → キー行
+        // (row, col) → key entry
         let mut grid = std::collections::HashMap::new();
         if let Some(rows) = v.get("keyboards").and_then(|k| k.as_array()) {
             for ko in rows.iter().flat_map(|r| r.as_array().into_iter().flatten()) {
@@ -1324,9 +1325,9 @@ impl XsydDriver {
             }
         }
         if grid.is_empty() {
-            return Err(HubError::Invalid("キーボードデータがありません".into()));
+            return Err(HubError::Invalid("No keyboard data".into()));
         }
-        // ---- キーマップ (win.fn0-3 → レイヤー 0-3) ----
+        // ---- Keymap (win.fn0-3 → layers 0-3) ----
         let nlayers = (self.xs.layers as usize).min(4);
         let keymap: Vec<Vec<KeyAction>> = (0..nlayers)
             .map(|l| {
@@ -1343,7 +1344,7 @@ impl XsydDriver {
                     .collect()
             })
             .collect();
-        // ---- 高度キー ----
+        // ---- Advanced keys ----
         let mut advanced = Vec::new();
         for (i, k) in layout.iter().enumerate() {
             let (row, col) = registry::su66max_matrix_pos(k.id);
@@ -1358,7 +1359,7 @@ impl XsydDriver {
                 });
             }
         }
-        // ---- キー性能 (公式も全キーに書く。axis 系は write_perf が現行値を保持) ----
+        // ---- Per-key performance (the official app also writes all keys. The axis fields keep the current values via write_perf) ----
         let perf: Vec<KeyPerf> = layout
             .iter()
             .map(|k| {
@@ -1369,7 +1370,7 @@ impl XsydDriver {
                         .and_then(|x| x.as_f64())
                         .unwrap_or(0.)
                 };
-                // ファイル値は既に mm (公式は wire 送信時に ×1000 する)
+                // File values are already in mm (the official app multiplies by ×1000 when sending over the wire)
                 let mm = |n: &str| num(n) as f32;
                 let mode = num("mode") as u8;
                 KeyPerf {
@@ -1390,7 +1391,7 @@ impl XsydDriver {
                 }
             })
             .collect();
-        // ---- マクロ (v2list) ----
+        // ---- Macros (v2list) ----
         let mut macros = Vec::new();
         if let Some(list) = v
             .get("macro")
@@ -1451,7 +1452,7 @@ impl XsydDriver {
                 });
             }
         }
-        // ---- ライティング (v2light) ----
+        // ---- Lighting (v2light) ----
         let mut lighting = BTreeMap::new();
         if let Some(areas) = v.get("v2light").and_then(|x| x.as_object()) {
             for (name, ad) in areas {
@@ -1466,7 +1467,7 @@ impl XsydDriver {
                     continue;
                 }
                 let light = &ad["light"];
-                // ファイルに無い項目 (パレット色・彩度) は現行値をベースに保持
+                // Items absent from the file (palette colors, saturation) keep the current values as the base
                 let mut s = self.read_lighting(area).unwrap_or_else(|_| LightingState {
                     on: true,
                     effect: 0,
@@ -1506,13 +1507,13 @@ impl XsydDriver {
                 };
                 if let Some(m) = num("selectStaticColor") {
                     s.palette_sel = (m as u8).min(7);
-                    // sel だけ変えると write_lighting が新スロットを
-                    // 旧スロットの色で上書きする — 選択先の色に合わせる。
+                    // Changing only sel makes write_lighting overwrite the new slot
+                    // with the old slot's color — match the color of the selection target.
                     if let Some(c) = s.palette.get(s.palette_sel as usize).copied() {
                         s.color = c;
                     }
                 }
-                // キーごとのカスタム色 → per_key (isCustom のみ)
+                // Per-key custom colors → per_key (isCustom only)
                 if area == 0 {
                     s.per_key = layout
                         .iter()
@@ -1536,7 +1537,7 @@ impl XsydDriver {
                 lighting.insert(area, s);
             }
         }
-        // ---- 汎用設定 ----
+        // ---- General settings ----
         let mut settings = BTreeMap::new();
         if let Some(s) = v.get("system") {
             if let Some(r) = s.get("rateOfReturn").and_then(|x| x.as_u64()) {
@@ -1565,8 +1566,8 @@ impl XsydDriver {
     }
 }
 
-/// 公式 `customKeys.win.fn{L}.bindKeyValue` → wire code。
-/// 数値はそのまま、`"@{...keycode=N}"` テンプレートは keycode を拾う。
+/// Official `customKeys.win.fn{L}.bindKeyValue` → wire code.
+/// Numbers as is; for a `"@{...keycode=N}"` template, the keycode is picked.
 fn official_bind(ko: &serde_json::Value, layer: usize) -> Option<u16> {
     let b = ko
         .get("customKeys")?
@@ -1583,7 +1584,7 @@ fn official_bind(ko: &serde_json::Value, layer: usize) -> Option<u16> {
     }
 }
 
-/// 公式 `advancedKeys` オブジェクト → Advanced (advancedType 0/欠落は None)。
+/// Official `advancedKeys` object → Advanced (advancedType 0/missing is None).
 fn official_advanced(ak: &serde_json::Value, layout: &[LayoutKey]) -> Option<Advanced> {
     let ty = ak.get("advancedType").and_then(|x| x.as_u64())?;
     let num = |v: &serde_json::Value, k: &str| v.get(k).and_then(|x| x.as_u64()).unwrap_or(0);
@@ -1595,7 +1596,7 @@ fn official_advanced(ak: &serde_json::Value, layout: &[LayoutKey]) -> Option<Adv
             .filter_map(|x| x.as_u64().map(|n| n as u32))
             .collect()
     };
-    // ペア相手の (row2,col2) → layout index
+    // (row2,col2) of the pair partner → layout index
     let pair = |v: &serde_json::Value| -> usize {
         let pos = (num(v, "row2") as u8, num(v, "col2") as u8);
         layout
@@ -1664,8 +1665,8 @@ fn official_advanced(ak: &serde_json::Value, layout: &[LayoutKey]) -> Option<Adv
             })
         }
         6 => {
-            // 実データは wrapper (advancedKeys.socd) の内側 socd オブジェクト。
-            // socdMode は wrapper 側 (公式 setHigherKeySOCD と同じ)。
+            // The real data is the socd object inside the wrapper (advancedKeys.socd).
+            // socdMode is on the wrapper side (same as the official setHigherKeySOCD).
             let w = &ak["socd"];
             let d = &w["socd"];
             let cs = codes(d, "kcs");
@@ -1696,8 +1697,8 @@ fn official_advanced(ak: &serde_json::Value, layout: &[LayoutKey]) -> Option<Adv
     }
 }
 
-/// ファームウェア文字列: device_info 応答末尾の ASCII 塊を拾う
-/// (実機: "... 49142 .. 2026101216:41:03" — 末尾がビルド時刻)。
+/// Firmware string: picks the trailing ASCII chunk of the device_info response
+/// (real device: "... 49142 .. 2026101216:41:03" — the tail is the build time).
 fn parse_fw(r: &[u8; 64]) -> Option<String> {
     let tail: String = r[2..]
         .iter()
@@ -1712,12 +1713,12 @@ fn parse_fw(r: &[u8; 64]) -> Option<String> {
     tail.split_whitespace().last().map(|s| s.to_string())
 }
 
-/// layout キー → カスタム LED のセル番号 (通常 1 個、分割スペースは複数 LED を持つ)。
+/// layout key → cell numbers of custom LEDs (normally 1; the split space bar has multiple LEDs).
 ///
-/// LED グリッドは 6 行×21 列 = 126 セル (実機目視で確定、SDK 既定値とも一致)。
-/// 行 1-4 は `cell = 行*21 + floor(x)`。行 5 は右側が圧縮・デッドセル混在のため
-/// 実測テーブル: LCtrl=105, LWin=106, LAlt=107, スペースバー下=109-113,
-/// RAlt=114, Fn=115, ←=117, ↓=118, →=119 (108/116/120-125 はデッドセル)。
+/// The LED grid is 6 rows×21 columns = 126 cells (fixed by visual inspection on the real device, also matches the SDK default).
+/// Rows 1-4 use `cell = row*21 + floor(x)`. Row 5 has a compressed right side and mixed dead cells, so it is a
+/// measured table: LCtrl=105, LWin=106, LAlt=107, below the space bar=109-113,
+/// RAlt=114, Fn=115, ←=117, ↓=118, →=119 (108/116/120-125 are dead cells).
 fn led_cells(k: &devhub_core::model::LayoutKey) -> Vec<usize> {
     let row = (k.id >> 4) as usize;
     if row == 5 {
@@ -1725,9 +1726,9 @@ fn led_cells(k: &devhub_core::model::LayoutKey) -> Vec<usize> {
             0 => vec![105],      // LCtrl
             1 => vec![106],      // LWin
             2 => vec![107],      // LAlt
-            4 => vec![109, 110], // Space 左
-            6 => vec![111],      // Space 中
-            8 => vec![112, 113], // Space 右
+            4 => vec![109, 110], // Space left
+            6 => vec![111],      // Space center
+            8 => vec![112, 113], // Space right
             9 => vec![114],      // RAlt
             10 => vec![115],     // Fn
             12 => vec![117],     // ←
@@ -1736,24 +1737,24 @@ fn led_cells(k: &devhub_core::model::LayoutKey) -> Vec<usize> {
             _ => vec![],
         }
     } else {
-        // LED 列 = マトリクス列 (probe10 split で実機確定: '=74, Enter=76,
-        // Del=98, ↑=97)。視覚 x は幅キーでずれるので使わない。
-        // 死んだマトリクス pad の LED は隣の幅キーの下に実在するので併せて書く:
-        //   row3 col12 (=cell75) は ' の右半分下、row4 col1 (=cell85) は LShift 下。
+        // LED column = matrix column (confirmed on the real device by probe10 split: '=74, Enter=76,
+        // Del=98, ↑=97). The visual x drifts with wide keys, so it is not used.
+        // The LED of a dead matrix pad really exists under the neighboring wide key, so it is written together:
+        //   row3 col12 (=cell75) is under the right half of ', row4 col1 (=cell85) is under LShift.
         let col = (k.id & 0x0f) as usize;
         match (row, col) {
-            (3, 11) => vec![74, 75], // ' (+右端の死pad)
-            (4, 0) => vec![84, 85],  // LShift (+右の死pad)
+            (3, 11) => vec![74, 75], // ' (+ dead pad at the right end)
+            (4, 0) => vec![84, 85],  // LShift (+ dead pad on the right)
             _ => vec![row * 21 + col],
         }
     }
 }
 
-/// DKS trps ビットマスク → 契約の 4 フェーズ。
-/// wire bit 並び (UI 7 チェック列 → 8 bit):
-///   b0=押始Tap, b1=押始Hold, b2=底打ちTap, b3|b4=底打ちHold,
-///   b5=戻り始めTap, b6=戻り始めHold, b7=全リリースTap。
-/// `[6,1]` 応答 r[4]=mode → `Advanced` (公式 higherKey*Data 準拠)。
+/// DKS trps bitmask → the contract's 4 phases.
+/// Wire bit order (UI 7 check columns → 8 bits):
+///   b0=press-start Tap, b1=press-start Hold, b2=bottom-out Tap, b3|b4=bottom-out Hold,
+///   b5=return-start Tap, b6=return-start Hold, b7=full-release Tap.
+/// `[6,1]` response r[4]=mode → `Advanced` (follows the official higherKey*Data).
 fn decode_higher(r: &[u8; 64]) -> Option<Advanced> {
     let mm = |i: usize| u16::from_le_bytes([r[i], r[i + 1]]) as f32 / 1000.0;
     let le = |i: usize| u16::from_le_bytes([r[i], r[i + 1]]) as u32;
@@ -1771,7 +1772,7 @@ fn decode_higher(r: &[u8; 64]) -> Option<Advanced> {
                     phases: trp_to_phases(r[13 + i]),
                 })
                 .collect(),
-            // dbs = [db, db2] = [最小行程, 最大行程]。契約の bottom は底打ち側。
+            // dbs = [db, db2] = [min travel, max travel]. The contract's bottom is the bottom-out side.
             bottom: mm(19),
         }),
         hk::MPT => Some(Advanced::Mpt {
@@ -1814,7 +1815,7 @@ fn decode_higher(r: &[u8; 64]) -> Option<Advanced> {
     }
 }
 
-/// `[6,2,...]` 書き込みパケット列 (SOCD/RS は 2 パケット、ペアを反転)。
+/// `[6,2,...]` write packet sequence (SOCD/RS take 2 packets, pair reversed).
 fn higher_packets(row: u8, col: u8, binding: Option<&Advanced>) -> HubResult<Vec<Vec<u8>>> {
     let index_to_pos = |i: usize| -> HubResult<(u8, u8)> {
         registry::su66max_layout()
@@ -1842,7 +1843,7 @@ fn higher_packets(row: u8, col: u8, binding: Option<&Advanced>) -> HubResult<Vec
             for dr in &rows4 {
                 p.push(phases_to_trp(&dr.phases));
             }
-            // dbs = [db, db2]。db は底打ち側の半分を既定に。
+            // dbs = [db, db2]. db defaults to the half on the bottom-out side.
             p.extend_from_slice(&mm(bottom / 2.0));
             p.extend_from_slice(&mm(*bottom));
             vec![p]
@@ -1970,7 +1971,7 @@ fn phases_to_trp(p: &[DksPhase; 4]) -> u8 {
     t
 }
 
-/// 既定レイアウトの刻印 → HID usage (reset 用)。
+/// Default layout legends → HID usage (for reset).
 fn default_code(label: &str) -> u16 {
     match label {
         "Esc" => 0x29,
@@ -2024,7 +2025,7 @@ fn default_stream(layer: u8) -> Vec<u16> {
         stream[row as usize * 30 + col as usize] = if layer == 0 {
             default_code(&k.label)
         } else {
-            1 // 他レイヤーは透過
+            1 // other layers are transparent
         };
     }
     stream
@@ -2036,7 +2037,7 @@ fn build_caps(xs: &XsydInfo) -> Capabilities {
         SettingSpec {
             id: "polling".into(),
             section: PERFORMANCE.into(),
-            label: "ポーリングレート".into(),
+            label: "Polling rate".into(),
             help: None,
             kind: SettingKind::Choice {
                 options: xs
@@ -2052,8 +2053,8 @@ fn build_caps(xs: &XsydInfo) -> Capabilities {
         SettingSpec {
             id: "system_type".into(),
             section: KEYBOARD.into(),
-            label: "OS 種別".into(),
-            help: Some("Win / Mac のキー配列モードを切り替えます".into()),
+            label: "OS type".into(),
+            help: Some("Switches between the Win and Mac key layout modes".into()),
             kind: SettingKind::Choice {
                 options: vec![ChoiceOpt::new(0, "Windows"), ChoiceOpt::new(1, "Mac")],
             },
@@ -2061,72 +2062,64 @@ fn build_caps(xs: &XsydInfo) -> Capabilities {
             confirm: None,
             enabled_when: None,
         },
-        SettingSpec::toggle("shake_opt", KEYBOARD, "チャタリング防止"),
-        SettingSpec::slider(
-            "light_sleep",
-            POWER,
-            "ライトスリープ",
-            0.0,
-            120.0,
-            1.0,
-            "分",
-        ),
+        SettingSpec::toggle("shake_opt", KEYBOARD, "Debounce"),
+        SettingSpec::slider("light_sleep", POWER, "Light sleep", 0.0, 120.0, 1.0, "min"),
     ];
-    settings[3].help = Some("無操作でライトを消すまでの時間 (分単位)".into());
-    // mode バイト 0-19 = 公式 UI の L1-L20 (書き込みは 19 にクランプされるのを実機確認)。
-    // OBS カメラによる実機撮像で同定した対応 (docs/PROTOCOL_NOTES.md 参照):
-    //  SDK enum Y1 は 1..16 (Ripple..Jump) だが、実機の wire 1..15 は Y1[2..16] に
-    //  対応し wire0=パレット静表示、wire16=カスタム表示、wire17-19=キー押下反応。
-    //  全モードが選択パレット色を使い、sel=0 はファームの虹 (マルチカラー) 表示。
+    settings[3].help = Some("Time of inactivity before the lights turn off (in minutes)".into());
+    // mode byte 0-19 = L1-L20 of the official UI (confirmed on the real device that writes are clamped to 19).
+    // Mapping identified by imaging the real device with an OBS camera (see docs/PROTOCOL_NOTES.md):
+    //  SDK enum Y1 is 1..16 (Ripple..Jump), but the real device's wire 1..15 corresponds to Y1[2..16],
+    //  and wire0=static palette display, wire16=custom display, wire17-19=key press reaction.
+    //  Every mode uses the selected palette color; sel=0 is the firmware's rainbow (multicolor) display.
     let effects = vec![
-        LightEffect::new(0, "固定色").color().still(), // 選択パレット色を固定 (sel0=虹)
-        LightEffect::new(1, "虹の横ながれ").color().dir(), // 虹グラデが左右にスクロール
-        LightEffect::new(2, "ゆっくり変色").color(),   // 均一色 + ゆるやかな色相回転
-        LightEffect::new(3, "すばやく変色").color(),   // 色相が速く回転
-        LightEffect::new(4, "虹の市松").color(),       // 虹チェッカー盤
-        LightEffect::new(5, "虹のめぐり").color(),     // 色相循環グラデーション
-        LightEffect::new(6, "虹の明滅").color(),       // 色相循環 + 明滅
-        LightEffect::new(7, "ほのかな窓").color().dir(), // ほぼ均一 + 薄い光帯が移動
-        LightEffect::new(8, "ゆるやか変形").color(),   // 色パッチが染みのようにモーフ
-        LightEffect::new(9, "色帯シフト").color().dir(), // 広い色ゾーンが移動
-        LightEffect::new(10, "虹のうねり").color().dir(), // マルチバンドの虹波
-        LightEffect::new(11, "斜めの光帯").color().dir(), // 斜めの光帯が掃引
-        LightEffect::new(12, "コンフェッティ").color(), // ランダムな色ドットが点在
-        LightEffect::new(13, "虹のモザイク").color(),  // 細かい虹チェッカー
-        LightEffect::new(14, "光の雨").color().dir(),  // 色ドットが落下
-        LightEffect::new(15, "跳ねる光").color(),      // 点灯ブロックが跳んで移動
-        LightEffect::new(16, "カスタム").per_key(),    // isCustom セルのみ表示
-        LightEffect::new(17, "押下・まわり").color(),  // 押下キー周辺ブロック点灯
-        LightEffect::new(18, "押下・行").color(),      // 押下キーの行が点灯
-        LightEffect::new(19, "押下・広域").color(),    // 押下キー周囲の広範囲が点灯
+        LightEffect::new(0, "Solid color").color().still(), // Fixes the selected palette color (sel0=rainbow)
+        LightEffect::new(1, "Rainbow flow").color().dir(), // Rainbow gradient scrolls left and right
+        LightEffect::new(2, "Slow color change").color(),  // Uniform color + gentle hue rotation
+        LightEffect::new(3, "Fast color change").color(),  // Hue rotates quickly
+        LightEffect::new(4, "Rainbow checker").color(),    // Rainbow checkerboard
+        LightEffect::new(5, "Rainbow cycle").color(),      // Hue-cycling gradient
+        LightEffect::new(6, "Rainbow pulse").color(),      // Hue cycling + pulsing
+        LightEffect::new(7, "Soft window").color().dir(), // Nearly uniform + a faint light band moves
+        LightEffect::new(8, "Gentle morph").color(),      // Color patches morph like stains
+        LightEffect::new(9, "Color band shift").color().dir(), // Wide color zones move
+        LightEffect::new(10, "Rainbow wave").color().dir(), // Multi-band rainbow wave
+        LightEffect::new(11, "Diagonal light band").color().dir(), // A diagonal light band sweeps across
+        LightEffect::new(12, "Confetti").color(),                  // Random color dots scattered
+        LightEffect::new(13, "Rainbow mosaic").color(),            // Fine rainbow checker
+        LightEffect::new(14, "Light rain").color().dir(),          // Color dots fall
+        LightEffect::new(15, "Bouncing light").color(),            // Lit blocks jump around
+        LightEffect::new(16, "Custom").per_key(),                  // Only isCustom cells are shown
+        LightEffect::new(17, "Press: around").color(), // Lights the block around the pressed key
+        LightEffect::new(18, "Press: row").color(),    // Lights the row of the pressed key
+        LightEffect::new(19, "Press: wide").color(),   // Lights a wide area around the pressed key
     ];
     Capabilities {
         settings,
         actions: vec![
-            ActionSpec::new("blackout", LIGHTING, "ブラックアウト切替")
-                .help("全 LED を一時消灯します。もう一度押すと元に戻ります。"),
-            ActionSpec::new("calibrate", PERFORMANCE, "磁軸キャリブレーション開始")
-                .help("キーの押下量センサーを調整します。開始後、全キーを数回強く押してください。"),
-            ActionSpec::new("calibrate_finish", PERFORMANCE, "キャリブレーション終了")
-                .help("押下データをデバイスに保存してキャリブレーションを終了します。"),
-            ActionSpec::new("reset_perf", SYSTEM, "性能設定を初期化")
-                .danger("全キーのトリガー・RT・デッドゾーンを初期値に戻します。"),
-            ActionSpec::new("reset_keymap", SYSTEM, "キー割り当てを初期化")
-                .danger("全レイヤーのキー割り当てを初期値に戻します。"),
-            ActionSpec::new("reset_lighting", SYSTEM, "ライティングを初期化")
-                .danger("ライティングを初期値に戻します。"),
-            ActionSpec::new("reset_advanced", SYSTEM, "高度キーを初期化")
-                .danger("すべての DKS/MPT/MT/TGL/END/SOCD/RS を解除します。"),
-            ActionSpec::new("export_config", SYSTEM, "設定をエクスポート")
-                .help("現在の全設定を JSON ファイルに書き出します。")
+            ActionSpec::new("blackout", LIGHTING, "Toggle blackout")
+                .help("Turns off all LEDs temporarily. Press again to restore them."),
+            ActionSpec::new("calibrate", PERFORMANCE, "Start magnetic switch calibration")
+                .help("Calibrates the key press depth sensors. After starting, press every key hard a few times."),
+            ActionSpec::new("calibrate_finish", PERFORMANCE, "Finish calibration")
+                .help("Saves the press data to the device and finishes calibration."),
+            ActionSpec::new("reset_perf", SYSTEM, "Reset performance settings")
+                .danger("Resets the trigger, RT and dead zones of all keys to their defaults."),
+            ActionSpec::new("reset_keymap", SYSTEM, "Reset key mapping")
+                .danger("Resets the key assignments of all layers to their defaults."),
+            ActionSpec::new("reset_lighting", SYSTEM, "Reset lighting")
+                .danger("Resets lighting to its defaults."),
+            ActionSpec::new("reset_advanced", SYSTEM, "Reset advanced keys")
+                .danger("Clears all DKS/MPT/MT/TGL/END/SOCD/RS."),
+            ActionSpec::new("export_config", SYSTEM, "Export settings")
+                .help("Writes all current settings to a JSON file.")
                 .save_file(&["json"]),
-            ActionSpec::new("import_config", SYSTEM, "設定をインポート")
-                .help("エクスポートした JSON ファイルから全設定を書き戻します。")
+            ActionSpec::new("import_config", SYSTEM, "Import settings")
+                .help("Writes all settings back from an exported JSON file.")
                 .file(&["json"]),
-            ActionSpec::new("reset_macro", SYSTEM, "マクロを初期化")
-                .danger("すべてのマクロを削除します。"),
-            ActionSpec::new("factory_reset", SYSTEM, "工場出荷時に戻す")
-                .danger("すべての設定 (キー・性能・ライト・マクロ) を初期化します。"),
+            ActionSpec::new("reset_macro", SYSTEM, "Reset macros")
+                .danger("Deletes all macros."),
+            ActionSpec::new("factory_reset", SYSTEM, "Restore factory settings")
+                .danger("Resets all settings (keys, performance, lighting, macros)."),
         ],
         profiles: (xs.configs > 1).then_some(ProfileCaps {
             count: xs.configs,
@@ -2138,14 +2131,14 @@ fn build_caps(xs: &XsydInfo) -> Capabilities {
             layers: (0..xs.layers)
                 .map(|i| {
                     if i == 0 {
-                        "メイン".into()
+                        "Main".into()
                     } else {
                         format!("Fn{i}")
                     }
                 })
                 .collect(),
             catalog: xsyd_catalog(),
-            // 0x1000|mods<<8|usage (custom-key 画面で確定)。
+            // 0x1000|mods<<8|usage (confirmed on the custom-key screen).
             combos: true,
             perf: Some(PerfCaps {
                 travel: xs.travel,
@@ -2156,7 +2149,7 @@ fn build_caps(xs: &XsydInfo) -> Capabilities {
                 rt_first: true,
                 deadzones: true,
                 continuous_rt: true,
-                switch_types: xs.axes.iter().map(|a| format!("軸 {a}")).collect(),
+                switch_types: xs.axes.iter().map(|a| format!("Switch {a}")).collect(),
                 switch_ids: xs.axes.clone(),
                 per_key: true,
                 live_travel: true,
@@ -2175,10 +2168,10 @@ fn build_caps(xs: &XsydInfo) -> Capabilities {
                 max_events: max_ev,
                 max_delay_ms: 32767,
                 modes: vec![
-                    ChoiceOpt::new(0, "クリックで実行 (回数指定)"),
-                    ChoiceOpt::new(1, "クリックで実行"),
-                    ChoiceOpt::new(4, "押している間リピート (離すと即停止)"),
-                    ChoiceOpt::new(5, "押している間リピート (完了後停止)"),
+                    ChoiceOpt::new(0, "Run on click (set count)"),
+                    ChoiceOpt::new(1, "Run on click"),
+                    ChoiceOpt::new(4, "Repeat while held (stops immediately on release)"),
+                    ChoiceOpt::new(5, "Repeat while held (stops after completing)"),
                 ],
                 repeat_modes: vec![0],
                 names: false,
@@ -2192,34 +2185,34 @@ fn build_caps(xs: &XsydInfo) -> Capabilities {
             .map(|(i, &a)| LightArea {
                 id: a,
                 name: if a == 0 {
-                    "メインキーボード".into()
+                    "Main keyboard".into()
                 } else {
-                    format!("デコレーション {i}")
+                    format!("Decoration {i}")
                 },
                 effects: effects.clone(),
                 brightness_max: 100,
                 speed_max: 100,
-                directions: vec!["正方向".into(), "逆方向".into()],
+                directions: vec!["Forward".into(), "Backward".into()],
                 switchable: true,
-                // Keyboard (area 0) で DoubleLighting 機のみ上/下ゾーン開閉がある。
+                // Only Keyboard (area 0) on DoubleLighting devices has upper/lower zone open/close.
                 zones: if a == 0 && xs.double_lighting {
-                    vec!["上部ライト".into(), "下部ライト".into()]
+                    vec!["Upper light".into(), "Lower light".into()]
                 } else {
                     vec![]
                 },
                 per_key: a == 0,
-                // DirectDrive / ライブ読み戻しはキーボードエリア (per-LED セル) のみ。
+                // DirectDrive / live readback is only for the keyboard area (per-LED cells).
                 direct_drive: a == 0,
                 live_readback: a == 0,
             })
             .collect(),
         battery: false,
         peq: None,
-        firmware_feed: None, // caps() で info の vid/pid から入れ直す
+        firmware_feed: None, // refilled in caps() from the info's vid/pid
     }
 }
 
-/// xsyd キーコード空間 (PROTOCOL_NOTES §2.4)。基本キーは HID usage。
+/// xsyd key code space (PROTOCOL_NOTES §2.4). Basic keys are HID usage.
 fn xsyd_catalog() -> Vec<KeyGroup> {
     let g = |name: &str, v: &[(u32, &str, &str)]| KeyGroup {
         name: name.into(),
@@ -2235,62 +2228,62 @@ fn xsyd_catalog() -> Vec<KeyGroup> {
     vec![
         devhub_core::keys::basic_group(),
         g(
-            "マウス",
+            "Mouse",
             &[
-                (16640, "マウス左", "M左"),
-                (16896, "マウス右", "M右"),
-                (17152, "マウス中", "M中"),
-                (17408, "マウス進む", "M進"),
-                (17664, "マウス戻る", "M戻"),
-                (18945, "ホイール上", "W↑"),
-                (19201, "ホイール下", "W↓"),
+                (16640, "Mouse left", "LMB"),
+                (16896, "Mouse right", "RMB"),
+                (17152, "Mouse middle", "MMB"),
+                (17408, "Mouse forward", "Fwd"),
+                (17664, "Mouse back", "Back"),
+                (18945, "Wheel up", "W↑"),
+                (19201, "Wheel down", "W↓"),
             ],
         ),
         g(
-            "メディア",
+            "Media",
             &[
-                (0x20CD, "再生/一時停止", "⏯"),
-                (8373, "次の曲", "⏭"),
-                (8374, "前の曲", "⏮"),
-                (0x20E9, "音量 +", "🔊"),
-                (0x20EA, "音量 −", "🔉"),
-                (8418, "ミュート", "🔇"),
+                (0x20CD, "Play/Pause", "⏯"),
+                (8373, "Next track", "⏭"),
+                (8374, "Previous track", "⏮"),
+                (0x20E9, "Volume +", "🔊"),
+                (0x20EA, "Volume −", "🔉"),
+                (8418, "Mute", "🔇"),
             ],
         ),
         g(
-            "レイヤー",
+            "Layers",
             &[
-                (61696, "メインレイヤーへ", "L0"),
-                (61697, "Fn1 レイヤーへ", "Fn1"),
-                (61698, "Fn2 レイヤーへ", "Fn2"),
-                (61699, "Fn3 レイヤーへ", "Fn3"),
+                (61696, "Go to main layer", "L0"),
+                (61697, "Go to Fn1 layer", "Fn1"),
+                (61698, "Go to Fn2 layer", "Fn2"),
+                (61699, "Go to Fn3 layer", "Fn3"),
             ],
         ),
         g(
-            "システム",
+            "System",
             &[
-                (61957, "構成 1 に切替", "P1"),
-                (61958, "構成 2 に切替", "P2"),
-                (61961, "Win キーロック", "WinL"),
-                (61955, "磁軸キャリブレーション (長押し)", "Cal"),
-                (61952, "初期化 (長押し)", "Rst"),
+                (61957, "Switch to profile 1", "P1"),
+                (61958, "Switch to profile 2", "P2"),
+                (61961, "Win key lock", "WinL"),
+                (61955, "Magnetic switch calibration (long press)", "Cal"),
+                (61952, "Reset (long press)", "Rst"),
             ],
         ),
         g(
-            "ライティング",
+            "Lighting",
             &[
-                (62208, "ライティングモード切替", "L模"),
-                (62209, "ライティング色切替", "L色"),
-                (62210, "明るさ +", "L+"),
-                (62211, "明るさ −", "L−"),
-                (62215, "ライト ON/OFF", "L⏻"),
+                (62208, "Switch lighting mode", "LMod"),
+                (62209, "Switch lighting color", "LCol"),
+                (62210, "Brightness +", "L+"),
+                (62211, "Brightness −", "L−"),
+                (62215, "Light ON/OFF", "L⏻"),
             ],
         ),
     ]
 }
 
-/// wire u16 → KeyAction。0x0000=未割当, 0x0001=透過,
-/// 0x1000|mods<<8|usage = 組み合わせキー (SDK custom-key で確定)。
+/// wire u16 → KeyAction. 0x0000=unassigned, 0x0001=transparent,
+/// 0x1000|mods<<8|usage = combination key (confirmed with the SDK custom-key).
 fn code_to_action(code: u16) -> KeyAction {
     match code {
         0x0000 => KeyAction::None,
@@ -2299,7 +2292,7 @@ fn code_to_action(code: u16) -> KeyAction {
             mods: ((c >> 8) & 0x0F) as u8,
             code: (c & 0xFF) as u32,
         },
-        // マクロ呼び出し: 0xF500+slot (SDK keycode カタログ macro:62720-62735)。
+        // Macro call: 0xF500+slot (SDK keycode catalog macro:62720-62735).
         c if (0xF500..=0xF50F).contains(&c) => KeyAction::Macro((c - 0xF500) as u8),
         c => KeyAction::Code(c as u32),
     }
@@ -2312,13 +2305,13 @@ fn action_to_code(a: &KeyAction) -> HubResult<u16> {
             .try_into()
             .map_err(|_| HubError::Invalid("keycode".into()))?,
         KeyAction::Combo { mods, code } => {
-            // wire: 0x1000 | mods<<8 | usage (左修飾 bit0-3 のみ)
+            // wire: 0x1000 | mods<<8 | usage (left modifiers bit0-3 only)
             if *code > 0xFF {
                 return Err(HubError::Invalid("combo keycode".into()));
             }
             0x1000 | ((*mods as u16 & 0x0F) << 8) | (*code as u16 & 0xFF)
         }
-        // 0xF500+slot (16 枠まで。実機のスロット数は macro_space 側で制限)。
+        // 0xF500+slot (up to 16 slots. The real device's slot count is limited on the macro_space side).
         KeyAction::Macro(i) if *i < 16 => 0xF500 + *i as u16,
         KeyAction::Macro(_) => return Err(HubError::Invalid("macro slot".into())),
     })
@@ -2361,16 +2354,16 @@ impl DeviceDriver for XsydDriver {
             );
         }
         self.alive()?;
-        // キーごと性能 — 失敗は既定値ではなく読み込みエラー (部分読み出しを
-        // 完全な設定として扱うと差分適用が実機の値を消す)。
+        // Per-key performance — a failure is a read error rather than defaults (treating a partial read
+        // as a complete setting would make the diff apply erase the real device's values).
         let mut perf = Vec::with_capacity(layout.len());
         for k in &layout {
             self.alive()?;
             let (row, col) = registry::su66max_matrix_pos(k.id);
             perf.push(self.read_perf(row, col).map(|(p, _)| p)?);
         }
-        // 高度キー (mode!=NONE のみ) — 途中失敗で部分一覧を返すと「存在しない
-        // 高度キー = 削除」と解釈されるため、失敗は伝播する。
+        // Advanced keys (only mode!=NONE) — returning a partial list on a mid-way failure would be read as "nonexistent
+        // advanced key = delete", so failures propagate.
         let mut advanced = Vec::new();
         for i in 0..layout.len() {
             self.alive()?;
@@ -2382,13 +2375,13 @@ impl DeviceDriver for XsydDriver {
                 });
             }
         }
-        // マクロ (valid スロットのみ中身を読む) — 本文の失敗も伝播する。
+        // Macros (only valid slots have their contents read) — failures reading the body propagate too.
         let mut macros = vec![];
         if let Some((slots, _)) = self.xs.macro_space {
             for id in 0..slots {
                 let def = match self.read_macro_mode(id) {
                     Ok((true, act, rep, mode)) => Some(MacroDef {
-                        name: format!("マクロ {}", id + 1),
+                        name: format!("Macro {}", id + 1),
                         events: self.read_macro_events(id, act)?,
                         mode,
                         repeat: rep,
@@ -2450,15 +2443,15 @@ impl DeviceDriver for XsydDriver {
                 self.save(scope::LAYOUT)
             }
             Change::Lighting { area, state } if self.xs.light_areas.contains(area) => {
-                // per_key はベースモードと独立したカスタムオーバーレイ (公式の isCustom
-                // セマンティクス)。area 0 では常に絶対状態として書く — 変化した
-                // chunk のみ送信されるので、変更なしなら readback のコストのみ。
+                // per_key is a custom overlay independent of the base mode (the official isCustom
+                // semantics). In area 0 it is always written as an absolute state — only
+                // changed chunks are sent, so with no change only the readback cost is paid.
                 if *area == 0 {
                     self.write_per_key(&state.per_key)?;
-                    // write_per_key は DD ピン (isCustom) も巻き込んで消す —
-                    // 追跡を破棄して次の direct_drive が全セルを再ピンするようにする。
-                    // dd_pre も破棄: 「DD 前のカスタム」は今適用した per_key に
-                    // 取って代わられたので、次セッションで取り直す。
+                    // write_per_key also wipes DD pins (isCustom) —
+                    // discard the tracking so that the next direct_drive re-pins all cells.
+                    // dd_pre is discarded too: the "pre-DD custom" has been
+                    // superseded by the per_key just applied, so it is re-taken in the next session.
                     if let Ok(mut p) = self.dd_pins.lock() {
                         p.remove(area);
                     }
@@ -2468,8 +2461,8 @@ impl DeviceDriver for XsydDriver {
                 }
                 self.write_lighting(*area, state)?;
                 self.save(scope::LIGHTING)?;
-                // save() は反映を待って返るが、それでも古い値を返す実機に備えて
-                // ベース値を検証し、ずれていれば 1 回だけ書き直す。
+                // save() waits for the change to take effect before returning, but to cope with real devices that still return old
+                // values, verify the base value and rewrite once only if it is off.
                 if let Ok(r) = self.cmd(grp::LIGHTING, sub::READ, &[*area, 0]) {
                     let exp = [
                         self.compose_open(*area, state),
@@ -2511,7 +2504,7 @@ impl DeviceDriver for XsydDriver {
                 if *i >= self.xs.configs {
                     return Err(HubError::Invalid("profile".into()));
                 }
-                // 退避した色は切替前の構成に属する。切替先をその色で上書きしない。
+                // The saved colors belong to the pre-switch config. Do not overwrite the switch target with those colors.
                 self.direct_drive_stop(0)?;
                 self.cmd(grp::GLOBAL, gfs::CONFIG_SWITCH, &[2, *i])?;
                 Ok(())
@@ -2533,8 +2526,8 @@ impl DeviceDriver for XsydDriver {
 
     fn run_action(&self, id: &str, file: Option<&std::path::Path>) -> HubResult<ActionOutcome> {
         match id {
-            // ブラックアウト (公式 CustomCommand): 状態 [10,1,0] → r[3]
-            // (255=消灯中/0=通常)、切替は [10,1,1,{255|0}]。
+            // Blackout (official CustomCommand): state [10,1,0] → r[3]
+            // (255=lights off/0=normal), toggle is [10,1,1,{255|0}].
             "blackout" => {
                 let r = self.cmd(grp::CUSTOM, sub::READ, &[0])?;
                 let active = r[3] == 255;
@@ -2542,24 +2535,24 @@ impl DeviceDriver for XsydDriver {
                 Ok(ActionOutcome {
                     message: Some(
                         if active {
-                            "ブラックアウトを解除しました"
+                            "Blackout disabled"
                         } else {
-                            "ブラックアウトを有効にしました"
+                            "Blackout enabled"
                         }
                         .into(),
                     ),
                     reload: false,
                 })
             }
-            // キャリブレーション開始 [2,6,0]。キーを数回押した後、
-            // 再度同じ action を呼ぶと [2,6,1] で終了する想定 — UI 側の導線に合わせ、
-            // ここでは開始のみ (終了は calibrate_finish)。
+            // Calibration start [2,6,0]. After pressing keys a few times,
+            // calling the same action again is expected to end with [2,6,1] — to match the UI flow,
+            // only the start is done here (the end is calibrate_finish).
             "calibrate" => {
                 self.cmd(grp::GLOBAL, gfs::CALIBRATION, &[0])?;
                 Ok(ActionOutcome {
                     message: Some(
-                        "キャリブレーションを開始しました。全キーを数回強く押してから \
-                         「キャリブレーション終了」を実行してください"
+                        "Calibration started. Press every key hard a few times, then run \
+                         \"Finish calibration\""
                             .into(),
                     ),
                     reload: false,
@@ -2569,7 +2562,7 @@ impl DeviceDriver for XsydDriver {
                 self.cmd(grp::GLOBAL, gfs::CALIBRATION, &[1])?;
                 self.save(scope::CALIBRATION)?;
                 Ok(ActionOutcome {
-                    message: Some("キャリブレーションを終了しました".into()),
+                    message: Some("Calibration finished".into()),
                     reload: true,
                 })
             }
@@ -2582,7 +2575,7 @@ impl DeviceDriver for XsydDriver {
                 }
                 self.save(scope::LAYOUT)?;
                 Ok(ActionOutcome {
-                    message: Some("キー割り当てを初期値に戻しました".into()),
+                    message: Some("Key assignments reset to defaults".into()),
                     reload: true,
                 })
             }
@@ -2605,21 +2598,21 @@ impl DeviceDriver for XsydDriver {
                 )?;
                 self.save(scope::LIGHTING)?;
                 Ok(ActionOutcome {
-                    message: Some("ライティングを初期値に戻しました".into()),
+                    message: Some("Lighting reset to defaults".into()),
                     reload: true,
                 })
             }
             "factory_reset" => {
                 self.cmd(grp::GLOBAL, gfs::RESET_FACTORY, &[scope::ALL])?;
                 Ok(ActionOutcome {
-                    message: Some("工場出荷時設定に戻しました".into()),
+                    message: Some("Factory settings restored".into()),
                     reload: true,
                 })
             }
-            // 設定の書き出し/読み込み (自前 JSON — 公式の暗号化形式とは非互換)。
-            // {app, model, name, state: DeviceState} か DeviceState 単体を受け付ける。
+            // Settings export/import (own JSON — not compatible with the official encrypted format).
+            // Accepts {app, model, name, state: DeviceState} or a bare DeviceState.
             "export_config" => {
-                let path = file.ok_or_else(|| HubError::Invalid("保存先".into()))?;
+                let path = file.ok_or_else(|| HubError::Invalid("save destination".into()))?;
                 let state = self.read()?;
                 let doc = serde_json::json!({
                     "app": "device-hub",
@@ -2630,35 +2623,35 @@ impl DeviceDriver for XsydDriver {
                 let json = serde_json::to_string_pretty(&doc)
                     .map_err(|e| HubError::Invalid(format!("JSON: {e}")))?;
                 std::fs::write(path, json)
-                    .map_err(|e| HubError::Io(format!("ファイル書き出し: {e}")))?;
+                    .map_err(|e| HubError::Io(format!("writing file: {e}")))?;
                 Ok(ActionOutcome {
-                    message: Some(format!("設定を {} に書き出しました", path.display())),
+                    message: Some(format!("Settings exported to {}", path.display())),
                     reload: false,
                 })
             }
             "import_config" => {
-                let path = file.ok_or_else(|| HubError::Invalid("ファイル".into()))?;
+                let path = file.ok_or_else(|| HubError::Invalid("file".into()))?;
                 let text = std::fs::read_to_string(path)
-                    .map_err(|e| HubError::Io(format!("ファイル読み込み: {e}")))?;
+                    .map_err(|e| HubError::Io(format!("reading file: {e}")))?;
                 let v: serde_json::Value = serde_json::from_str(&text)
                     .map_err(|e| HubError::Invalid(format!("JSON: {e}")))?;
                 let st: DeviceState = if v.get("keyboards").is_some() || v.get("data").is_some() {
-                    // 公式 configurator のエクスポート (keyboard_config.json)。
+                    // Export of the official configurator (keyboard_config.json).
                     let plain = self.official_plain(&v)?;
                     self.official_to_state(&plain)?
                 } else {
                     serde_json::from_value(v.get("state").cloned().unwrap_or(v))
-                        .map_err(|e| HubError::Invalid(format!("設定データ: {e}")))?
+                        .map_err(|e| HubError::Invalid(format!("settings data: {e}")))?
                 };
                 self.import_state(&st)?;
                 Ok(ActionOutcome {
-                    message: Some("設定をインポートしました".into()),
+                    message: Some("Settings imported".into()),
                     reload: true,
                 })
             }
-            "reset_perf" => self.reset_scope(scope::PERFORMANCE, "性能設定"),
-            "reset_advanced" => self.reset_scope(scope::HIGHER_KEY, "高度キー"),
-            "reset_macro" => self.reset_scope(scope::MACRO, "マクロ"),
+            "reset_perf" => self.reset_scope(scope::PERFORMANCE, "Performance settings"),
+            "reset_advanced" => self.reset_scope(scope::HIGHER_KEY, "Advanced keys"),
+            "reset_macro" => self.reset_scope(scope::MACRO, "Macros"),
             _ => Err(HubError::Unsupported("action")),
         }
     }
@@ -2667,14 +2660,14 @@ impl DeviceDriver for XsydDriver {
         self.route_mm()
     }
 
-    /// `[4,3,kind,row]` × ADC/Route/Calibrate/KeyStatus を行 1-5 で取得し layout 順にまとめる。
-    /// まずキューをドレインして流れているフレームをキャッシュし、不足セルには
-    /// まとめて要求を送って一括収集する (セルごと往復では 25ms 枠を超え、
-    /// 更新が飛び飛びになる)。公式 HUB 等の別プロセスが会話中ならその応答に
-    /// 相乗りして自分は送信を休む (受動モード)。
+    /// `[4,3,kind,row]` × ADC/Route/Calibrate/KeyStatus fetched over rows 1-5 and gathered in layout order.
+    /// First drain the queue and cache the frames that are flowing, then send requests
+    /// for the missing cells all at once to collect them in bulk (a round trip per cell would exceed the 25ms slot
+    /// and make updates sporadic). If another process such as the official HUB is conversing, piggyback on its responses
+    /// and hold off sending (passive mode).
     fn live_axis(&self) -> HubResult<Vec<AxisSample>> {
         const KINDS: [u8; 4] = [axis::ADC, axis::ROUTE, axis::CALIBRATE, axis::KEY_STATUS];
-        // 視覚的な滑らかさに効く 2 種は ~ポーリング毎、変化の少ない 2 種は間引く。
+        // The 2 kinds that affect visual smoothness are fetched ~every poll; the 2 with little change are thinned out.
         let fresh_for = |kind: u8| match kind {
             k if k == axis::ROUTE || k == axis::KEY_STATUS => Duration::from_millis(60),
             _ => Duration::from_millis(2500),
@@ -2697,7 +2690,7 @@ impl DeviceDriver for XsydDriver {
 
         self.drain_axis(4);
 
-        // 不足セルを洗い出して一括要求 → エコーをまとめて収集する。
+        // Find the missing cells and request in bulk → collect the echoes together.
         let mut wanted = Vec::with_capacity(20);
         for row in 1..=5u8 {
             for kind in KINDS {
@@ -2715,8 +2708,8 @@ impl DeviceDriver for XsydDriver {
                     .unwrap_or_else(|p| p.into_inner())
                     .insert((kind, row), Instant::now());
             }
-            // 短く待って残りは次ポーリングの drain に回す — ここで長くブロック
-            // すると OBS ループ周期 (25ms) を大きく超えて表示 FPS が落ちる。
+            // Wait briefly and leave the rest to the next poll's drain — blocking for long here
+            // would far exceed the OBS loop period (25ms) and drop the display FPS.
             let deadline = Instant::now() + Duration::from_millis(14);
             let mut saw_axis = false;
             let mut foreign = false;
@@ -2728,7 +2721,7 @@ impl DeviceDriver for XsydDriver {
                         } else if b.first().copied() == Some(grp::PERFORMANCE)
                             && b.get(1).copied() == Some(0xFF)
                         {
-                            // 未対応の (kind,row) — 0 埋めで進める。
+                            // Unsupported (kind,row) — advance filling with 0.
                             self.axis_cache
                                 .lock()
                                 .unwrap_or_else(|p| p.into_inner())
@@ -2746,8 +2739,8 @@ impl DeviceDriver for XsydDriver {
                     Err(e) => return Err(e),
                 }
             }
-            // 軸フレームが 1 枚も来ず外部応答でもない → 切断とみなす
-            // (従来通り失敗として伝播し、切断検知を保つ)。
+            // No axis frame came and no external response either → treat as disconnected
+            // (propagate as a failure as before, to keep disconnect detection).
             if !saw_axis && !foreign {
                 return Err(HubError::Protocol("axis: no frames".into()));
             }
@@ -2773,8 +2766,8 @@ impl DeviceDriver for XsydDriver {
         Ok(out)
     }
 
-    /// キーごとの作動点 (layout 順、mm)。RT キーは First touch、通常はアクチュエーション。
-    /// デバイス発見時に 1 度だけ呼ぶ (66 キー分の read_perf = 66 round-trip)。
+    /// Per-key actuation point (layout order, mm). RT keys use First touch, normal keys use actuation.
+    /// Called only once at device discovery (66 keys' read_perf = 66 round-trip).
     fn live_key_perf(&self) -> HubResult<Vec<KeyPerf>> {
         let layout = registry::su66max_layout();
         let mut out = Vec::with_capacity(layout.len());
@@ -2799,7 +2792,7 @@ impl DeviceDriver for XsydDriver {
     }
 
     fn battery(&self) -> HubResult<Battery> {
-        // [13,1] → [2]=mode [3]=charge [4]=percent。SU66 は有線 → 未対応返しのはず。
+        // [13,1] → [2]=mode [3]=charge [4]=percent. SU66 is wired → should come back as unsupported.
         let r = self.cmd(grp::THREE_MODE, sub::GET_BASIC_INFO, &[])?;
         Ok(Battery {
             percent: Some(r[4]),
@@ -2807,19 +2800,19 @@ impl DeviceDriver for XsydDriver {
         })
     }
 
-    /// DirectDrive `[5,5,area,chunk,…15セル×4B(B,G,R,255)]` — 応答なし (SDK
-    /// `setLightingDirectDrive` = sendDataNoResponse)。キー index → LED セル展開は
-    /// `led_cells` (スペースバー等は複数セル)。
-    /// **flag=255 のセルは isCustom としてピン留めされる — flag=0 は「触らない」で
-    /// あり解放ではない (実機確認)**: 未指定セルはファームのアニメーションが
-    /// そのまま駆動し続ける (P2-b ハイブリッド — 実機で紫色エフェクト上に
-    /// 赤 DD セルが重なって動作することを確認)。
-    /// そのため:
-    /// - flag=0 しか含まないチャンクは送らない (空振り削減 — ハイブリッドでは
-    ///   5キーの強調に 1-2 チャンクで済む)。
-    /// - 前フレームでピン留めしたが今回指定が無いセルは、`[5,4]` で isCustom を
-    ///   落として解放する (ドライバが pin 集合を追跡 — `direct_drive` の呼ぶたびの
-    ///   指定集合が「いま光らせたい集合」の絶対指定として扱える)。
+    /// DirectDrive `[5,5,area,chunk,…15 cells×4B(B,G,R,255)]` — no response (SDK
+    /// `setLightingDirectDrive` = sendDataNoResponse). Key index → LED cell expansion is
+    /// `led_cells` (space bar etc. have multiple cells).
+    /// **Cells with flag=255 are pinned as isCustom — flag=0 means "don't touch" and
+    /// is not release (confirmed on the real device)**: unspecified cells keep being driven by
+    /// the firmware animation as is (P2-b hybrid — confirmed on the real device that
+    /// red DD cells work overlaid on a purple effect).
+    /// Therefore:
+    /// - Chunks containing only flag=0 are not sent (fewer wasted sends — in the hybrid, highlighting
+    ///   5 keys takes only 1-2 chunks).
+    /// - Cells pinned in the previous frame but not specified this time are released by clearing isCustom with `[5,4]`
+    ///   (the driver tracks the pin set — the set specified on each `direct_drive` call
+    ///   can be treated as an absolute specification of "the set I want lit now").
     fn direct_drive(&self, area: u8, cells: &BTreeMap<usize, Rgb>) -> HubResult<()> {
         self.alive()?;
         let layout = registry::su66max_layout();
@@ -2839,8 +2832,8 @@ impl DeviceDriver for XsydDriver {
             let pins = self.dd_pins.lock().unwrap_or_else(|p| p.into_inner());
             pins.get(&area).cloned().unwrap_or_default()
         };
-        // セッション開始: 最初のピン設定の前に、ユーザーカスタムのセル+色を
-        // 退避する — DD が上書きした後でも解放時に元のカスタムへ戻せる。
+        // Session start: before the first pin is set, save aside the user custom cells + colors
+        // — so that even after DD overwrites them, they can be restored to the original custom on release.
         if !new_map.is_empty() {
             let needs = self
                 .dd_pre
@@ -2856,8 +2849,8 @@ impl DeviceDriver for XsydDriver {
             .filter(|c| !new_map.contains_key(*c))
             .copied()
             .collect();
-        // 新規ピンまたは色が変わったセルを含むチャンクだけ送る。
-        // 未変化ピンは残るので再送不要 (実機: ストリーム停止後も固まる)。
+        // Send only chunks that contain a newly pinned cell or one whose color changed.
+        // Unchanged pins remain, so no resend is needed (real device: they stay stuck even after the stream stops).
         let touched: std::collections::BTreeSet<u8> = new_map
             .iter()
             .filter(|(cell, rgb)| old_map.get(*cell).copied().flatten() != Some(**rgb))
@@ -2876,8 +2869,8 @@ impl DeviceDriver for XsydDriver {
                 w[4 + i * 4..8 + i * 4].copy_from_slice(cell);
             }
             let result = self.ch.send(&w);
-            // 途中で送信に失敗しても、送信を試みたチャンクは停止時に復元する。
-            // エラーでも機器側に届いた可能性があるため保守的に追跡する。
+            // Even if a send fails midway, chunks we attempted to send are restored at stop.
+            // Even on error it may have reached the device, so track conservatively.
             self.dd_pins
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
@@ -2889,15 +2882,15 @@ impl DeviceDriver for XsydDriver {
                         .map(|(&cell, &rgb)| (cell, result.is_ok().then_some(rgb))),
                 );
             result?;
-            // 公式は await の USB 転送時間 (~1ms) で自然ペース。133µs 連打でも
-            // デバイスは生存するが (probe9)、OUT エンドポイントの消費に合わせて 1ms 開ける。
+            // The official app is naturally paced by the await USB transfer time (~1ms). Even hammering at 133µs
+            // the device survives (probe9), but leave 1ms to match the OUT endpoint's consumption.
             std::thread::sleep(Duration::from_millis(1));
         }
-        // 外れたセルを `[5,4]` で解放 — チャンクごとに読み戻して対象セルだけ
-        // 直す (ユーザーのカスタムや他のピン留めは温存。DD 前にカスタムだった
-        // セルは dd_pre の色+flag=255 で復帰する)。
+        // Release the cells that dropped out with `[5,4]` — read back per chunk and fix only the target cells
+        // (the user's custom and other pins are preserved. Cells that were custom before DD
+        // are restored with dd_pre's color + flag=255).
         let rel_failed = self.release_cells(area, &released.iter().copied().collect());
-        // 解放に失敗したチャンクのセルは追跡に残し、次フレームで解放を再試行する。
+        // Cells of chunks whose release failed stay tracked, and the release is retried on the next frame.
         let mut pending: BTreeMap<_, _> = new_map
             .into_iter()
             .map(|(cell, rgb)| (cell, Some(rgb)))
@@ -2914,12 +2907,12 @@ impl DeviceDriver for XsydDriver {
         Ok(())
     }
 
-    /// DirectDrive 解除 — DD フレームの flag=255 は isCustom としてセルを
-    /// ピン留めする (flag=0 は「触らない」であり解放ではない — probe14)。
-    /// 追跡中の DD ピンだけ `[5,4]` で解放し (ユーザーのカスタムは温存、
-    /// DD 前にカスタムだったセルは `dd_pre` の色で復帰)、その後現在の照明
-    /// 設定を `[5,2]` 再送してファーム側アニメーションに戻す。
-    /// フラグ操作は save しない — flash 上のユーザーカスタム色は温存される。
+    /// DirectDrive release — flag=255 in a DD frame pins the cell as isCustom
+    /// (flag=0 means "don't touch" and is not release — probe14).
+    /// Releases only the tracked DD pins with `[5,4]` (the user's custom is preserved,
+    /// cells that were custom before DD are restored with the color from `dd_pre`), then resends
+    /// the current lighting settings with `[5,2]` to return to the firmware animation.
+    /// Flag operations do not save — the user custom colors on flash are preserved.
     fn direct_drive_stop(&self, area: u8) -> HubResult<()> {
         if !self
             .dd_pre
@@ -2929,7 +2922,7 @@ impl DeviceDriver for XsydDriver {
         {
             return Ok(());
         }
-        // 空集合の direct_drive = 追跡ピンのみ解放 (未追跡セルは触らない)。
+        // direct_drive with an empty set = release only the tracked pins (untracked cells are not touched).
         self.direct_drive(area, &BTreeMap::new())?;
         if self
             .dd_pins
@@ -2939,7 +2932,7 @@ impl DeviceDriver for XsydDriver {
             .is_some_and(|pins| !pins.is_empty())
         {
             return Err(HubError::Protocol(
-                "DirectDrive: LED の復元が完了していません".into(),
+                "DirectDrive: LED restore did not complete".into(),
             ));
         }
         let r = self.cmd(grp::LIGHTING, sub::READ, &[area, 0])?;
@@ -2955,17 +2948,17 @@ impl DeviceDriver for XsydDriver {
         Ok(())
     }
 
-    /// `[5,3]` の応答は**全セルの現在描画色**を返す (BGR は常に現在フレーム)。
-    /// flag はマーカーであって点灯判定ではない — 0xFF=ユーザー/DD カスタム、
-    /// 0xF0=ファームがマークしたセル、0=無印 (色は来る)。公式 HUB のプレビューは
-    /// これを全セルそのまま表示している (キー色 = 実機の今の色。シミュレーション無し)。
+    /// The `[5,3]` response returns **the current drawn color of all cells** (BGR is always the current frame).
+    /// flag is a marker, not a lit indicator — 0xFF=user/DD custom,
+    /// 0xF0=cell marked by the firmware, 0=unmarked (the color still comes). The official HUB's preview
+    /// shows these for all cells as is (key color = the real device's current color. No simulation).
     fn live_lighting(&self, area: u8) -> HubResult<BTreeMap<usize, Rgb>> {
         if area != 0 {
             return Err(HubError::Unsupported("live_lighting"));
         }
         self.alive()?;
         let layout = registry::su66max_layout();
-        // cell → layout index。Space 等の複数セルは最初のセルの色を採用。
+        // cell → layout index. For multi-cell keys such as Space, adopt the color of the first cell.
         let mut cell_key = [usize::MAX; 135];
         for (i, k) in layout.iter().enumerate() {
             for cell in led_cells(k) {
@@ -2979,11 +2972,11 @@ impl DeviceDriver for XsydDriver {
             let rb = self.cmd(grp::LIGHTING, sub::LIGHT_READBACK, &[0, c])?;
             for i in 0..15usize {
                 let cell = c as usize * 15 + i;
-                // 「点灯しているか」は flag ではなく色レジスタで見る:
-                // flag (0xF0/0xFF) はファーム/ユーザーがマークしたセルにだけ立ち、
-                // 無印のまま色だけ出るセルもある (litpoll で実機確認 — 書き込み無しの
-                // セッションでは全セル flag=0 でも色は流れてくる)。
-                // 色 000 の消灯セルはマップに入れない (UI 側は無印=消灯として描く)。
+                // Judge "is it lit" by the color register, not by the flag:
+                // the flag (0xF0/0xFF) is set only for cells marked by the firmware/user,
+                // and some cells output a color while staying unmarked (confirmed on the real device with litpoll — in a
+                // session without writes, the colors flow even when every cell has flag=0).
+                // Cells that are off with color 000 are not put into the map (the UI draws unmarked = off).
                 let (b, g, r, f) = (rb[4 + i * 4], rb[5 + i * 4], rb[6 + i * 4], rb[7 + i * 4]);
                 if (f != 0 || r != 0 || g != 0 || b != 0) && cell_key[cell] != usize::MAX {
                     out.insert(cell_key[cell], Rgb::new(r, g, b));
@@ -3024,15 +3017,15 @@ mod tests {
     #[test]
     fn default_stream_layer0() {
         let s = default_stream(0);
-        // Esc は (1,0) → stream[30]
+        // Esc is (1,0) → stream[30]
         assert_eq!(s[30], 0x29);
-        // A は (3,1) → stream[3*30+1]
+        // A is (3,1) → stream[3*30+1]
         assert_eq!(s[91], 0x04);
         // Space (5,4) → stream[154]
         assert_eq!(s[5 * 30 + 4], 0x2C);
         // Fn (5,10) → 0xF101
         assert_eq!(s[5 * 30 + 10], 0xF101);
-        // レイヤー 1 はすべて透過
+        // Layer 1 is all transparent
         let s1 = default_stream(1);
         assert_eq!(s1[30], 1);
     }
@@ -3045,9 +3038,9 @@ mod tests {
         assert_eq!(parse_fw(&r).as_deref(), Some("2026101216:41:03"));
     }
 
-    // ---- live_axis の相乗り/受動モード ----
+    // ---- live_axis piggyback / passive mode ----
 
-    /// `[4,3,kind,row]` 軸フレーム。cell0 に mark を入れる。
+    /// `[4,3,kind,row]` axis frame. Puts mark in cell0.
     fn axis_frame(kind: u8, row: u8, mark: u16) -> Vec<u8> {
         let mut f = vec![4u8, 3, kind, row];
         for i in 0..30 {
@@ -3057,7 +3050,7 @@ mod tests {
         f
     }
 
-    /// 全 kind×row (20 枚) をキューに積む。
+    /// Queues all kind×row (20 frames).
     fn seed_all(d: &XsydDriver, mark: u16) {
         for row in 1..=5 {
             for kind in 0..=3 {
@@ -3069,28 +3062,28 @@ mod tests {
     #[test]
     fn live_axis_piggyback_sends_no_requests() {
         let d = mock_driver();
-        // 公式 HUB 等の要求が起こしたフレームだけが流れている状況。
+        // A situation where only frames triggered by requests from the official HUB etc. are flowing.
         seed_all(&d, 1500);
         let out = d.live_axis().unwrap();
-        // 相乗りで全部キャッシュから取れるので要求は 0。
+        // Everything can be fetched from the cache by piggybacking, so 0 requests.
         assert!(d.ch.mock_sent().is_empty());
-        // 値はキャッシュから来ている (route は /1000 → 1.5mm)。
+        // The values come from the cache (route is /1000 → 1.5mm).
         assert!(out.iter().any(|s| (s.route - 1.5).abs() < 0.001));
-        // 外部トラフィック検出で受動モードが立っている。
+        // Passive mode has been set by external traffic detection.
         assert!(
             *d.axis_passive.lock().unwrap() > Instant::now(),
-            "外部フレームだけのはずなので受動モードになる"
+            "only external frames are expected, so passive mode should be entered"
         );
     }
 
     #[test]
     fn live_axis_passive_never_requests() {
         let d = mock_driver();
-        // 外部フレーム 1 枚で受動モードへ。
+        // Passive mode with 1 external frame.
         d.ch.mock_reply(&axis_frame(1, 1, 1000));
         d.drain_axis(5);
         assert!(*d.axis_passive.lock().unwrap() > Instant::now());
-        // キューが空でも要求を出さず Ok で返す (欠損セルは 0)。
+        // Even if the queue is empty no request is issued and it returns Ok (missing cells are 0).
         let out = d.live_axis().unwrap();
         assert!(d.ch.mock_sent().is_empty());
         assert_eq!(out.len(), registry::su66max_layout().len());
@@ -3099,22 +3092,22 @@ mod tests {
     #[test]
     fn drain_foreign_command_frame_triggers_passive() {
         let d = mock_driver();
-        // 公式の設定応答 ([3,1,...] 等) が流れている状況 — OBS は
-        // 軸要求しか出さないので非軸フレーム = 他人のトラフィック。
+        // A situation where official settings responses ([3,1,...] etc.) are flowing — OBS
+        // only issues axis requests, so a non-axis frame = someone else's traffic.
         let mut f = vec![3u8, 1];
         f.resize(64, 0);
         d.ch.mock_reply(&f);
         assert!(d.drain_axis(5));
         assert!(*d.axis_passive.lock().unwrap() > Instant::now());
-        // 他人のコマンドがデバイス側ストリームを解除するので、
-        // こちらからは何も送らない。
+        // Someone else's command releases the device-side stream,
+        // so we send nothing from our side.
         assert!(d.ch.mock_sent().is_empty());
     }
 
     #[test]
     fn drain_ignores_own_command_responses() {
         let d = mock_driver();
-        // 自分が [3,1] を直前に送っていた状況 → その応答は外部ではない。
+        // A situation where I sent [3,1] just before → that response is not external.
         d.cmd_self.lock().unwrap().insert((3, 1), Instant::now());
         let mut f = vec![3u8, 1];
         f.resize(64, 0);
@@ -3126,32 +3119,32 @@ mod tests {
     #[test]
     fn axis_row_ignores_foreign_frames_and_caches_them() {
         let d = mock_driver();
-        // 他 kind/他行のフレーム → 自分のエコーの順で届く。
+        // Frames of another kind/row → arrive before my own echo, in that order.
         d.ch.mock_reply(&axis_frame(3, 5, 777));
         d.ch.mock_reply(&axis_frame(1, 1, 2048));
         let v = d.axis_row(1, 1).unwrap();
         assert_eq!(v[0], 2048);
-        // エコー外のフレームも捨てずキャッシュに入る (相乗りに使う)。
+        // Frames outside the echo go into the cache without being discarded (used for piggybacking).
         let c = d.axis_cache.lock().unwrap();
         assert_eq!(c.get(&(3, 5)).unwrap().1[0], 777);
-        // 自分の要求が記録されている。
+        // My request has been recorded.
         assert!(d.axis_self.lock().unwrap().contains_key(&(1, 1)));
     }
 
     #[test]
     fn live_axis_requests_when_cache_cold() {
         let d = mock_driver();
-        // キャッシュも受動モードも無い → 要求を出して応答待ち → モックは
-        // 応答を返さないのでエラー。切断検知に必要な挙動は残っている。
+        // No cache and no passive mode → issue a request and wait for the response → the mock
+        // returns no response, so it is an error. The behavior needed for disconnect detection remains.
         assert!(d.live_axis().is_err());
         let sent = d.ch.mock_sent();
         assert!(sent.iter().any(|s| s.len() >= 4 && s[0] == 4 && s[1] == 3));
     }
 
-    /// 照明 wire レイアウト (公式 lightingBaseData と一致) の境界値。
+    /// Boundary values of the lighting wire layout (matches the official lightingBaseData).
     #[test]
     fn lighting_scale() {
-        // caps の範囲 = wire の範囲 = 0..100 生値。方向は Forward=0/Backward=1 のみ。
+        // caps range = wire range = 0..100 raw values. Direction is only Forward=0/Backward=1.
         let xs = XsydInfo {
             layers: 2,
             rt_step: 0.01,
@@ -3169,7 +3162,7 @@ mod tests {
         assert_eq!(caps[0].directions.len(), 2);
     }
 
-    /// 実機 fixture: `fixtures/su66max/perf.resp.bin` (r1c0, 2026-11-15 採取)。
+    /// Real-device fixture: `fixtures/su66max/perf.resp.bin` (r1c0, captured 2026-11-15).
     /// mode=0, nP=nR=2.0, rtFirst=0.5, rtP=rtR=0.3, pDead=rDead=0.2, axis=0
     #[test]
     fn perf_decode_fixture() {
@@ -3188,8 +3181,8 @@ mod tests {
         assert_eq!(p.switch_type, 0);
     }
 
-    /// rapid mode=1 → TriggerMode::Rapid + continuous (公式 vn: RT=1)。
-    /// mode=2 (IntervalRT) → Rapid + 非連続。
+    /// rapid mode=1 → TriggerMode::Rapid + continuous (official vn: RT=1).
+    /// mode=2 (IntervalRT) → Rapid + non-continuous.
     #[test]
     fn perf_decode_rapid() {
         let mut r = [0u8; 64];
@@ -3203,7 +3196,7 @@ mod tests {
         assert!(!p.continuous);
     }
 
-    /// DKS trps ビットマスク ↔ フェーズの往復。
+    /// DKS trps bitmask ↔ phase round trip.
     #[test]
     fn trp_roundtrip() {
         use DksPhase::*;
@@ -3220,11 +3213,11 @@ mod tests {
             assert_eq!(trp_to_phases(trp), expect, "trp={trp:#04x}");
             assert_eq!(phases_to_trp(&expect), trp);
         }
-        // Hold 優先: b0+b1 両立て → Hold
+        // Hold takes priority: b0+b1 both set → Hold
         assert_eq!(trp_to_phases(3)[0], Hold);
     }
 
-    /// マクロイベント u32 パック (SDK と同じ: bit31=down, bits16-30=delay, low16=keycode)。
+    /// Macro event u32 packing (same as the SDK: bit31=down, bits16-30=delay, low16=keycode).
     #[test]
     fn macro_event_pack() {
         let w = (1u32 << 31) | (100u32 << 16) | 0x04;
@@ -3235,7 +3228,7 @@ mod tests {
         assert_eq!(back >> 31, 1);
     }
 
-    /// ポーリング wire code のラベル。
+    /// Labels of polling rate wire codes.
     #[test]
     fn polling_labels() {
         assert_eq!(polling_label(0), "8000 Hz");
@@ -3243,7 +3236,7 @@ mod tests {
         assert_eq!(polling_label(6), "125 Hz");
     }
 
-    /// LED セル対応 — 実機目視で確定した座標 (cell = 行*21 + 列)。
+    /// LED cell mapping — coordinates fixed by visual inspection on the real device (cell = row*21 + col).
     #[test]
     fn led_cell_map() {
         let layout = registry::su66max_layout();
@@ -3251,8 +3244,8 @@ mod tests {
         assert_eq!(led_cells(&at("Esc")), vec![21]);
         assert_eq!(led_cells(&at("9")), vec![30]);
         assert_eq!(led_cells(&at("W")), vec![44]);
-        // 右端は実機プローブ確定値 — LED 列 = マトリクス列。' は右端の死pad
-        // (cell75) も自分の下に持つ。LShift も同様 (cell85)。
+        // The right edge is confirmed by real-device probes — LED column = matrix column. ' also has the dead pad on its right end
+        // (cell75) under itself. LShift likewise (cell85).
         assert_eq!(led_cells(&at("'")), vec![74, 75]);
         assert_eq!(led_cells(&at("Enter")), vec![76]);
         assert_eq!(led_cells(&at("↑")), vec![97]);
@@ -3260,7 +3253,7 @@ mod tests {
         assert_eq!(led_cells(&at("LShift")), vec![84, 85]);
         assert_eq!(led_cells(&at("V")), vec![89]);
         assert_eq!(led_cells(&at("B")), vec![90]);
-        // 行 5 は実測テーブル (右側圧縮 + スペースバー複数 LED)。
+        // Row 5 is the measured table (compressed right side + space bar with multiple LEDs).
         assert_eq!(led_cells(&at("LCtrl")), vec![105]);
         assert_eq!(led_cells(&at("RAlt")), vec![114]);
         assert_eq!(led_cells(&at("Fn")), vec![115]);
@@ -3274,8 +3267,8 @@ mod tests {
         assert_eq!(spaces, vec![109, 110, 111, 112, 113]);
     }
 
-    /// 高度キー wire 往復 — `higher_packets` で書いた内容を `[6,1]` 応答
-    /// として `decode_higher` で読み戻せるか (遅延フィールドを含む)。
+    /// Advanced key wire round trip — can what was written with `higher_packets` be read back
+    /// with `decode_higher` as a `[6,1]` response (including delay fields).
     #[test]
     fn higher_wire_roundtrip() {
         let layout = registry::su66max_layout();
@@ -3291,7 +3284,7 @@ mod tests {
                 registry::su66max_matrix_pos(k.id)
             };
             let packets = higher_packets(row, col, Some(&b)).unwrap();
-            // 応答 r[2..]=row,col,mode,... と同レイアウトで合成 (r[4]=mode)。
+            // Synthesized with the same layout as the response r[2..]=row,col,mode,... (r[4]=mode).
             let mut r = [0u8; 64];
             r[2..2 + packets[0].len()].copy_from_slice(&packets[0]);
             decode_higher(&r).unwrap_or_else(|| panic!("{key_label} decode failed"))
@@ -3343,7 +3336,7 @@ mod tests {
             }
             other => panic!("MT → {other:?}"),
         }
-        // SOCD: pair@5..6, kcs@7..10, delay@11..12, socdMode@13 (2 パケット目も構造を確認)
+        // SOCD: pair@5..6, kcs@7..10, delay@11..12, socdMode@13 (the structure of the 2nd packet is also checked)
         for (mode, x0, x1) in [
             (SocdMode::Last, 0u8, 0u8),
             (SocdMode::PriorityA, 1, 2),
@@ -3360,10 +3353,10 @@ mod tests {
             let (row, col) = registry::su66max_matrix_pos(layout[idx("A")].id);
             let packets = higher_packets(row, col, Some(&b)).unwrap();
             assert_eq!(packets.len(), 2);
-            // 書き込みパケット = [row,col,mode,r2,c2,kcA,kcB,delay,x] → socdMode は index 11
+            // Write packet = [row,col,mode,r2,c2,kcA,kcB,delay,x] → socdMode is at index 11
             assert_eq!(packets[0][11], x0);
             assert_eq!(packets[1][11], x1);
-            // パケット 2 はペアとキーコードが反転 (kcB@5..6, kcA@7..8)
+            // Packet 2 has the pair and key codes reversed (kcB@5..6, kcA@7..8)
             assert_eq!(u16::from_le_bytes([packets[1][5], packets[1][6]]), 0x07);
             assert_eq!(u16::from_le_bytes([packets[1][7], packets[1][8]]), 0x04);
             let mut r = [0u8; 64];
@@ -3383,7 +3376,7 @@ mod tests {
                 other => panic!("SOCD {mode:?} → {other:?}"),
             }
         }
-        // RS: SOCD と同構造 (モードバイトなし)
+        // RS: same structure as SOCD (no mode byte)
         match roundtrip(
             "A",
             Advanced::Rs {
@@ -3404,7 +3397,7 @@ mod tests {
             }
             other => panic!("RS → {other:?}"),
         }
-        // DKS: 4×kc@5..12, 4×trp@13..16, dbs@17..20 — bottom は db2
+        // DKS: 4×kc@5..12, 4×trp@13..16, dbs@17..20 — bottom is db2
         match roundtrip(
             "A",
             Advanced::Dks {
@@ -3436,14 +3429,14 @@ mod tests {
             }
             other => panic!("MPT → {other:?}"),
         }
-        // NONE (解除) → decode_higher は None
+        // NONE (cleared) → decode_higher returns None
         let packets = higher_packets(3, 1, None).unwrap();
         assert_eq!(packets[0][2], hk::NONE);
     }
 
-    // ---- モック Channel の fixture テスト (実機応答バイトの再生) ----
+    // ---- Mock Channel fixture tests (replay of real-device response bytes) ----
 
-    /// `[group, ...tail]` の 64B 応答を組み立てる (tail には sub/引数エコーを含める)。
+    /// Builds a 64B response of `[group, ...tail]` (include the sub/argument echo in tail).
     fn reply(group: u8, tail: &[u8]) -> Vec<u8> {
         let mut v = Vec::with_capacity(64);
         v.push(group);
@@ -3452,15 +3445,15 @@ mod tests {
         v
     }
 
-    /// DD セッション開始時の `capture_dd_pre` (全 9 チャンクのカスタム読み出し)
-    /// への応答を積む — 全セル isCustom=0 (ユーザー塗りなし)。
+    /// Queues the responses to `capture_dd_pre` at DD session start (custom read of all 9 chunks)
+    /// — all cells isCustom=0 (no user paint).
     fn mock_dd_pre_empty(d: &XsydDriver) {
         for c in 0..9u8 {
             d.ch.mock_reply(&reply(5, &[3, 0, c]));
         }
     }
 
-    /// DoubleLighting + areas=[0,1] の最小 XsydDriver。
+    /// A minimal XsydDriver with DoubleLighting + areas=[0,1].
     fn mock_driver() -> XsydDriver {
         XsydDriver {
             info: DeviceInfo {
@@ -3505,14 +3498,14 @@ mod tests {
         }
     }
 
-    /// SU66 実機 (area0) と同じ応答列: base=Open/mode15/#slot2/100/75 →
-    /// LightingState へのデコードを検証。
+    /// The same response sequence as the SU66 real device (area0): base=Open/mode15/#slot2/100/75 →
+    /// verifies decoding into LightingState.
     #[test]
     fn lighting_read_fixture() {
         let d = mock_driver();
         // base [5,1,0,0] → r[4]=open=3 r[5]=15 r[6]=100 r[7]=75 r[8]=0 r[9]=sel=2
         d.ch.mock_reply(&reply(5, &[1, 0, 0, 3, 15, 100, 75, 0, 2]));
-        // palette [5,1,0,1] → r[4..36]=[B,G,R,H]×8、slot2 = #204080
+        // palette [5,1,0,1] → r[4..36]=[B,G,R,H]×8, slot2 = #204080
         let mut tail = vec![1, 0, 1];
         tail.resize(3 + 32, 0);
         tail[3 + 8] = 0x80; // B
@@ -3521,7 +3514,7 @@ mod tests {
         d.ch.mock_reply(&reply(5, &tail));
         // cc [5,1,0,2] → r[4,5,6] = R,G,B
         d.ch.mock_reply(&reply(5, &[1, 0, 2, 38, 35, 40]));
-        // per-key [5,3,0,0..8]: chunk1 (cells 15..29) の i=6 = cell21 (Esc) にカスタム
+        // per-key [5,3,0,0..8]: chunk1 (cells 15..29) i=6 = cell21 (Esc) has custom
         for c in 0..9u8 {
             let mut t = vec![3, 0, c];
             t.resize(3 + 60, 0);
@@ -3545,9 +3538,9 @@ mod tests {
         assert_eq!(*s.per_key.values().next().unwrap(), Rgb::new(1, 2, 3));
     }
 
-    /// DirectDrive: `[5,5,area,chunk,…15セル×4B(B,G,R,255)]` を応答待ちせず送る。
-    /// flag=0 しか無いチャンクは送らない (flag=0 は「触らない」)。
-    /// キー index → LED セル展開 (Esc=21、スペースバー=複数セル) を検証。
+    /// DirectDrive: sends `[5,5,area,chunk,…15 cells×4B(B,G,R,255)]` without waiting for a response.
+    /// Chunks with only flag=0 are not sent (flag=0 is "don't touch").
+    /// Verifies key index → LED cell expansion (Esc=21, space bar = multiple cells).
     #[test]
     fn direct_drive_wire() {
         let d = mock_driver();
@@ -3558,13 +3551,13 @@ mod tests {
             .position(|k| led_cells(k).contains(&111))
             .unwrap();
         let mut cells = BTreeMap::new();
-        cells.insert(esc, Rgb::new(255, 0, 0)); // 赤
-        cells.insert(spc, Rgb::new(0, 0, 255)); // 青
+        cells.insert(esc, Rgb::new(255, 0, 0)); // red
+        cells.insert(spc, Rgb::new(0, 0, 255)); // blue
         mock_dd_pre_empty(&d);
         d.direct_drive(0, &cells).unwrap();
         let sent = d.ch.mock_sent();
-        // Esc=cell21 (chunk1) と Space=cell111 (chunk7) だけが含まれる
-        // (capture_dd_pre の 9 read も sent に混ざるので DD だけ拾う)。
+        // Only Esc=cell21 (chunk1) and Space=cell111 (chunk7) are included
+        // (the 9 reads of capture_dd_pre are also mixed into sent, so pick up only the DD ones).
         let dd: Vec<_> = sent
             .iter()
             .filter(|f| f[1] == sub::LIGHT_DIRECTDRIVE)
@@ -3576,16 +3569,16 @@ mod tests {
             assert_eq!(f.len(), 64);
         }
         let c1 = dd.iter().find(|f| f[3] == 1).unwrap();
-        // Esc → cell21 = chunk1 の 7 番目セル → [B,G,R,255]
+        // Esc → cell21 = 7th cell of chunk1 → [B,G,R,255]
         assert_eq!(&c1[4 + 6 * 4..8 + 6 * 4], &[0, 0, 255, 255]);
         let c7 = dd.iter().find(|f| f[3] == 7).unwrap();
-        // スペースバー中 cell111 = chunk7 (105-119) の 7 番目セル
+        // space bar center cell111 = 7th cell of chunk7 (105-119)
         assert_eq!(&c7[4 + 6 * 4..8 + 6 * 4], &[255, 0, 0, 255]);
     }
 
-    /// DirectDrive のハイブリッド解放: 前フレームでピン留めしたセルが
-    /// 次フレームの指定集合から外れたら `[5,4]` で isCustom を落とす。
-    /// 解放書き込みは readback した現行値で、対象セルの flag だけ 0。
+    /// DirectDrive hybrid release: when a cell pinned in the previous frame
+    /// drops out of the next frame's specified set, isCustom is cleared with `[5,4]`.
+    /// The release write uses the readback current values, with only the target cell's flag set to 0.
     #[test]
     fn direct_drive_releases_dropped_cells() {
         let d = mock_driver();
@@ -3595,33 +3588,33 @@ mod tests {
         cells.insert(esc, Rgb::new(255, 0, 0));
         mock_dd_pre_empty(&d);
         d.direct_drive(0, &cells).unwrap();
-        // Esc=cell21 → chunk1 にピン。次は空 → 全解放。
-        // 解放は chunk1 だけ — readback 応答 (cell21 は isCustom=255, 他は 0) を用意。
+        // Esc=cell21 → pin to chunk1. Next is empty → release all.
+        // Release is chunk1 only — prepare the readback response (cell21 is isCustom=255, the others 0).
         let mut t = vec![3, 0, 1u8];
         t.resize(3 + 60, 0);
         t[3 + 6 * 4] = 0; // B
         t[4 + 6 * 4] = 0;
         t[5 + 6 * 4] = 255; // R
-        t[6 + 6 * 4] = 255; // isCustom (ピン留め中)
-        t[3 + 7 * 4 + 3] = 255; // 隣の cell22 は別途ユーザーがピン留め → 温存すべき
+        t[6 + 6 * 4] = 255; // isCustom (pinned)
+        t[3 + 7 * 4 + 3] = 255; // the neighboring cell22 is separately pinned by the user → should be preserved
         d.ch.mock_reply(&reply(5, &t));
-        // [5,4] への ack
+        // ack to [5,4]
         d.ch.mock_reply(&reply(5, &[4, 0, 1]));
         d.direct_drive(0, &BTreeMap::new()).unwrap();
         let sent = d.ch.mock_sent();
-        // [5,4] chunk1 だけ出る (DD フレームは送られない — 指定セル無し)。
+        // Only [5,4] chunk1 is emitted (no DD frame is sent — no specified cells).
         let custom: Vec<_> = sent.iter().filter(|f| f[1] == sub::LIGHT_CUSTOM).collect();
         assert_eq!(custom.len(), 1, "frames: {sent:?}");
         let f = custom[0];
         assert_eq!(f[3], 1); // chunk1
-                             // 解放対象の cell21 (chunk 内 index6) → flag=0、色は readback 値を保持。
+                             // cell21 to release (index 6 in chunk) → flag=0, color keeps the readback value.
         assert_eq!(&f[4 + 6 * 4..8 + 6 * 4], &[0, 0, 255, 0]);
-        // ユーザーのピン cell22 (index7) → flag=255 のまま温存。
+        // The user's pin cell22 (index7) → kept at flag=255.
         assert_eq!(f[7 + 7 * 4], 255);
     }
 
-    /// 同じ DirectDrive フレームを連続で渡しても、ピン済み・同色のセルは
-    /// 再送しない (実機でピンが持続するため静止時の輻輳を避ける)。
+    /// Even if the same DirectDrive frame is passed repeatedly, cells already pinned and with the same color are
+    /// not resent (pins persist on the real device, so avoid congestion at rest).
     #[test]
     fn direct_drive_skips_unchanged_frames() {
         let d = mock_driver();
@@ -3633,7 +3626,7 @@ mod tests {
         let n = d.ch.mock_sent().len();
         d.direct_drive(0, &cells).unwrap();
         assert_eq!(d.ch.mock_sent().len(), n);
-        // 色を変えたら同じセルでも chunk を再送する。
+        // If the color changes, the chunk is resent even for the same cell.
         d.direct_drive(0, &BTreeMap::from([(esc, Rgb::new(0, 255, 0))]))
             .unwrap();
         let sent = d.ch.mock_sent();
@@ -3644,7 +3637,7 @@ mod tests {
     #[test]
     fn direct_drive_never_writes_with_an_incomplete_backup() {
         let d = mock_driver();
-        // チャンク 1 の応答としてチャンク 2 が届いたら退避を確定しない。
+        // If chunk 2 arrives as the response to chunk 1, do not finalize the save.
         d.ch.mock_reply(&reply(5, &[3, 0, 0]));
         d.ch.mock_reply(&reply(5, &[3, 0, 2]));
         let esc = registry::su66max_layout()
@@ -3668,7 +3661,7 @@ mod tests {
         for c in 0..9 {
             let mut rb = reply(5, &[3, 0, c]);
             if c == 1 {
-                rb[28..32].copy_from_slice(&[3, 2, 1, 255]); // Esc のユーザー色
+                rb[28..32].copy_from_slice(&[3, 2, 1, 255]); // Esc user color
             }
             d.ch.mock_reply(&rb);
         }
@@ -3729,23 +3722,23 @@ mod tests {
         assert_eq!(restored, [1, 7]);
     }
 
-    /// ベース書き込みの wire: `[5,2,area,0,open,mode,lum,spd,dir,sel]` と
-    /// 「現行と同じ部分は送らない」ことを検証。
+    /// Wire of the base write: `[5,2,area,0,open,mode,lum,spd,dir,sel]` and
+    /// verifying that "parts identical to the current are not sent".
     #[test]
     fn lighting_write_wire() {
         let d = mock_driver();
-        // cur base (変更あり → base フレームだけ出る)
+        // cur base (changed → only the base frame is emitted)
         d.ch.mock_reply(&reply(5, &[1, 0, 0, 1, 1, 50, 50, 0, 0]));
-        // base SET への ack エコー
+        // ack echo to base SET
         d.ch.mock_reply(&reply(5, &[2, 0, 0]));
-        // cur palette: slot2 が目標色と同じ → パレット書き込み無し
+        // cur palette: slot2 equals the target color → no palette write
         let mut tail = vec![1, 0, 1];
         tail.resize(3 + 32, 0);
         tail[3 + 8] = 0x80;
         tail[3 + 9] = 0x40;
         tail[3 + 10] = 0x20;
         d.ch.mock_reply(&reply(5, &tail));
-        // cur cc = 目標と同じ → cc 書き込み無し
+        // cur cc = same as the target → no cc write
         d.ch.mock_reply(&reply(5, &[1, 0, 2, 38, 35, 40]));
         let s = LightingState {
             on: true,
@@ -3762,14 +3755,14 @@ mod tests {
         };
         d.write_lighting(0, &s).unwrap();
         let sent = d.ch.mock_sent();
-        // sent には READ も混ざる — SET フレームだけ取り出して検証。
+        // sent also contains READs — extract and verify only the SET frames.
         let sets: Vec<_> = sent.iter().filter(|f| f[1] == sub::SETTING).collect();
         assert_eq!(sets.len(), 1, "frames: {sent:?}");
         assert_eq!(&sets[0][..10], &[5, 2, 0, 0, 3, 15, 100, 75, 0, 2]);
     }
 
-    /// jo enum 合成: 両方=3 / 上のみ=2 / 下のみ=1 / 閉=0。非 DoubleLighting
-    /// エリアは真偽 (on→1)。
+    /// jo enum synthesis: both=3 / upper only=2 / lower only=1 / closed=0. Non-DoubleLighting
+    /// areas use a boolean (on→1).
     #[test]
     fn lighting_zone_open() {
         let d = mock_driver();
@@ -3790,9 +3783,9 @@ mod tests {
         assert_eq!(d.compose_open(0, &mk(vec![true, false], true)), 2);
         assert_eq!(d.compose_open(0, &mk(vec![false, true], true)), 1);
         assert_eq!(d.compose_open(0, &mk(vec![false, false], false)), 0);
-        // zone_on が無い時は on→3 (DoubleLighting)
+        // When zone_on is absent, on→3 (DoubleLighting)
         assert_eq!(d.compose_open(0, &mk(vec![], true)), 3);
-        // SingleLighting エリアは真偽
+        // SingleLighting area is a boolean
         assert_eq!(d.compose_open(1, &mk(vec![], true)), 1);
         assert_eq!(d.compose_open(1, &mk(vec![], false)), 0);
     }

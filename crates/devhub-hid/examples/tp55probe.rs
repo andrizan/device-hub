@@ -1,4 +1,4 @@
-//! output_gain を High (1) に戻して確認する。
+//! Sets output_gain back to High (1) and checks it.
 
 fn main() {
     let api = hidapi::HidApi::new().unwrap();
@@ -23,7 +23,7 @@ fn main() {
         let n = d.read_timeout(&mut r, 150).unwrap_or(0);
         r[..n].to_vec()
     };
-    // High に書いて保存
+    // Write High and save
     send(&[1, 25, 1, 1]);
     send(&[1, 1, 0]);
     std::thread::sleep(std::time::Duration::from_millis(150));

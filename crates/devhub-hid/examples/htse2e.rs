@@ -1,7 +1,7 @@
-//! HTS Plus Pro 有線 (33e4:5219) E2E: EEPROM ダンプ + 書き込み往復。
-//! 使い方:
-//!   cargo run -p devhub-hid --example htse2e -- dump     # 関連領域をダンプ
-//!   cargo run -p devhub-hid --example htse2e -- e2e      # 書き込み往復テスト (要マウス覚醒)
+//! HTS Plus Pro wired (33e4:5219) E2E: EEPROM dump + write round trip.
+//! Usage:
+//!   cargo run -p devhub-hid --example htse2e -- dump     # dump the relevant regions
+//!   cargo run -p devhub-hid --example htse2e -- e2e      # write round-trip test (mouse must be awake)
 use devhub_hid::transport;
 use std::time::{Duration, Instant};
 
@@ -30,7 +30,7 @@ fn cmd(dev: &hidapi::HidDevice, c: u8, addr: u16, data: &[u8]) -> Vec<u8> {
     }
 }
 
-/// EEPROM 読み (10B チャンクを連結)。応答データは b[6..]。
+/// EEPROM read (concatenates 10B chunks). Response data is b[6..].
 fn ee_read(dev: &hidapi::HidDevice, addr: u16, len: u16) -> Vec<u8> {
     let mut out = Vec::new();
     let mut a = addr;
@@ -47,7 +47,7 @@ fn ee_read(dev: &hidapi::HidDevice, addr: u16, len: u16) -> Vec<u8> {
     out
 }
 
-/// EEPROM 書き (10B チャンク)。
+/// EEPROM write (10B chunks).
 fn ee_write(dev: &hidapi::HidDevice, addr: u16, data: &[u8]) {
     for (i, chunk) in data.chunks(10).enumerate() {
         let a = addr + (i * 10) as u16;
@@ -98,11 +98,11 @@ fn dump(dev: &hidapi::HidDevice) {
     for i in 0..5 {
         println!("  slot{i}: [{}]", hex(&kf[i * 4..(i + 1) * 4]));
     }
-    println!("=== 磁気 @239..250 ===");
+    println!("=== Magnetic @239..250 ===");
     for addr in [239u16, 241, 243, 245, 247, 249] {
         println!("  @{addr}: {:?}", ee_read(dev, addr, 2));
     }
-    println!("=== ShortcutKey @256+32k (type5 のスロットのみ生で) ===");
+    println!("=== ShortcutKey @256+32k (raw for type5 slots only) ===");
     for i in 0..5u16 {
         if kf[i as usize * 4] == 5 {
             let sc = ee_read(dev, 256 + i * 32, 32);
@@ -135,7 +135,7 @@ fn main() {
     }
 }
 
-/// ドライバ経路 (RealHub→driver→read/apply) の E2E。encode/RMW を含めて検証。
+/// E2E through the driver path (RealHub→driver→read/apply). Verifies including encode/RMW.
 fn drv() {
     use devhub_core::model::*;
     let hub = devhub_hid::connect().unwrap();
@@ -175,7 +175,7 @@ fn drv() {
         };
     }
 
-    // ---- RT: enable トグル + 感度 RMW ----
+    // ---- RT: enable toggle + sensitivity RMW ----
     println!("== RT (ms_fast) ==");
     drv.apply(&Change::Setting {
         id: "ms_fast_left_en".into(),
@@ -212,13 +212,13 @@ fn drv() {
     .unwrap();
     let st = drv.read().unwrap();
     check!(
-        "disable keeps value 7 (公式 0x07 相当)",
+        "disable keeps value 7 (equivalent to official 0x07)",
         get(&st, "ms_fast_left") == Some(SettingValue::Num(7.))
             && get(&st, "ms_fast_left_en") == Some(SettingValue::Bool(false))
     );
 
-    // ---- トリガー位置: 公式は 1-20 表示 ----
-    println!("== ms_trigger (1-20 表示) ==");
+    // ---- Trigger position: official shows 1-20 ----
+    println!("== ms_trigger (1-20 display) ==");
     let t0 = get(&st0, "ms_trigger_left");
     drv.apply(&Change::Setting {
         id: "ms_trigger_left".into(),
@@ -238,7 +238,7 @@ fn drv() {
         .unwrap();
     }
 
-    // ---- サイドボタン: Media (ShortcutKey + CRC) ----
+    // ---- Side button: Media (ShortcutKey + CRC) ----
     println!("== side button slot3 ==");
     drv.apply(&Change::Button {
         slot: 3,
@@ -251,7 +251,7 @@ fn drv() {
         "slot3 = Media(PlayPause)",
         b3 == ButtonAction::Media(MediaFn::PlayPause)
     );
-    // キー + 修飾 (Ctrl+Shift+A)
+    // Key + modifiers (Ctrl+Shift+A)
     drv.apply(&Change::Button {
         slot: 3,
         action: ButtonAction::Key(KeyStroke {
@@ -266,7 +266,7 @@ fn drv() {
         "slot3 = Ctrl+Shift+A",
         matches!(b3, ButtonAction::Key(k) if k.mods == 0b11 && k.usage == 4)
     );
-    // マウス「戻る」 (type1 — shortcut 領域は残るが type で無効化)
+    // Mouse "Back" (type1 — the shortcut region remains but is disabled via type)
     drv.apply(&Change::Button {
         slot: 3,
         action: ButtonAction::Mouse(MouseFn::Back),
@@ -278,7 +278,7 @@ fn drv() {
         st.mouse.as_ref().unwrap().buttons[3] == ButtonAction::Mouse(MouseFn::Back)
     );
 
-    // ---- 復元 ----
+    // ---- Restore ----
     println!("== restore ==");
     drv.apply(&Change::Button {
         slot: 3,
@@ -303,12 +303,12 @@ fn drv() {
     println!("== {} ==", if fails == 0 { "ALL PASS" } else { "FAILURES" });
 }
 
-/// 書き込み往復テスト。現状値を退避→書き→読み戻し→復元。
+/// Write round-trip test. Save current values → write → read back → restore.
 fn e2e(dev: &hidapi::HidDevice) {
     println!("=== baseline ===");
     dump(dev);
 
-    // 保存する領域: サイドボタン (slot3/4) の KeyFunction + shortcut、磁気 4 本
+    // Regions to save: KeyFunction + shortcut of the side buttons (slot3/4), the 4 magnetic buttons
     let kf = ee_read(dev, 96, 20);
     let mut saved_short: Vec<(u16, Vec<u8>)> = vec![];
     for i in 0..5u16 {
@@ -321,7 +321,7 @@ fn e2e(dev: &hidapi::HidDevice) {
         .map(|&a| (a, ee_read(dev, a, 2)))
         .collect();
 
-    // ---- RT (ms_fast) 書き込み往復 ----
+    // ---- RT (ms_fast) write round trip ----
     println!("\n=== RT e2e (@241/247) ===");
     for (addr, name) in [(241u16, "L"), (247u16, "R")] {
         for wire in [0x83u8, 0x00, 0x87] {
@@ -332,7 +332,7 @@ fn e2e(dev: &hidapi::HidDevice) {
         }
     }
 
-    // ---- サイドボタン: slot3 (戻る) に Media PlayPause を書いて往復 ----
+    // ---- Side button: write Media PlayPause to slot3 (Back) and round-trip ----
     println!("\n=== side-button e2e (slot3) ===");
     let media: Vec<u8> = {
         let mut b = vec![2, 0x82, 0xCD, 0x00, 0x42, 0xCD, 0x00, 0];
@@ -355,7 +355,7 @@ fn e2e(dev: &hidapi::HidDevice) {
     let kf3 = ee_read(dev, 96 + 3 * 4, 4);
     println!("  keyfn slot3 -> [{}]", hex(&kf3));
 
-    // ---- 復元 ----
+    // ---- Restore ----
     println!("\n=== restore ===");
     ee_write(dev, 96, &kf);
     for (a, b) in &saved_short {

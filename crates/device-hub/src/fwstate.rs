@@ -1,21 +1,21 @@
-//! ファームウェア更新通知の永続状態 (`%APPDATA%\DeviceHub\firmware.json`)。
-//! キーは `DeviceInfo.model` (機種ごとに 1 件 — 同じ機種が複数つながっても共通)。
+//! Persistent state of firmware update notifications (`%APPDATA%\DeviceHub\firmware.json`).
+//! The key is `DeviceInfo.model` (one entry per model — shared when several of the same model are connected).
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-/// 自動確認の間隔。
+/// Interval between automatic checks.
 pub const CHECK_EVERY: u64 = 24 * 60 * 60;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FwEntry {
-    /// 前回確認した配布物の指紋 (基準値)。
+    /// Fingerprint of the distribution last checked (baseline).
     pub fingerprint: String,
-    /// 最後に確認を試みた時刻 (UNIX 秒)。失敗でも記録して打ちすぎない。
+    /// Time of the last check attempt (UNIX seconds). Recorded even on failure so we do not retry too often.
     pub last_check: u64,
-    /// ユーザーが閉じた指紋 — 同じ更新では再通知しない。
+    /// Fingerprint the user dismissed — the same update is not notified again.
     pub dismissed: String,
 }
 
@@ -60,7 +60,7 @@ impl FwState {
             .as_secs()
     }
 
-    /// 自動確認すべき間隔が経過したか (force なら常に true)。
+    /// Whether the interval for an automatic check has elapsed (always true if force).
     pub fn due(&self, key: &str, force: bool) -> bool {
         if force {
             return true;
@@ -69,7 +69,7 @@ impl FwState {
         Self::now().saturating_sub(last) >= CHECK_EVERY
     }
 
-    /// 確認を始める直前に打刻する (失敗しても 24h は再試行しない)。
+    /// Stamp just before starting a check (no retry for 24h even on failure).
     pub fn touch(&mut self, key: &str) {
         self.devices.entry(key.to_string()).or_default().last_check = Self::now();
     }

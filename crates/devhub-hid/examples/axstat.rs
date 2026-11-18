@@ -1,5 +1,5 @@
-//! KeyStatus (kind=3) 生値の観測 — 押下表示が点滅する問題の切り分け。
-//! 100ms ごとに全行を読み、非0セルを出す。
+//! Observing raw KeyStatus (kind=3) values — isolating why the press display flickers.
+//! Reads all rows every 100ms and prints the non-zero cells.
 
 use std::time::Duration;
 

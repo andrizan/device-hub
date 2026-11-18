@@ -6,8 +6,8 @@ members = ["crates/*"]
 edition = "2021"
 license = "MIT OR Apache-2.0"
 
-# GPU backdrop-filter (Liquid Glass の下地) を GPUI に足すため、core と
-# Windows 描画を vendor/ で差し替える。変更点は vendor/README.md。
+# To add a GPU backdrop-filter (the base of Liquid Glass) to GPUI, the core and
+# the Windows renderer are replaced with the copies in vendor/. See vendor/README.md for the changes.
 [patch.crates-io]
 gpui-pre = { path = "vendor/gpui-pre" }
 gpui-pre-windows = { path = "vendor/gpui-pre-windows" }
@@ -18,7 +18,7 @@ opt-level = 3
 lto = "thin"
 codegen-units = 1
 
-# OBS オーバーレイの CPU 描画はデバッグビルドだと遅い (アプリのプレビューで使う) ので最適化しておく。
+# The OBS overlay's CPU rendering is slow in debug builds (the app uses it for its preview), so optimize it.
 [profile.dev.package.devhub-obs]
 opt-level = 3
 [profile.dev.package.fontdue]

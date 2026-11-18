@@ -1,5 +1,5 @@
-//! 解析プローブ #14: flag=0 = セル解放か検証。
-//! 1) cell75 に赤 flag255 → 2) 全セル flag=0 フレーム → 3) [5,3] で custom 状態確認
+//! Analysis probe #14: verify whether flag=0 releases the cell.
+//! 1) Red flag255 on cell75 → 2) frame with flag=0 on all cells → 3) check the custom state via [5,3]
 fn main() {
     let api = hidapi::HidApi::new().unwrap();
     let dev = api
@@ -52,17 +52,17 @@ fn main() {
             .unwrap_or(0xfe)
     };
 
-    // 1) cell75 を赤 flag255 でオーバーライド
+    // 1) Override cell75 with red flag255
     let mut cells = [[0u8; 4]; 135];
     cells[75] = [0, 0, 255, 255];
     dd(&cells);
     std::thread::sleep(std::time::Duration::from_millis(400));
     println!("after flag255 red: cell75 custom={}", custom_of(75));
 
-    // 2) 全セル flag=0 フレーム (解放)
+    // 2) Frame with flag=0 on all cells (release)
     let cells = [[0u8; 4]; 135];
     dd(&cells);
     std::thread::sleep(std::time::Duration::from_millis(400));
     println!("after flag0 release: cell75 custom={}", custom_of(75));
-    println!("→ custom=0 になれば flag=0 は解放として機能");
+    println!("→ if custom becomes 0, flag=0 works as a release");
 }

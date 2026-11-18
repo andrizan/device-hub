@@ -459,7 +459,7 @@ impl<'a> Iterator for BatchIterator<'a> {
             PrimitiveKind::PolychromeSprite => {
                 let first = self.polychrome_sprites_iter.peek().unwrap();
                 let texture_id = first.tile.texture_id;
-                // DEVHUB: `pad` は最近傍サンプラの印 (シェーダは読まない)。
+                // DEVHUB: `pad` is the nearest-neighbor sampler marker (the shader does not read it).
                 let nearest = first.pad != 0;
                 let sprites_start = self.polychrome_sprites_start;
                 let mut sprites_end = sprites_start + 1;
@@ -540,7 +540,7 @@ pub enum PrimitiveBatch {
     PolychromeSprites {
         texture_id: AtlasTextureId,
         range: Range<usize>,
-        /// DEVHUB: 拡大を最近傍 (POINT) サンプラで行うか (ピクセル風景の壁紙)。
+        /// DEVHUB: whether to magnify with the nearest-neighbor (POINT) sampler (pixel-art landscape wallpaper).
         nearest: bool,
     },
     Surfaces(Range<usize>),

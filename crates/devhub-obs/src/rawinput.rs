@@ -1,25 +1,25 @@
-//! Raw Input で実測 input report レートを計測する (Windows)。
+//! Measure the actual input report rate with Raw Input (Windows).
 //!
-//! マウス (usage 1/2) とキーボード (usage 1/6) の raw input をメッセージ専用
-//! ウィンドウで `RIDEV_INPUTSINK` 受信し、hDevice → VID/PID ごとに到達イベントを
-//! 数える。OS のカーソル/キーイベントとは違い、デバイスが実際に送った
-//! input report の到達率になる (8KHz マウスなら動かすと ~8000/秒)。
-//! キーボードはキー状態変化のたびに report が来るので、入力中のみカウントされる。
+//! Receives raw input from the mouse (usage 1/2) and keyboard (usage 1/6) in a message-only
+//! window with `RIDEV_INPUTSINK`, and counts the arriving events per hDevice → VID/PID.
+//! Unlike OS cursor/key events, this gives the arrival rate of the
+//! input reports the device actually sent (for an 8KHz mouse, ~8000/s when moved).
+//! A keyboard sends a report on every key state change, so it is only counted while typing.
 //!
-//! 高頻度対策: `WM_INPUT` 受信時に `GetRawInputData` で当該イベントを読み、
-//! 続けて `GetRawInputBuffer` で溜まった分をまとめてドレインする
-//! (Microsoft が高周波デバイス向けに推奨する手順。GetMessage が現在イベントを
-//! キューから除くため二重カウントにはならない)。
+//! High-frequency handling: on `WM_INPUT`, read that event with `GetRawInputData`,
+//! then drain the accumulated ones in bulk with `GetRawInputBuffer`
+//! (the procedure Microsoft recommends for high-frequency devices. GetMessage removes the current event from
+//! the queue, so nothing is double counted).
 //!
-//! 「ポーリング実測」の値の意味 (docs/POLLING_RATE.md):
-//! - マウスは「動きがあるときだけ」レポートを送るので、届く数 ≦ カウント/秒。
-//! - 区間 (gap ≤ 2ms が続く区間) ごとにレートを出し、止まっている時間を除外する。
-//! - RAWMOUSE の |dx|+|dy| を集計して「この速度・DPI での理論上限 ≒ カウント/秒」を出す。
+//! Meaning of the "measured polling" values (docs/POLLING_RATE.md):
+//! - A mouse sends reports "only when it moves", so arrivals ≤ counts/s.
+//! - A rate is computed per segment (a stretch where gaps stay ≤ 2ms), excluding idle time.
+//! - Sum |dx|+|dy| of RAWMOUSE to get "the theoretical ceiling at this speed and DPI ≒ counts/s".
 //!
-//! 注意: Windows 11 (Moment 3 / KB5022497 以降) は**バックグラウンドプロセスへの
-//! raw input 配信を制限**する。背面では ~150Hz 程度まで落ちた値しか取れないため、
-//! 計測値が信用できるのは自プロセスの窓が前面のときだけ (MouseTester と同じ制約)。
-//! UI は `last_window_active` で出し分けている。
+//! Note: Windows 11 (Moment 3 / KB5022497 and later) **restricts raw input delivery to background
+//! processes**. In the background only values dropped to ~150Hz can be obtained, so
+//! measurements are reliable only while this process's window is in front (same constraint as MouseTester).
+//! The UI switches its display with `last_window_active`.
 
 #[cfg(windows)]
 mod imp {
@@ -41,38 +41,38 @@ mod imp {
         TranslateMessage, CW_USEDEFAULT, MSG, WM_INPUT, WNDCLASSEXW, WS_OVERLAPPED,
     };
 
-    /// Hz 計測窓。
+    /// Hz measurement window.
     const WINDOW_SECS: f32 = 1.0;
-    /// グラフのバケット幅。
+    /// Bucket width of the graph.
     const BUCKET_MS: u64 = 250;
-    /// グラフに持つバケット数 (~15 秒)。
+    /// Number of buckets kept for the graph (~15 s).
     const HIST_LEN: usize = 60;
-    /// 間隔統計に使う直近ギャップ数 (8KHz で ~64ms、1KHz で ~0.5s 分)。
+    /// Number of recent gaps used for interval statistics (~64ms at 8KHz, ~0.5s at 1KHz).
     const GAP_LEN: usize = 512;
-    /// これより間隔が空いたら「動くのをやめた」とみなして区間を切る (ms)。
+    /// A gap longer than this is treated as "stopped moving" and ends the segment (ms).
     const SEG_BREAK_MS: u64 = 2;
-    /// 区間として採用する最小の時間幅 (ms)。
+    /// Minimum duration to accept as a segment (ms).
     const SEG_MIN_SPAN_MS: u64 = 100;
-    /// 区間として採用する最小レポート数。
+    /// Minimum number of reports to accept as a segment.
     const SEG_MIN_N: u32 = 8;
-    /// 確定区間の保持数。
+    /// Number of finalized segments kept.
     const SEGS_LEN: usize = 128;
-    /// 「ピーク」の対象期間 (ms)。
+    /// Period covered by the "peak" (ms).
     const PEAK_WINDOW_MS: u64 = 10_000;
-    /// 「現在の区間」とみなす終端の鮮度 (ms)。これより古い確定区間は使わない。
+    /// Freshness of the end that counts as the "current segment" (ms). Finalized segments older than this are not used.
     const SEG_FRESH_MS: u64 = 1_500;
-    /// 生入力バッファの初期サイズ (要素数 = u64 → 64KiB)。
+    /// Initial size of the raw input buffer (element count = u64 → 64KiB).
     const BUF_LEN: usize = 8192;
 
-    /// 確定した「動いている区間」。start/last はエポックからの ms。
+    /// A finalized "moving segment". start/last are ms since the epoch.
     #[derive(Clone, Copy, Default)]
     struct Seg {
         start_ms: u64,
         last_ms: u64,
         n: u32,
-        /// |dx|+|dy| ≤ 1 のレポート数 (DPI/速度不足の指標)。
+        /// Number of reports with |dx|+|dy| ≤ 1 (an indicator of insufficient DPI/speed).
         low: u32,
-        /// 移動量合計 (|dx|+|dy|)。
+        /// Total movement (|dx|+|dy|).
         counts: u64,
     }
 
@@ -83,24 +83,24 @@ mod imp {
         fn rate_hz(&self) -> f32 {
             self.n as f32 / (self.span_ms() as f32 / 1000.).max(0.001)
         }
-        /// 採用できる区間か (短い揺れや孤立イベントを除く)。
+        /// Whether this is an acceptable segment (excludes short jitters and isolated events).
         fn usable(&self) -> bool {
             self.n >= SEG_MIN_N && self.span_ms() >= SEG_MIN_SPAN_MS
         }
     }
 
     struct Dev {
-        /// デバイス名から引いた VID/PID (未取得なら None)。
+        /// VID/PID taken from the device name (None if not obtained).
         vidpid: Option<Option<(u16, u16)>>,
-        /// 直近 ~1.2 秒のイベント時刻 (エポックからの ms)。
+        /// Event times of the last ~1.2 s (ms since the epoch).
         events: VecDeque<u64>,
-        /// 直近のイベント間隔 (ms)。
+        /// Recent event intervals (ms).
         gaps: VecDeque<f32>,
-        /// 250ms バケット (bucket_idx, count)。
+        /// 250ms buckets (bucket_idx, count).
         buckets: VecDeque<(u64, u32)>,
-        /// 集計中の区間 (マウスのみ — キーイベントは counts=None で区間を作らない)。
+        /// Segment being aggregated (mouse only - key events have counts=None and make no segment).
         seg: Seg,
-        /// 確定した区間 (新しい順に末尾)。
+        /// Finalized segments (newest at the tail).
         segs: VecDeque<Seg>,
     }
 
@@ -162,7 +162,7 @@ mod imp {
             }
         }
 
-        /// 集計中の区間を確定し、採用できるなら履歴へ。
+        /// Finalize the segment being aggregated, and push it to the history if acceptable.
         fn close_seg(&mut self) {
             let s = self.seg;
             self.seg = Seg::default();
@@ -175,45 +175,45 @@ mod imp {
         }
     }
 
-    /// `stats` の区間 1 件の公開形。
+    /// Public form of one segment in `stats`.
     #[derive(Clone, Copy, Debug)]
     pub struct SegInfo {
-        /// 区間内のレポート/秒。
+        /// Reports/s within the segment.
         pub rate_hz: f32,
-        /// 区間の時間幅 (ms)。
+        /// Duration of the segment (ms).
         pub span_ms: u64,
-        /// 区間終了からの経過秒 (stats 呼び出し時点)。
+        /// Seconds elapsed since the segment ended (at the time of the stats call).
         pub age_s: f32,
     }
 
-    /// 計測スナップショット — `stats` が 1 回のロックでまとめて返す。
+    /// Measurement snapshot - `stats` returns everything under a single lock.
     #[derive(Clone, Debug, Default)]
     pub struct PollStats {
-        /// 直近 1 秒のイベント数/秒 (止まっている時間も分母に入る下限値)。
+        /// Events/s over the last 1 second (a lower bound, since idle time is also in the denominator).
         pub hz: f32,
-        /// 250ms バケットのレート履歴 (古い→新しい、~15 秒)。
+        /// Rate history in 250ms buckets (oldest → newest, ~15 s).
         pub hist: Vec<f32>,
-        /// 直近イベントの最小間隔 (ms)。
+        /// Minimum interval of recent events (ms).
         pub min_gap_ms: Option<f32>,
-        /// 直近イベント間隔の (中央値, p95) [ms] — 真のレポート周期が出る。
+        /// (median, p95) of recent event intervals [ms] - shows the true report period.
         pub gap_stats: Option<(f32, f32)>,
-        /// 直近の「動いている区間」のレート (進行中 ≥60ms or 直近確定 ≤1.5s)。
+        /// Rate of the latest "moving segment" (in progress ≥60ms or finalized ≤1.5s ago).
         pub seg_hz: Option<f32>,
-        /// `seg_hz` の区間幅 (ms)。
+        /// Segment width of `seg_hz` (ms).
         pub seg_span_ms: Option<u64>,
-        /// 直近 10 秒に終わった区間の最大レート (「ピーク」)。
+        /// Maximum rate of segments that ended in the last 10 s (the "peak").
         pub peak_hz: Option<f32>,
-        /// 直近区間の移動量合計/秒 (|dx|+|dy|) — この速度・DPI での理論上限 ≒ これ。
+        /// Total movement/s of the latest segment (|dx|+|dy|) - the theoretical ceiling at this speed and DPI ≒ this.
         pub counts_per_sec: Option<f32>,
-        /// 直近区間で |d|≤1 のレポートの割合 — 高いほど DPI/速度が足りない。
+        /// Share of reports with |d|≤1 in the latest segment - the higher it is, the more DPI/speed is lacking.
         pub low_frac: Option<f32>,
-        /// 確定区間 (新しい順、最大 128) — 5 秒計測等の窓切りに使う。
+        /// Finalized segments (newest at the tail, up to 128) - used for windowing such as a 5-second measurement.
         pub segs: Vec<SegInfo>,
     }
 
     struct Meter {
         devs: HashMap<usize, Dev>,
-        /// 時刻の起点 (最初のイベント時刻)。
+        /// Time origin (time of the first event).
         epoch: Option<Instant>,
     }
 
@@ -225,7 +225,7 @@ mod imp {
     });
     static STARTED: AtomicBool = AtomicBool::new(false);
 
-    /// 起動時に 1 度だけ呼ぶ。メッセージ専用ウィンドウ + raw input 登録。
+    /// Call once at startup. Message-only window + raw input registration.
     pub fn start() {
         start_meter(true);
     }
@@ -250,10 +250,10 @@ mod imp {
     }
 
     unsafe fn run(keyboard: bool) {
-        // 8KHz マウスでもキューを溢れさせないよう捌きを優先する。
-        // MMCSS "Pro Audio" は単なる優先度以上にスケジューリングを優遇される
-        // (計測専用スレッドの定石)。取れなければ通常の優先度上げにフォールバック。
-        // (前面時の精度に効く。背面の配信制限は OS 側なのでこれでは解けない)
+        // Prioritize draining so that even an 8KHz mouse does not overflow the queue.
+        // MMCSS "Pro Audio" gets scheduling favor beyond a mere priority boost
+        // (the standard approach for a measurement-only thread). If unavailable, fall back to a normal priority boost.
+        // (this helps accuracy while in front. The background delivery limit is on the OS side, so this cannot solve it)
         let mmcss_name: Vec<u16> = "Pro Audio\0".encode_utf16().collect();
         let mut idx = 0u32;
         if windows_sys::Win32::System::Threading::AvSetMmThreadCharacteristicsW(
@@ -277,7 +277,7 @@ mod imp {
             ..Default::default()
         };
         RegisterClassExW(&wc);
-        // メッセージ専用ウィンドウ (HWND_MESSAGE = -3)。
+        // Message-only window (HWND_MESSAGE = -3).
         let hwnd = CreateWindowExW(
             0,
             name.as_ptr(),
@@ -298,13 +298,13 @@ mod imp {
         let devs = [
             RAWINPUTDEVICE {
                 usUsagePage: 0x01,
-                usUsage: 0x02, // マウス
+                usUsage: 0x02, // mouse
                 dwFlags: RIDEV_INPUTSINK,
                 hwndTarget: hwnd,
             },
             RAWINPUTDEVICE {
                 usUsagePage: 0x01,
-                usUsage: 0x06, // キーボード
+                usUsage: 0x06, // keyboard
                 dwFlags: RIDEV_INPUTSINK,
                 hwndTarget: hwnd,
             },
@@ -322,12 +322,12 @@ mod imp {
     }
 
     thread_local! {
-        /// 生入力の読み取りバッファ (8B アライン、使い回し)。
+        /// Read buffer for raw input (8B aligned, reused).
         static RAW_BUF: RefCell<Vec<u64>> = const { RefCell::new(Vec::new()) };
     }
 
-    /// 1 レコードから (hDevice, マウス移動量 |dx|+|dy|)。
-    /// キーボード等マウス以外は counts=None (区間・移動量の対象外)。
+    /// From one record: (hDevice, mouse movement |dx|+|dy|).
+    /// Non-mouse devices such as keyboards get counts=None (excluded from segments and movement).
     fn read_raw(raw: &RAWINPUT) -> (usize, Option<u32>) {
         let hdev = raw.header.hDevice as usize;
         let counts = if raw.header.dwType == RIM_TYPEMOUSE {
@@ -359,8 +359,8 @@ mod imp {
                     guard.resize(BUF_LEN, 0);
                 }
                 let buf = &mut *guard;
-                // 1) この WM_INPUT が運んだイベント (GetMessage でキューから抜けるので
-                //    バッファ読みには含まれない — 二重カウントしない)。
+                // 1) The event carried by this WM_INPUT (it leaves the queue via GetMessage, so
+                //    it is not included in the buffer read - no double counting).
                 let mut size = (buf.len() * 8) as u32;
                 let got = GetRawInputData(
                     lp as HRAWINPUT,
@@ -373,7 +373,7 @@ mod imp {
                     let (hdev, counts) = read_raw(&*(buf.as_ptr() as *const RAWINPUT));
                     push(hdev, counts, now);
                 }
-                // 2) キューに溜まった残りをまとめてドレイン (高周波向け公式手順)。
+                // 2) Drain the rest accumulated in the queue in bulk (the official procedure for high frequencies).
                 loop {
                     let mut sz = (buf.len() * 8) as u32;
                     let n = GetRawInputBuffer(buf.as_mut_ptr().cast(), &mut sz, hdr_size);
@@ -381,7 +381,7 @@ mod imp {
                         break;
                     }
                     if n == u32::MAX {
-                        // バッファ不足 → 必要量か 2 倍で拡張してやり直し。
+                        // Buffer too small → grow to the required size or 2x and retry.
                         let need = (sz as usize).div_ceil(8);
                         buf.resize(need.max(buf.len() * 2), 0);
                         continue;
@@ -391,7 +391,7 @@ mod imp {
                         let raw = &*p;
                         let (hdev, counts) = read_raw(raw);
                         push(hdev, counts, now);
-                        // NEXTRAWINPUTBLOCK 相当: header.dwSize をポインタ境界に揃えて進む。
+                        // Equivalent of NEXTRAWINPUTBLOCK: advance by header.dwSize aligned to the pointer boundary.
                         let adv =
                             (raw.header.dwSize as usize + size_of::<usize>() - 1)
                                 & !(size_of::<usize>() - 1);
@@ -402,7 +402,7 @@ mod imp {
         }
     }
 
-    /// hDevice → (vid, pid)。デバイス名は `…VID_xxxx&PID_xxxx…`。
+    /// hDevice → (vid, pid). The device name is `…VID_xxxx&PID_xxxx…`.
     fn vidpid_of(hdev: usize) -> Option<(u16, u16)> {
         unsafe {
             let mut size = 0u32;
@@ -429,7 +429,7 @@ mod imp {
         }
     }
 
-    /// 指定 vid/pid のデバイスの計測スナップショット。無ければ None。
+    /// Measurement snapshot of the device with the given vid/pid. None if absent.
     pub fn stats(vid: u16, pid: u16) -> Option<PollStats> {
         let mut m = METER.lock().unwrap_or_else(|p| p.into_inner());
         let now = Instant::now();
@@ -457,7 +457,7 @@ mod imp {
             }
             found = true;
 
-            // 直近 1 秒のイベント数。
+            // Number of events in the last 1 second.
             st.hz += d
                 .events
                 .iter()
@@ -468,7 +468,7 @@ mod imp {
             }
             all_gaps.extend(d.gaps.iter().copied());
 
-            // 区間: 確定分は公開 & ピーク計算、進行中はピークと「現在」にだけ使う。
+            // Segments: finalized ones are published and used for the peak calculation; the in-progress one is used only for the peak and "current".
             let mut newest: Option<(u64, Seg, bool)> = None; // (last_ms, seg, is_running)
             for &s in &d.segs {
                 let age_ms = now_ms.saturating_sub(s.last_ms);
@@ -493,7 +493,7 @@ mod imp {
                     newest = Some((s.last_ms, s, true));
                 }
             }
-            // 「現在の区間」= 進行中 ≥60ms かつ新鮮、または確定 ≤1.5s。
+            // "Current segment" = in progress ≥60ms and fresh, or finalized ≤1.5s ago.
             if let Some((last, s, live)) = newest {
                 let ok = if live {
                     s.span_ms() >= 60 && now_ms.saturating_sub(last) <= 300
@@ -514,7 +514,7 @@ mod imp {
         }
         st.hz /= WINDOW_SECS;
 
-        // 履歴グラフ (バケットを連番に展開)。
+        // History graph (buckets expanded into sequential numbers).
         let (mut lo, mut hi) = (u64::MAX, 0u64);
         for &i in merged_buckets.keys() {
             lo = lo.min(i);
@@ -526,7 +526,7 @@ mod imp {
                 .collect();
         }
 
-        // 間隔統計 (0.05ms 未満は dispatch 合体ノイズとして除外 — 8K の真間隔は 0.125ms)。
+        // Interval statistics (anything under 0.05ms is excluded as dispatch coalescing noise - the true interval at 8K is 0.125ms).
         const FLOOR_MS: f32 = 0.05;
         all_gaps.retain(|&g| g >= FLOOR_MS);
         if !all_gaps.is_empty() {

@@ -1,12 +1,12 @@
-# legacy/ — 契約 v1 時代のドライバ (コンパイル対象外)
+# legacy/ — drivers from the contract v1 era (not compiled)
 
-2026-11-14 に devhub-core の契約を v2 (Capabilities + DeviceState + Change) に作り直したため、
-v1 の型に依存していたコードをここへ退避した。**捨てずに移植の材料として使う。**
+On 2026-11-14 the devhub-core contract was rebuilt as v2 (Capabilities + DeviceState + Change),
+so the code that depended on v1 types was moved here. **Don't throw it away; use it as source material for porting.**
 
-| ファイル | 中身 | 価値 |
+| File | Contents | Value |
 |---|---|---|
-| `mousefit.rs` | mouse.fit 系 (HTS Plus Pro 33e4:5219) の report 8 / 16B コマンド / EEPROM 読み書き | 実機で読み書き検証済み。フレーミング・チェックサム (`0x55` 和)・補数ペア・DPI 4B レコードはそのまま使える |
-| `xsyd.rs` | XSYD (SU66 Max 1ca6:3009) の 64B フレーム / group-sub コマンド / キーコード表 | 実機で読み取り検証済み (device info, performance, lighting)。レイヤー 2 枚 |
-| `probe.rs`, `wtest.rs` | v1 API を使う実機テスト | 新 API に合わせて書き直してから `examples/` に戻す |
+| `mousefit.rs` | mouse.fit family (HTS Plus Pro 33e4:5219) report 8 / 16B commands / EEPROM read and write | Read and write verified on a real device. Framing, checksum (`0x55` sum), complement pairs and the DPI 4B record can be reused as is |
+| `xsyd.rs` | XSYD (SU66 Max 1ca6:3009) 64B frames / group-sub commands / key code table | Read verified on a real device (device info, performance, lighting). 2 layers |
+| `probe.rs`, `wtest.rs` | Real-device tests that use the v1 API | Rewrite for the new API, then move back to `examples/` |
 
-移植先: `crates/devhub-hid/src/mousefit/` と `crates/devhub-hid/src/xsyd/` (docs/BACKEND_BRIEF.md 参照)。
+Porting targets: `crates/devhub-hid/src/mousefit/` and `crates/devhub-hid/src/xsyd/` (see docs/BACKEND_BRIEF.md).

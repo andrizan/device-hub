@@ -107,7 +107,7 @@ struct DirectXGlobalElements {
     global_params_buffer: Option<ID3D11Buffer>,
     batch_params_buffer: Option<ID3D11Buffer>,
     sampler: Option<ID3D11SamplerState>,
-    /// DEVHUB: 最近傍で拡大する面用 (`polychrome` の最近傍バッチ)。
+    /// DEVHUB: for surfaces magnified with nearest-neighbor (the nearest-neighbor batch of `polychrome`).
     sampler_point: Option<ID3D11SamplerState>,
 }
 
@@ -838,7 +838,7 @@ impl DirectXRenderer {
         let Some(texture_view) = self.atlas.get_texture_view(texture_id) else {
             return Ok(());
         };
-        // DEVHUB: 最近傍バッチだけ POINT で標本化する (既定は線形のまま)。
+        // DEVHUB: sample only the nearest-neighbor batch with POINT (the default stays linear).
         let sampler = if nearest {
             &self.globals.sampler_point
         } else {
@@ -1125,8 +1125,8 @@ impl DirectXGlobalElements {
             output
         };
 
-        // DEVHUB: 最近傍 (POINT) サンプラ。ピクセル風景の壁紙を低解像度のまま
-        // 窓いっぱいに拡大するときに使う (線形だとドットの境目がにじむ)。
+        // DEVHUB: nearest-neighbor (POINT) sampler. Used when a pixel-art landscape wallpaper
+        // is magnified to fill the window at its low resolution (with linear, the dot edges would blur).
         let sampler_point = unsafe {
             let desc = D3D11_SAMPLER_DESC {
                 Filter: D3D11_FILTER_MIN_MAG_MIP_POINT,

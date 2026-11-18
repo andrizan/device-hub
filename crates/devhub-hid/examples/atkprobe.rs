@@ -1,5 +1,5 @@
-//! ATK F1 V3 ULTIMATE+ (373b:12a7) 実機プローブ — 読み取りのみ。
-//! 確定済み: ff02/usage2 collection, reportId 0x08, 16B パケット。
+//! ATK F1 V3 ULTIMATE+ (373b:12a7) real-device probe — read-only.
+//! Confirmed: ff02/usage2 collection, reportId 0x08, 16B packets.
 //!   req:  [0]=cmd [1]=0 [2..4]=addr u16BE [4]=len [5..15]=data [15]=sum
 //!   resp: [0]=0x08 [1]=cmd [2]=status [3..5]=addr [5]=len [6..]=data [16]=sum
 //!   sum = 0x55 - ((8 + sum(bytes0..14)) & 0xff)

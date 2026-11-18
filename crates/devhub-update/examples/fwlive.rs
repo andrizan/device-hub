@@ -1,7 +1,7 @@
 use devhub_core::model::FirmwareFeed;
 
 fn main() {
-    // HTS Plus Pro の実フィード (初回 = 基準値、2 回目に偽の指紋 = 更新ありになるはず)。
+    // Real feed for the HTS Plus Pro (first = baseline, second with a fake fingerprint = should report an update).
     let feed = FirmwareFeed::MouseFit {
         ui_folder: "JM_052_3955".into(),
     };
@@ -14,7 +14,7 @@ fn main() {
             Err(e) => println!("mousefit last={last:?} → ERR {}", e.0),
         }
     }
-    // SU66 (board_id=3145737) — 現在公開物なし → new=false のはず。
+    // SU66 (board_id=3145737) - nothing published right now, so new=false is expected.
     let feed = FirmwareFeed::Sparklink {
         vid: 0x1CA6,
         pid: 0x3009,

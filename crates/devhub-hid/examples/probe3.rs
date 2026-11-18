@@ -1,5 +1,5 @@
-//! 深掘りプローブ: 未公開コマンドを1件ずつデバイスを開き直して試す。
-//! (未知コマンドでファームが USB detach することがあるため、毎回 reopen。)
+//! Deep-dive probe: tries each undocumented command one at a time, reopening the device each time.
+//! (Reopens every time because an unknown command can make the firmware USB-detach.)
 
 fn open(api: &hidapi::HidApi) -> Option<hidapi::HidDevice> {
     let dev = api

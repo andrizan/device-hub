@@ -1,4 +1,4 @@
-//! 解析プローブ #11: [3,5] keyLayoutStyle の全セルを正しくデコードして並びを調べる
+//! Analysis probe #11: correctly decode all cells of [3,5] keyLayoutStyle and examine their order
 fn main() {
     let api = hidapi::HidApi::new().unwrap();
     let dev = api

@@ -1,4 +1,4 @@
-//! GPUI のキー名 (`Keystroke::key`) → HID usage。マクロ記録とショートカット取り込み用。
+//! GPUI key names (`Keystroke::key`) → HID usage. For macro recording and shortcut capture.
 
 use devhub_core::mods;
 use gpui_kit::Modifiers;
@@ -80,7 +80,7 @@ pub fn mods_of(m: &Modifiers) -> u8 {
     b
 }
 
-/// ショートカットの表示 ("Ctrl+Shift+A")。
+/// Display of a shortcut ("Ctrl+Shift+A").
 pub fn stroke_label(s: devhub_core::KeyStroke) -> String {
     let mut out = devhub_core::keys::mods_label(s.mods);
     if s.usage != 0 {
@@ -89,7 +89,7 @@ pub fn stroke_label(s: devhub_core::KeyStroke) -> String {
         out.pop();
     }
     if out.is_empty() {
-        "(未設定)".into()
+        "(unset)".into()
     } else {
         out
     }

@@ -1,21 +1,21 @@
-//! パラメトリック EQ の biquad 計算 — WalkPlay CB 系 (peq.szwalkplay.com) の
-//! 公式実装から移植。ドライバ側の wire 係数生成と UI の周波数特性グラフで
-//! 共有し、両者の曲線が一致することを保証する。
+//! Parametric EQ biquad math — ported from the official implementation of the
+//! WalkPlay CB series (peq.szwalkplay.com). Shared by the driver's wire coefficient
+//! generation and the UI frequency response graph, so both curves are guaranteed to match.
 //!
-//! TP55 の DAC EQ 係数は **96 kHz** で計算される (実機応答の係数と
-//! バイト単位で一致することを確認済み)。グラフ評価も同じ 96 kHz を使う。
+//! The TP55 DAC EQ coefficients are computed at **96 kHz** (confirmed to match the
+//! coefficients in the real device's response byte for byte). The graph uses the same 96 kHz.
 
 use crate::model::{PeqBand, PeqFilter};
 
-/// TP55 DAC EQ の係数サンプルレート。
+/// Coefficient sample rate of the TP55 DAC EQ.
 pub const FS: f64 = 96_000.;
 
-/// 正規化 biquad 係数 `[b0, b1, b2, -a1, -a2]` (a0=1)。
-/// 公式フィルタークラス (H1/j1/X1/U1/t2) を忠実に再現する:
-/// - PK/LP/HP … 標準 RBJ 公式
-/// - LS (j1) … **Q を使わない**固定スロープの shelf (公式は引数に Q を取るが無視)
-/// - HS (X1) … ゲインを ±12dB・Q を 0.5..5 にクランプし、さらに
-///   **ゲイン × 0.85 (headroom)** を掛けた後に計算。負ゲイン時は分子の符号を反転
+/// Normalized biquad coefficients `[b0, b1, b2, -a1, -a2]` (a0=1).
+/// Faithfully reproduces the official filter classes (H1/j1/X1/U1/t2):
+/// - PK/LP/HP … standard RBJ formulas
+/// - LS (j1) … a fixed-slope shelf that **does not use Q** (the official code takes a Q argument but ignores it)
+/// - HS (X1) … clamps gain to ±12dB and Q to 0.5..5, then multiplies
+///   **gain × 0.85 (headroom)** before computing. For negative gain the numerator sign is flipped
 pub fn coefs(filter: PeqFilter, freq: f32, q: f32, gain_db: f32, fs: f64) -> [f64; 5] {
     let f = freq as f64;
     match filter {
@@ -34,7 +34,7 @@ pub fn coefs(filter: PeqFilter, freq: f32, q: f32, gain_db: f32, fs: f64) -> [f6
             ]
         }
         PeqFilter::LowShelf => {
-            // j1: Q は無視 (公式も q 引数を使っていない)。
+            // j1: Q is ignored (the official code does not use the q argument either).
             let a = (10f64).powf(gain_db as f64 / 40.);
             let w = 2. * std::f64::consts::PI * f / fs;
             let s = w.sin() / 2. * (0.25 * (a + 1. / a) + 2.).sqrt();
@@ -52,7 +52,7 @@ pub fn coefs(filter: PeqFilter, freq: f32, q: f32, gain_db: f32, fs: f64) -> [f6
             ]
         }
         PeqFilter::HighShelf => {
-            // X1: 公式の _validateParameters + headroom を再現。
+            // X1: reproduces the official _validateParameters + headroom.
             let f = f.clamp(20., 0.99 * fs / 2.);
             let q = (q as f64).clamp(0.5, 5.);
             let g = (gain_db as f64).clamp(-12., 12.) * 0.85;
@@ -100,7 +100,7 @@ pub fn coefs(filter: PeqFilter, freq: f32, q: f32, gain_db: f32, fs: f64) -> [f6
     }
 }
 
-/// `at` Hz における全バンド合成の応答 (dB)。UI のグラフ描画用。
+/// Combined response (dB) of all bands at `at` Hz. For drawing the UI graph.
 pub fn response_db(bands: &[PeqBand], at: f64) -> f64 {
     use std::f64::consts::PI;
     let w = 2. * PI * at / FS;

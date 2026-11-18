@@ -1,13 +1,13 @@
-//! ライブライティング (DirectDrive) — 公式に無い PC 駆動のキー照明。
+//! Live lighting (DirectDrive) — PC-driven key lighting that the official app does not have.
 //!
-//! エンジンは `crate::livefx`。ここは (1) 30fps ティッカーから呼ばれる `fx_tick`
-//! (タブ/デバイスを離れても・最小化中も動く) と (2) 設定画面。
+//! The engine is `crate::livefx`. This file holds (1) `fx_tick`, called from the 30fps ticker
+//! (keeps running when you leave the tab/device or minimize) and (2) the settings screen.
 
 use crate::app::{Route, Shell, Tab};
 use crate::livefx::{focus_preset, FxMode, FOCUS_PRESETS};
 use crate::procmon::foreground_app;
 
-/// Caps Lock のトグル状態。
+/// Caps Lock toggle state.
 #[cfg(windows)]
 fn caps_lock_on() -> bool {
     use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_CAPITAL};
@@ -27,14 +27,14 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-/// 主色・副色・背景のクイックパレット。
+/// Quick palette for the primary color, secondary color and background.
 const SWATCHES: [u32; 10] = [
     0x4cb4ff, 0x34d6a8, 0xa98bff, 0xff8a5c, 0xff5c8a, 0xf5c24c, 0xffffff, 0xff2a2a, 0x22c55e,
     0x2a5bff,
 ];
 
 impl Shell {
-    // ------------------------------------------------------------ 実行
+    // ------------------------------------------------------------ Run
 
     pub fn fx_start(&mut self, id: DeviceId, cx: &mut Context<Self>) {
         self.fx = Default::default();
@@ -50,7 +50,7 @@ impl Shell {
     pub fn fx_stop(&mut self, cx: &mut Context<Self>) {
         if let Some(id) = self.fx_on.take() {
             self.hub.set_dd(&id, false);
-            // テスト/トリガー画面で同じデバイスを見ているなら測定は続ける。
+            // If the Test / Triggers page is looking at the same device, keep measuring.
             let watching = self.device_id().as_ref() == Some(&id)
                 && matches!(self.tab, Tab::Test | Tab::Trigger);
             if !watching {
@@ -60,9 +60,9 @@ impl Shell {
         cx.notify();
     }
 
-    /// 30fps ティッカーから毎回呼ばれる。止まっていれば何もしない。
+    /// Called every time from the 30fps ticker. Does nothing if stopped.
     pub fn fx_tick(&mut self, cx: &mut Context<Self>) {
-        // 起動時の自動開始 (対象デバイスの読み込みが終わったら 1 回だけ)。
+        // Auto-start at launch (once, after the target device finishes loading).
         if !self.fx_autostarted && self.fx_on.is_none() && self.prefs.livefx.autostart {
             if let Some(dev) = self.prefs.livefx.device.clone() {
                 let id = DeviceId(dev);
@@ -80,10 +80,10 @@ impl Shell {
             return;
         };
         let Some(s) = self.hub.session(&id) else {
-            return; // 切断中: 再接続を待つ
+            return; // disconnected: wait for reconnect
         };
         if s.switching_profile || !s.ready() {
-            return; // 確認済みの構成を再読するまでフレームを生成しない。
+            return; // do not generate frames until the confirmed configuration is re-read.
         }
         let (Some(caps), Some(state)) = (s.caps.clone(), s.state.clone()) else {
             return;
@@ -94,13 +94,13 @@ impl Shell {
         let (travel_on, dd_on) = (s.travel_on, s.dd_on);
         let depths = s.travel.clone();
         let tmax = s.travel_max;
-        // DirectDrive が外から止まった (送信失敗など) → ライブも止める。
+        // DirectDrive was stopped from outside (send failure, etc.) → stop live too.
         if !dd_on {
             if self.fx.armed {
                 self.fx_on = None;
                 self.hub.set_travel(&id, false);
                 self.toast(
-                    "DirectDrive が止まったため、ライブライティングを停止しました",
+                    "Live lighting was stopped because DirectDrive stopped",
                     true,
                     cx,
                 );
@@ -110,7 +110,7 @@ impl Shell {
         } else {
             self.fx.armed = true;
         }
-        // 測定が止まった (失敗) → 2 秒おきに再開を試す。
+        // Measurement stopped (failure) → try to resume every 2 seconds.
         if !travel_on
             && self
                 .fx
@@ -126,7 +126,7 @@ impl Shell {
             .map(|k| k.perf.iter().map(|p| p.actuation).collect())
             .unwrap_or_default();
         let nominal = kc.perf.as_ref().map(|p| p.travel).unwrap_or(4.);
-        // 実測の底が浅い個体に合わせる (公称より深くは押せない)。
+        // Match a unit whose measured bottom is shallow (it cannot be pressed deeper than nominal).
         let full = if tmax > 1.5 {
             tmax.min(nominal)
         } else {
@@ -138,8 +138,8 @@ impl Shell {
         let env = self.fx_env(&cfg);
         let frame = self.fx.frame(&cfg, &kc, &depths, &act, full, dt, &env);
         let cells: BTreeMap<usize, Rgb> = if cfg.hybrid {
-            // ハイブリッド: 無効セル (背景色と同じ) は送らずファームの
-            // エフェクトに任せる。離れたセルはドライバが [5,4] で解放する。
+            // Hybrid: invalid cells (same as the background color) are not sent and are left to the firmware's
+            // effect. Cells that move away are released by the driver with [5,4].
             let off = crate::livefx::off_color(&cfg);
             frame
                 .iter()
@@ -156,10 +156,10 @@ impl Shell {
         }
     }
 
-    /// フレーム計算の外部入力 (CapsLock / 電池 / 音 / 前面アプリ)。
+    /// External inputs to the frame computation (CapsLock / battery / audio / foreground app).
     fn fx_env(&self, cfg: &crate::livefx::FxPrefs) -> crate::livefx::FxEnv {
         let caps_lock = caps_lock_on();
-        // 他のワイヤレス機を含む最低電池 (このキーボード自身も対象)。
+        // Lowest battery including other wireless devices (this keyboard itself is included).
         let battery = self
             .hub
             .devices
@@ -191,7 +191,7 @@ impl Shell {
         }
     }
 
-    // ------------------------------------------------------------ 画面
+    // ------------------------------------------------------------ Screen
 
     pub fn page_live(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let _ = window;
@@ -204,25 +204,25 @@ impl Shell {
             .and_then(|s| s.caps.as_ref())
             .and_then(|c| c.keyboard.clone())
         else {
-            return div().child(ui::faint("キーボード情報を読み込み中…"));
+            return div().child(ui::faint("Loading keyboard info…"));
         };
         let running_here = self.fx_on.as_ref() == Some(&id);
         let running_other = self.fx_on.is_some() && !running_here;
         let cfg = self.prefs.livefx.clone();
 
-        // ---- ヘッダー: 開始/停止 ----
+        // ---- Header: start / stop ----
         let status = if running_here {
-            ui::chip("動作中", p.ok)
+            ui::chip("Running", p.ok)
         } else if running_other {
-            ui::chip("別のデバイスで動作中", p.warn)
+            ui::chip("Running on another device", p.warn)
         } else {
-            ui::chip("停止中", p.faint)
+            ui::chip("Stopped", p.faint)
         };
         let id2 = id.clone();
         let toggle_btn = if running_here {
             ui::button(
                 "fx-stop",
-                "停止",
+                "Stop",
                 Some("square"),
                 Btn::Glass,
                 cx,
@@ -231,7 +231,7 @@ impl Shell {
         } else {
             ui::button(
                 "fx-start",
-                "開始",
+                "Start",
                 Some("play"),
                 Btn::Primary,
                 cx,
@@ -248,7 +248,7 @@ impl Shell {
             .child(status)
             .child(toggle_btn);
 
-        // ---- モード (4+3 の2行) ----
+        // ---- Mode (2 rows, 4+3) ----
         let mut modes = div().flex().flex_col().gap(px(8.));
         for chunk in FxMode::ALL.chunks(4) {
             let mut row = div().flex().gap(px(8.));
@@ -298,7 +298,7 @@ impl Shell {
             modes = modes.child(row);
         }
 
-        // ---- プレビュー (実際に送っている色) ----
+        // ---- Preview (the colors actually being sent) ----
         let frame = if running_here {
             self.fx.last.clone()
         } else {
@@ -307,7 +307,7 @@ impl Shell {
         let depths = self.cur().map(|s| s.travel.clone()).unwrap_or_default();
         let full = kc.perf.as_ref().map(|p| p.travel).unwrap_or(4.).max(0.5);
         let focus_mode = cfg.mode == FxMode::Focus;
-        // 強調中のキー列 (Focus=手動、AppFocus=前面アプリから解決)。
+        // Highlighted key columns (Focus=manual, AppFocus=resolved from the foreground app).
         let sel_keys: Vec<String> = match cfg.mode {
             FxMode::AppFocus => foreground_app()
                 .as_deref()
@@ -329,7 +329,7 @@ impl Shell {
                 let tint = frame
                     .get(i)
                     .map(|c| {
-                        // ハイブリッド: ファームに任せるセルは薄く表示。
+                        // Hybrid: cells left to the firmware are shown faintly.
                         if Some(*c) == off {
                             theme::alpha(p.faint, 0.10)
                         } else {
@@ -337,7 +337,7 @@ impl Shell {
                         }
                     })
                     .or_else(|| {
-                        // 停止中は設定のイメージ (キー強調のみ意味がある)
+                        // While stopped, an image of the settings (only key highlight is meaningful)
                         (focus_mode && sel_keys.iter().any(|l| l.eq_ignore_ascii_case(&k.label)))
                             .then(|| theme::alpha(theme::rgb_of(cfg.a), 0.7))
                     });
@@ -364,7 +364,7 @@ impl Shell {
             caps_v,
             cx,
             Rc::new(move |this, i, _, cx| {
-                // キー強調モードではクリックで点灯キーを追加/削除。
+                // In key highlight mode, a click adds/removes a lit key.
                 if this.prefs.livefx.mode != FxMode::Focus {
                     return;
                 }
@@ -380,61 +380,61 @@ impl Shell {
             }),
         );
         let hint = match cfg.mode {
-            FxMode::Focus => "キーをクリックで点灯キーを追加/削除",
+            FxMode::Focus => "Click a key to add/remove a lit key",
             FxMode::Status => {
-                "CapsLock で Caps キー点灯 / ワイヤレス機の電池が 40% を切ると数字行がゲージになります"
+                "CapsLock lights the Caps key / when a wireless device's battery drops below 40%, the number row becomes a gauge"
             }
-            FxMode::Audio => "PC で再生中の音のスペクトルをキーボードに映します (ハイブリッド推奨)",
-            FxMode::AppFocus => "前面アプリに合わせて強調キーが自動で切り替わります (下で割り当て)",
+            FxMode::Audio => "Mirrors the spectrum of the sound playing on the PC onto the keyboard (hybrid recommended)",
+            FxMode::AppFocus => "The highlighted keys switch automatically to match the foreground app (assign below)",
             _ if running_here && cfg.hybrid => {
-                "暗いキーはキーボード側のエフェクトです — 押したキーだけ PC 駆動します"
+                "Dark keys are the keyboard's own effect — only the keys you press are PC-driven"
             }
-            _ if running_here => "いま実機に流している色です (押し込み深さはバーで表示)",
-            _ => "「開始」を押すと実機のキーが光り始めます",
+            _ if running_here => "The colors currently being sent to the device (press depth is shown as a bar)",
+            _ => "Press \"Start\" and the device's keys start to light",
         };
-        let main = ui::card_titled("ライブライティング", "zap", Some(trailing.into_any_element())).child(
+        let main = ui::card_titled("Live lighting", "zap", Some(trailing.into_any_element())).child(
             ui::body()
                 .pt(px(8.))
                 .gap(px(12.))
                 .child(div().text_size(px(12.)).text_color(p.sub).child(
-                    "公式アプリに無い機能: 押し込み深さを読みながら PC から LED を直接駆動します (DirectDrive)。\
-                     タブを移動しても・最小化しても動き続け、停止するとキーボード本来の点灯に戻ります。",
+                    "A feature the official app lacks: drives the LEDs directly from the PC while reading press depth (DirectDrive). \
+                     It keeps running when you switch tabs or minimize, and when stopped the keyboard returns to its own lighting.",
                 ))
                 .child(modes)
                 .child(view)
                 .child(ui::faint(hint)),
         );
 
-        // ---- カスタマイズ ----
+        // ---- Customize ----
         let mut body = ui::body();
         body = body.child(ui::row_first(
             if matches!(cfg.mode, FxMode::Depth) {
-                "浅い押下の色"
+                "Color for light presses"
             } else {
-                "主色"
+                "Primary color"
             },
             Some(match cfg.mode {
-                FxMode::Depth => "押し始め〜作動点までの色",
-                FxMode::Focus | FxMode::AppFocus => "強調するキーの色",
-                FxMode::Ripple => "波紋の外側の色",
-                FxMode::Audio => "スペクトルの低い側の色",
-                FxMode::Status => "使いません (インジケータは副色)",
-                FxMode::Heat => "ヒートマップでは使いません",
+                FxMode::Depth => "Color from the start of the press to the actuation point",
+                FxMode::Focus | FxMode::AppFocus => "Color of the highlighted keys",
+                FxMode::Ripple => "Color at the outer edge of the ripple",
+                FxMode::Audio => "Color of the low end of the spectrum",
+                FxMode::Status => "Not used (indicators use the secondary color)",
+                FxMode::Heat => "Not used in the heatmap",
             }),
             self.fx_swatches("fx-a", cfg.a, |c| &mut c.a, window, cx),
         ));
         body = body.child(ui::row(
             if matches!(cfg.mode, FxMode::Depth) {
-                "作動後の色"
+                "Color after actuation"
             } else {
-                "押下時の色"
+                "Color on press"
             },
-            Some("作動点を越えた / 押した瞬間の色"),
+            Some("Color at the moment it passes the actuation point / is pressed"),
             self.fx_swatches("fx-b", cfg.b, |c| &mut c.b, window, cx),
         ));
         body = body.child(ui::row(
-            "キーボードのエフェクトを背景に使う",
-            Some("ハイブリッド: 押したキー/強調だけ PC 駆動し、他のキーはファーム本来の点灯が続きます (実機で動作確認済み)"),
+            "Use the keyboard's effect as the background",
+            Some("Hybrid: only pressed/highlighted keys are PC-driven, and other keys keep the firmware's own lighting (verified on a real device)"),
             ui::toggle("fx-hybrid", cfg.hybrid, cx, |this, v, cx| {
                 this.prefs.livefx.hybrid = v;
                 this.prefs.save();
@@ -443,12 +443,12 @@ impl Shell {
         ));
         if !cfg.hybrid {
             body = body.child(ui::row(
-                "背景色",
-                Some("何もしていないキーの色"),
+                "Background color",
+                Some("Color of idle keys"),
                 self.fx_swatches("fx-base", cfg.base, |c| &mut c.base, window, cx),
             ));
             body = body.child(ui::row(
-                "背景の明るさ",
+                "Background brightness",
                 None,
                 div().child(ui::slider_value(
                     "fx-base-lv",
@@ -467,7 +467,7 @@ impl Shell {
             ));
         }
         body = body.child(ui::row(
-            "全体の明るさ",
+            "Overall brightness",
             None,
             div().child(ui::slider_value(
                 "fx-bright",
@@ -485,8 +485,8 @@ impl Shell {
             )),
         ));
         body = body.child(ui::row(
-            "残光",
-            Some("離したあと光が消えるまでの時間"),
+            "Afterglow",
+            Some("Time until the light fades after release"),
             div().child(ui::slider_value(
                 "fx-decay",
                 cfg.decay_ms as f32,
@@ -515,11 +515,11 @@ impl Shell {
                 })
                 .unwrap_or(usize::MAX);
             body = body.child(ui::row(
-                "強調するキー",
+                "Highlighted keys",
                 Some(if cur == usize::MAX {
-                    "カスタム (プレビューのキーをクリックで編集)"
+                    "Custom (click preview keys to edit)"
                 } else {
-                    "プリセット"
+                    "Preset"
                 }),
                 div().w(px(320.)).child(ui::segmented(
                     "fx-focus",
@@ -536,8 +536,8 @@ impl Shell {
         }
         if cfg.mode == FxMode::Audio {
             body = body.child(ui::row(
-                "感度",
-                Some("光が弱い/反応しない場合に上げてください"),
+                "Sensitivity",
+                Some("Raise it if the light is weak / not responding"),
                 div().child(ui::slider_value(
                     "fx-again",
                     cfg.audio_gain as f32,
@@ -555,10 +555,10 @@ impl Shell {
             ));
         }
         if cfg.mode == FxMode::AppFocus {
-            // 前面アプリ → プリセットの割り当て。
+            // Foreground app → preset assignment.
             let fg = foreground_app();
             let names: Vec<String> = FOCUS_PRESETS.iter().map(|s| s.to_string()).collect();
-            let fg_label = fg.clone().unwrap_or_else(|| "(不明)".into());
+            let fg_label = fg.clone().unwrap_or_else(|| "(unknown)".into());
             let cur_preset = fg
                 .as_deref()
                 .and_then(|exe| cfg.app_map.iter().find(|(m, _)| exe.contains(m.as_str())))
@@ -568,8 +568,8 @@ impl Shell {
                 .and_then(|p| FOCUS_PRESETS.iter().position(|n| *n == p))
                 .unwrap_or(usize::MAX);
             body = body.child(ui::row(
-                format!("前面アプリ: {fg_label}").as_str(),
-                Some("プリセットを選ぶとこのアプリの強調キーとして登録します"),
+                format!("Foreground app: {fg_label}").as_str(),
+                Some("Choosing a preset registers it as the highlight keys for this app"),
                 div().w(px(320.)).child(ui::segmented(
                     "fx-app-sel",
                     &names,
@@ -591,14 +591,14 @@ impl Shell {
                     },
                 )),
             ));
-            // 登録済み割り当て (削除可)。
+            // Registered assignments (can be deleted).
             for (mi, (m, preset)) in cfg.app_map.iter().enumerate() {
                 body = body.child(ui::row(
                     format!("…{m}").as_str(),
                     Some(preset.as_str()),
                     ui::button(
                         format!("fx-app-del-{mi}"),
-                        "削除",
+                        "Delete",
                         Some("trash-2"),
                         Btn::Ghost,
                         cx,
@@ -614,7 +614,7 @@ impl Shell {
         if cfg.mode == FxMode::Heat {
             let top = self.fx.top_keys(&kc, 6);
             let top_txt = if top.is_empty() {
-                "まだ打鍵がありません".to_string()
+                "No key presses yet".to_string()
             } else {
                 top.iter()
                     .map(|(k, n)| format!("{k} {n}"))
@@ -622,11 +622,11 @@ impl Shell {
                     .join(" · ")
             };
             body = body.child(ui::row(
-                format!("打鍵数 {}", self.fx.presses).as_str(),
+                format!("Key presses {}", self.fx.presses).as_str(),
                 Some(&top_txt),
                 ui::button(
                     "fx-heat-reset",
-                    "リセット",
+                    "Reset",
                     Some("rotate-ccw"),
                     Btn::Ghost,
                     cx,
@@ -638,8 +638,8 @@ impl Shell {
             ));
         }
         body = body.child(ui::row(
-            "起動時に自動で開始",
-            Some("アプリを起動してこのキーボードが見つかったら自動でライブを始めます (ゲーム前に開くだけ)"),
+            "Start automatically at launch",
+            Some("When the app launches and finds this keyboard, live starts automatically (just open it before the game)"),
             ui::toggle("fx-auto", cfg.autostart, cx, |this, v, cx| {
                 this.prefs.livefx.autostart = v;
                 if v && this.prefs.livefx.device.is_none() {
@@ -649,7 +649,7 @@ impl Shell {
                 cx.notify();
             }),
         ));
-        let custom = ui::card_titled("カスタマイズ", "palette", None).child(body);
+        let custom = ui::card_titled("Customize", "palette", None).child(body);
 
         div()
             .flex()
@@ -659,7 +659,7 @@ impl Shell {
             .child(custom)
     }
 
-    /// 色のクイック選択 (パレット + 任意色)。
+    /// Quick color picker (palette + any color).
     fn fx_swatches(
         &mut self,
         id: &str,
@@ -684,7 +684,7 @@ impl Shell {
             );
         }
         let custom = !SWATCHES.iter().any(|h| Rgb::hex(*h) == cur);
-        let title = "色を選ぶ".to_string();
+        let title = "Choose a color".to_string();
         let pal = theme::pal();
         let face = if custom {
             ui::swatch(theme::rgb_of(cur), 20., true)

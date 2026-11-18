@@ -1,126 +1,126 @@
-# LAMZU MAYA X V2 (LM20) 再監査 — 2026-11-17 (2 回目)
+# LAMZU MAYA X V2 (LM20) re-audit — 2026-11-17 (2nd)
 
-対象: Device HUB `249b806`（前回監査 [LAMZU_MAYA_X_V2_AUDIT.md](LAMZU_MAYA_X_V2_AUDIT.md) の修正後）と公式 LAMZU Aurora。
-2026-11-17 15:30 JST に [公式 Aurora](https://www.lamzu.net/#/project/items) の配布物を再照合。
-機種定義の Maya X (LM20) は前回から変更なし。LM20 の初期化はセンサーモデル取得が有効な分岐を通り、
-ポーリングレートの変換を伴う。
-別メーカー (`vid==13652`=0x3554) 用の `K2()` / `uM()` 経路は LM20 には使われない。
-今回は**コードを変更していない**し、実機にも書き込んでいない (別エージェントが同時に `lamzu.rs` を編集中のため)。
+Target: Device HUB `249b806` (after the fixes from the previous audit [LAMZU_MAYA_X_V2_AUDIT.md](LAMZU_MAYA_X_V2_AUDIT.md)) and the official LAMZU Aurora.
+On 2026-11-17 15:30 JST, the distributed files of the [official Aurora](https://www.lamzu.net/#/project/items) were re-checked.
+The Maya X (LM20) model definition is unchanged from last time. LM20's initialization goes through the branch where fetching the sensor model is enabled,
+and involves converting the polling rate.
+The `K2()` / `uM()` path for another manufacturer (`vid==13652`=0x3554) is not used for LM20.
+This time **no code was changed** and nothing was written to the real device (because another agent is editing `lamzu.rs` at the same time).
 
-## 対応状況 (2026-11-17 夜 — すべて修正済み)
+## Status (night of 2026-11-17 — all fixed)
 
-§2〜§5 の指摘はこのセッションで実装した (実機への書き込みテストは未実施。デモと読み取り経路で確認)。
+The findings in §2 to §5 were implemented in this session (write tests on the real device were not done; confirmed with the demo and the read path).
 
-| 指摘 | 対応 |
+| Finding | Response |
 |---|---|
-| P1 スリープ OFF | 選択肢は 1/5/10/15/20/25 分のみ。無効の読み値は設定に入れない |
-| P1 完全初期化 | `send_only` で 1 回だけ送信、無線は 1 秒後に target 0 (受信機) にも送る。`cmd()` の自動再送は resetProfile(13) 以外に限定 |
-| P2 無線 500 Hz | caps を接続方式で出し分け (無線 1K–8K)、`16`→1000 Hz |
-| P2 20K FPS 従属 | 競技モード OFF で 20K FPS も OFF を書く。`SettingSpec::enabled_when` (新規) で UI も無効表示 |
-| P2 読み取り失敗 | 失敗時は settings に入れない |
-| P2 ペア先機種 | `devhub-core/src/lamzu.rs` の機種表 + GetDevicePID。未知は `supported=false`、registry に 0050/0052/0056/0046/0054 追加 |
-| P3 連射 | 左クリックのみ |
-| ガラスモード | 公式フレームで復活 (書けなければ読み戻しでエラー)。ON で LOD を無効表示 |
-| AdaDPI | 契約に `AdaptiveCurve` / `AdaptiveCaps` / `Change::Adaptive` を追加。性能タブにカーブ編集 (プリセット 3 種 + ドラッグ) |
-| 表示名 §4 | 全て公式名に変更 |
-| 解析書 §5 | PROTOCOL_NOTES §5.4/§5.5 を訂正、§5.8 を追記 |
-| 未対応のまま | ボタンの追加機能 (LOD 循環ほか)、マクロ、FW 更新通知 |
+| P1 Sleep OFF | The choices are only 1/5/10/15/20/25 minutes. Invalid read values are not put into the settings |
+| P1 Full reset | Sent only once with `send_only`; for wireless, also sent to target 0 (the receiver) after 1 second. The automatic resend in `cmd()` is limited to commands other than resetProfile(13) |
+| P2 Wireless 500 Hz | Caps now differ by connection type (wireless 1K–8K), `16` → 1000 Hz |
+| P2 20K FPS dependency | Turning competitive mode OFF also writes OFF for 20K FPS. The UI also shows it disabled via `SettingSpec::enabled_when` (new) |
+| P2 Read failure | On failure, not put into settings |
+| P2 Paired device model | Model table in `devhub-core/src/lamzu.rs` + GetDevicePID. Unknown ones are `supported=false`; added 0050/0052/0056/0046/0054 to the registry |
+| P3 Rapid fire | Left click only |
+| Glass mode | Restored with the official frame (if it cannot be written, an error on read-back). LOD is shown disabled when ON |
+| AdaDPI | Added `AdaptiveCurve` / `AdaptiveCaps` / `Change::Adaptive` to the contract. Curve editing on the Performance tab (3 presets + drag) |
+| Display names §4 | All changed to the official names |
+| Analysis document §5 | Corrected PROTOCOL_NOTES §5.4/§5.5, added §5.8 |
+| Still unsupported | Additional button functions (LOD cycle etc.), macros, FW update notifications |
 
-## 結論
+## Conclusion
 
-- **プロトコル (送受信バイト列) は公式と一致**。前回 P1 の「応答照合」「プロファイル不明時の書込」「ボタン送信値」は正しく直っている。
-- **まだ公式と食い違う動作が 4 件 (P1×2, P2×2)**、**機能の欠け 6 件**、**表示名の不一致 12 件**。下に修正指示を付ける。
-- 解析書 (`PROTOCOL_NOTES.md §5`) に**誤り・誤解を招く記述が 4 か所**。
+- **The protocol (sent/received byte sequences) matches the official.** The previous P1s "response matching", "write when the profile is unknown", and "button send values" are fixed correctly.
+- **There are still 4 behaviors that differ from the official (P1×2, P2×2)**, **6 missing features**, and **12 display-name mismatches**. Fix instructions follow below.
+- The analysis document (`PROTOCOL_NOTES.md §5`) has **4 places with errors or misleading statements**.
 
-## 1. 公式と一致していることを確認した項目 (バイト単位)
+## 1. Items confirmed to match the official (byte for byte)
 
-| 機能 | 公式 (関数) | アプリ | 判定 |
+| Feature | Official (function) | App | Verdict |
 |---|---|---|---|
-| フレーム | `sendFeatureReport(0, t)`、`t[2]=target,t[3]=sub,t[4]=f,t[5]=cmd,t[6..]=args` | `w[3..]` に同じ並び | 一致 |
-| 応答 | `r[1]=A1`、値は `r[8]` (新プロトコル) | 同じ + target/f/cmd/devID/ボタン番号/長さを照合 | 一致 (公式より厳格) |
-| ポーリング | `[2,2,1,128/0,prof,(v)]`、`fM`: 500→2, 1K→1, 2K→32, 4K→64, 8K→128 | 同じ | 一致 |
-| LOD (PAW3955) | `T2`: センサー=4 で候補 `0.7;1;1.3;1.5;1.7`。`setLOD`: <1 → `v*10\|0x80`、1<v<2 → BCD、それ以外 → 値 | 同じ | 一致 |
-| モーション同期 / 直線補正 / リップル / 競技モード / 20K FPS / X-Y 軸分離 | f1 の 137/9, 132/4, 138/10, 139/11, 147/19, 141/13 | 同じ | 一致 |
-| 角度調整 | `[2,2,1,148/20]`、負値は `256-|v|`、UI は −30〜30 | 同じ | 一致 |
-| 中心オフセット | `[2,3,1,149/21]`、set は `o[8]` (o[7] 空き)、UI は −5〜5 | 同じ | 一致 |
-| デバウンス | `[2,2,0,136/8]`、UI は 0〜15 ms (`rM` で範囲外を拒否) | 同じ | 一致 |
-| スリープ | LM20 経路は**秒** (`x2("1min…")` = 60…1500)、`[2,3,0,135/7]` u16BE | 秒 | 一致 (OFF 選択肢を除く → §2) |
-| 高速トリガー | `[2,3,0,154/26,prof,L,R]` | 同じ | 一致 |
-| スクロール Bhop | `[2,4,0,153/25,prof,方向,ms16]`、方向 0/2/3、200〜1000 ms | 同じ | 一致 |
-| AdaDPI | `[2,9,1,154]` 読み (`a[8]`=有効, `a[12]`=点数, 点 = 速度u16 + 倍率×100 u16)、書き `[prof,en,0,N,…]` sub=4+4N | 同じ | 一致 (有効/無効のみ) |
-| DPI 段 | 読み `[2,10,1,129,prof,6]`、書き `[2,26,1,1,prof,N,(X,Y)×N]`、色 `[2,19,2,129/1]` (`aM` は `t[8..]`) | 同じ | 一致 |
-| ボタン | 読み `GetButton(prof,btn,255,[],10)` = `[2,15,3,128,prof,btn,0,255,10]`、型 `r[10]`/長さ `r[11]`/値 `r[12..]` | 同じ | 一致 |
-| ボタン値 (`jM`) | DPI = type7 + 6/1/2/5、ロック `[5,Xh,Xl,Xh,Xl]`、プロファイル循環 type8+[3]、ポーリング循環 type13+[3]、マクロ 16/17/18 | 同じ | 一致 (前回 P1 解消) |
-| 電池 | `getBatPer` → `[o[7], o[8]]` = (充電中, %) | 同じ | 一致 |
-| ペア先 | `GetDevicePID` `[1,6,0,139,2]` → VID `r[9..10]`、PID `r[11..12]` | 同じ | 一致 |
-| ドングル LED | `T2`: `!isWired && pid==0x48` で表示。ON=`SetLightness(1,prof,0,255)`、OFF=`SetLightEffect(1,prof,255,0,…)`、各灯 = idx 5/3/4、値 6/11/10/12、読みは `r[9]` | 同じ | 一致 |
-| プロファイル初期化 | `resetProfile` `[2,1,0,13,prof]` | 同じ | 一致 |
+| Frame | `sendFeatureReport(0, t)`, `t[2]=target,t[3]=sub,t[4]=f,t[5]=cmd,t[6..]=args` | the same layout from `w[3..]` | Match |
+| Response | `r[1]=A1`, value at `r[8]` (new protocol) | the same + matches target/f/cmd/devID/button number/length | Match (stricter than the official) |
+| Polling | `[2,2,1,128/0,prof,(v)]`, `fM`: 500→2, 1K→1, 2K→32, 4K→64, 8K→128 | the same | Match |
+| LOD (PAW3955) | `T2`: with sensor=4 the candidates are `0.7;1;1.3;1.5;1.7`. `setLOD`: <1 → `v*10\|0x80`, 1<v<2 → BCD, otherwise → the value | the same | Match |
+| Motion sync / straight-line correction / ripple / competitive mode / 20K FPS / X-Y axis separation | 137/9, 132/4, 138/10, 139/11, 147/19, 141/13 of f1 | the same | Match |
+| Angle adjustment | `[2,2,1,148/20]`, negative values are `256-|v|`, UI is −30 to 30 | the same | Match |
+| Center offset | `[2,3,1,149/21]`, set uses `o[8]` (o[7] is free), UI is −5 to 5 | the same | Match |
+| Debounce | `[2,2,0,136/8]`, UI is 0 to 15 ms (`rM` rejects out of range) | the same | Match |
+| Sleep | the LM20 path uses **seconds** (`x2("1min…")` = 60…1500), `[2,3,0,135/7]` u16BE | seconds | Match (except the OFF choice → §2) |
+| Fast trigger | `[2,3,0,154/26,prof,L,R]` | the same | Match |
+| Scroll Bhop | `[2,4,0,153/25,prof,direction,ms16]`, direction 0/2/3, 200 to 1000 ms | the same | Match |
+| AdaDPI | `[2,9,1,154]` read (`a[8]`=enabled, `a[12]`=number of points, point = speed u16 + multiplier×100 u16), write `[prof,en,0,N,…]` sub=4+4N | the same | Match (enable/disable only) |
+| DPI stages | read `[2,10,1,129,prof,6]`, write `[2,26,1,1,prof,N,(X,Y)×N]`, color `[2,19,2,129/1]` (`aM` uses `t[8..]`) | the same | Match |
+| Buttons | read `GetButton(prof,btn,255,[],10)` = `[2,15,3,128,prof,btn,0,255,10]`, type `r[10]` / length `r[11]` / value `r[12..]` | the same | Match |
+| Button values (`jM`) | DPI = type7 + 6/1/2/5, lock `[5,Xh,Xl,Xh,Xl]`, profile cycle type8+[3], polling cycle type13+[3], macro 16/17/18 | the same | Match (the previous P1 is resolved) |
+| Battery | `getBatPer` → `[o[7], o[8]]` = (charging, %) | the same | Match |
+| Paired device | `GetDevicePID` `[1,6,0,139,2]` → VID `r[9..10]`, PID `r[11..12]` | the same | Match |
+| Dongle LED | `T2`: shown when `!isWired && pid==0x48`. ON=`SetLightness(1,prof,0,255)`, OFF=`SetLightEffect(1,prof,255,0,…)`, each light = idx 5/3/4, values 6/11/10/12, read from `r[9]` | the same | Match |
+| Profile reset | `resetProfile` `[2,1,0,13,prof]` | the same | Match |
 
-## 2. 公式と食い違う動作 (要修正)
+## 2. Behaviors that differ from the official (fixes needed)
 
-| 優先度 | 指摘 | 根拠と修正 |
+| Priority | Finding | Grounds and fix |
 |---|---|---|
-| **P1** | **スリープの「OFF」を選ぶと 1 分が書き込まれる** | `lamzu.rs` の `sleep_min` は選択肢 `0 = OFF` を持ち、`apply` で `clamp(1,60)*60` = 60 秒を書く。公式 `SleepTimeGrade` は 1/5/10/15/20/25 分のみで、OFF を書く手段はない (0/0xFF00/0xFFFF は**読み取り時に**「無効」と表示するだけ)。→ 選択肢から OFF を外す。読み値が OFF のときは表示だけ「無効 (デバイス側)」にする (書き込み候補にしない)。 |
-| **P1** | **完全初期化が応答を待ち、再送し、ドングルを初期化しない** | 公式 `defaultDevice()` は送りっぱなし (`getReport` しない)。`Xv()` は無線なら 1 秒後に `defaultDevice_id(0)` で**受信機も初期化**する (LM20・非 Mini)。アプリは `cmd()` で最大 3 秒待ち、その間に **2 回再送** (`i==8,16`) してから timeout エラーを返す → 実機は初期化済みなのに UI は失敗表示、受信機は残る。→ `factory_reset` は専用の送信のみ関数で 1 回だけ送り、無線なら 1 秒後に target 0 で同じフレームを送る。`cmd()` の自動再送は「同じ値の再送で害がない」コマンドだけに限定する。 |
-| P2 | **無線で 500 Hz を選べる** | 公式は `isWired` なら `PollingRateWired` (500〜8000)、無線なら `PollingRateWireless` = **1000/2000/4000/8000**。アプリは有線・無線とも 500 を出す。→ `build_caps(transport)` で無線は 500 を外す。読み値 `16` は公式どおり 1000 Hz と解釈 (今は「16」と表示される)。 |
-| P2 | **20K FPS が競技モードと独立に操作できる** | 公式 `s2()`: 競技モード OFF にすると `setTrackingMode(false)` を送って 20K FPS を無効化 (`trackingModeDisable`)。ヒント文も「最初にコンペティションモードを有効に」。→ 競技モード OFF への変更時に 20K FPS も OFF を書く。UI では `SettingSpec` に依存条件 (`visible_if`/無効化) を付ける。20K FPS を ON にするときは公式同様に電池消費の確認を出す。 |
-| P2 | 読み取り失敗が既定値に化ける | `read()` の `self.get(2,1,128,dev).unwrap_or(1)` は読めないと **1000 Hz と表示**する。→ 失敗時は設定を `settings` に入れない (UI は「読み取れません」表示になる)。 |
-| P2 | ペア先が Maya X 以外でも Maya X の機能を出す | `0048` は Maya(0050)・Maya M(0052)・Orcus V2(0056) と共通。`info()` は常に `supported=true`、caps は 1 種類。Orcus V2 は公式で `SensorOffsetEnable=0`・`DynamicSensivtyEnable=0`・`GlassModeEnable=0`。→ ペア先 PID ごとの機種表 (env-models の値) から caps を組み立て、未知の PID は `supported=false`。製品名も Maya / Maya M / Orcus V2 を出す。 |
-| P3 | 連射 (X クリック) の対象ボタン | 公式 `xClickToolStripMenuItem` は常に左クリック (`o[1]=LeftButton`)。アプリは左以外も書ける。実機未検証の値を書かないよう、公式どおり左固定にするか「実験的」と明示。 |
+| **P1** | **Choosing sleep "OFF" writes 1 minute** | `sleep_min` in `lamzu.rs` has the choice `0 = OFF`, and `apply` writes `clamp(1,60)*60` = 60 seconds. The official `SleepTimeGrade` is only 1/5/10/15/20/25 minutes, and there is no way to write OFF (0/0xFF00/0xFFFF are only **displayed as** "disabled" **when read**). → Remove OFF from the choices. When the read value is OFF, only show "Disabled (on the device)" as the display (do not make it a write candidate). |
+| **P1** | **Full reset waits for a response, resends, and does not reset the dongle** | The official `defaultDevice()` is fire-and-forget (no `getReport`). For wireless, `Xv()` **also resets the receiver** with `defaultDevice_id(0)` after 1 second (LM20, non-Mini). The app waits up to 3 seconds in `cmd()` and **resends twice** in the meantime (`i==8,16`) before returning a timeout error → the device is already reset but the UI shows failure, and the receiver remains. → Make `factory_reset` a dedicated send-only function that sends once, and for wireless sends the same frame to target 0 after 1 second. Limit `cmd()`'s automatic resend to commands where "resending the same value does no harm". |
+| P2 | **500 Hz can be chosen on wireless** | The official uses `PollingRateWired` (500 to 8000) when `isWired`, and for wireless `PollingRateWireless` = **1000/2000/4000/8000**. The app offers 500 for both wired and wireless. → With `build_caps(transport)`, remove 500 for wireless. Interpret the read value `16` as 1000 Hz as the official does (currently it is shown as "16"). |
+| P2 | **20K FPS can be operated independently of competitive mode** | Official `s2()`: turning competitive mode OFF sends `setTrackingMode(false)` to disable 20K FPS (`trackingModeDisable`). The hint text also says "enable Competition Mode first". → When changing to competitive mode OFF, also write OFF for 20K FPS. In the UI, attach a dependency condition (`visible_if`/disabled) to `SettingSpec`. When turning 20K FPS ON, show a battery-consumption confirmation as the official does. |
+| P2 | Read failures turn into default values | `self.get(2,1,128,dev).unwrap_or(1)` in `read()` **shows 1000 Hz** when it cannot be read. → On failure, do not put it into `settings` (the UI shows "cannot be read"). |
+| P2 | **Maya X features are shown even when the paired device is not a Maya X** | `0048` is shared with Maya (0050), Maya M (0052), and Orcus V2 (0056). `info()` always returns `supported=true`, and there is one kind of caps. For Orcus V2 the official has `SensorOffsetEnable=0`, `DynamicSensivtyEnable=0`, `GlassModeEnable=0`. → Build caps from a per-paired-PID model table (the env-models values), and make unknown PIDs `supported=false`. Also show Maya / Maya M / Orcus V2 as the product name. |
+| P3 | Target button of rapid fire (X click) | The official `xClickToolStripMenuItem` is always the left click (`o[1]=LeftButton`). The app can write buttons other than left. To avoid writing values that are unverified on the real device, either fix it to left as the official does or label it "experimental". |
 
-## 3. 公式にあってアプリに無い機能
+## 3. Features the official has and the app lacks
 
-| 機能 | 公式 | 対応案 |
+| Feature | Official | Proposal |
 |---|---|---|
-| ガラスモード | `GlassModeEnable=1` で表示。`setGlassModeDetect(v)` = `[2,1,1,14,v]` (プロファイル無し)、ON で LOD 編集を無効化 | アプリは「set が効かない」として非表示。公式と同じフレーム (`[v]` のみ・sub=1) で再検証し、効かない場合も「FW 0.0.3.0 では未適用」と注記して表示する方が公式に忠実。ON 時は LOD を無効表示に。 |
-| AdaDPI のカーブ編集 | プリセット 経典/自然/跳躍/カスタム、点ごとの (速度 0–105, 倍率 0–1.5) を `setAdaptiveDPICurve` で送る | 今は有効/無効だけ。プリセット 3 種は値が bundle にある (Classic 0/20/40 × 1.0、Natural 1.5/0.75/0.1、Leap 0.1/0.75/1.5)。点エディタは EQ 画面と同じ部品で作れる (フロント担当) — 契約に `AdaptiveCurve { points: Vec<(u16 speed, f32 ratio)> }` の追加が必要。 |
-| ボタン機能 | LOD 循環 (type14+[3])、競技モード切替 (type20+[0])、左ダブルクリック (type2 `[1,1,2,0,100]`)、メディアプレイヤー (387)、WWW ホーム (547) | 読みは `Unsupported` で保持できている。書きの候補に追加 (`MouseFn`/`MediaFn` に追加 or 汎用の「公式機能」)。 |
-| マクロ | 3 種 (回数/離すまで/再押下まで)、最大 30 個、`AllocateMacroDataSize`/`SetMacroData` 50B ずつ | 未対応のまま (前回どおり)。 |
-| ペアリング・FW 更新 | ペアリング手順 (3 ボタン 3 秒)、`DeviceFWFile_00` (v0.0.3.0) の更新 | 書き込みは対象外でよいが、**更新通知**は `firmware_feed` で可能: `env-models.json` の `DeviceFWFile_00` / `Receiver4K8KFWFile_00` のファイル名から版を取り、実機版と比較。 |
-| 初回のデバウンス変更時の注意 | 1 回目だけ確認ダイアログ (推奨 2–4 ms) | `SettingSpec::confirm` 相当の文言を付ける。 |
+| Glass mode | Shown when `GlassModeEnable=1`. `setGlassModeDetect(v)` = `[2,1,1,14,v]` (no profile), ON disables LOD editing | The app hides it because "set has no effect". Re-verify with the same frame as the official (`[v]` only, sub=1), and if it still has no effect, showing it with a note "not applied on FW 0.0.3.0" is more faithful to the official. Show LOD as disabled when ON. |
+| AdaDPI curve editing | Presets Classic / Natural / Leap / Custom, sends per-point (speed 0–105, multiplier 0–1.5) with `setAdaptiveDPICurve` | Currently only enable/disable. The values of the 3 presets are in the bundle (Classic 0/20/40 × 1.0, Natural 1.5/0.75/0.1, Leap 0.1/0.75/1.5). The point editor can be built with the same components as the EQ screen (frontend owner) — the contract needs the addition of `AdaptiveCurve { points: Vec<(u16 speed, f32 ratio)> }`. |
+| Button functions | LOD cycle (type14+[3]), competitive mode toggle (type20+[0]), left double click (type2 `[1,1,2,0,100]`), media player (387), WWW home (547) | Reads are already held as `Unsupported`. Add them to the write candidates (add to `MouseFn`/`MediaFn`, or a generic "official function"). |
+| Macros | 3 kinds (count / until release / until re-press), up to 30, `AllocateMacroDataSize`/`SetMacroData` 50B at a time | Remains unsupported (as before). |
+| Pairing / FW update | Pairing procedure (3 buttons for 3 seconds), update of `DeviceFWFile_00` (v0.0.3.0) | Writing can stay out of scope, but **update notifications** are possible with `firmware_feed`: take the version from the file names of `DeviceFWFile_00` / `Receiver4K8KFWFile_00` in `env-models.json` and compare it with the device's version. |
+| Notice on the first debounce change | A confirmation dialog only the first time (recommended 2–4 ms) | Attach wording equivalent to `SettingSpec::confirm`. |
 
-## 4. 表示名 (公式 Aurora の日本語表示) との不一致
+## 4. Mismatches with display names (the official Aurora's Japanese display)
 
-公式の文字列は `DxSz` の日本語辞書 (`JP:"Japanese",HOME:"ホーム"…`)。日本語訳が無い項目 (AdaDPI・中心オフセット) は公式でも英語表示になる。
+The official strings come from the Japanese dictionary of `DxSz` (`JP:"Japanese",HOME:"(Home)"…`). Items without a Japanese translation (AdaDPI, center offset) are shown in English even in the official app. In the "Official" column the Japanese labels are rendered in English.
 
-| アプリ (現在) | 公式 | 修正案 |
+| App (current) | Official | Proposed fix |
 |---|---|---|
-| モーション同期 | **移動同期** (MotionSync) | 移動同期 (Motion Sync) |
-| リップル制御 | **リップル** | リップル |
-| リフトオフ距離 | **LOD** | LOD (リフトオフ距離) |
-| トラッキングモード (20K FPS) | **20K FPS** | 20K FPS |
-| DPI X/Y 個別 | **X-Y軸分離** | X-Y 軸分離 |
-| センサー角度 | **角度調整** | 角度調整 |
-| センサーオフセット | 中国語「中心偏移」/ 英 SensorCenterOffset | センサー中心オフセット |
-| スリープまでの時間 | **スリープ時間** | スリープ時間 |
-| B-hop (ホイール誤操作) / 上 / 下 | **スクロールBhop** / スクロールアップ / スクロールダウン / オフ | スクロール Bhop |
-| B-hop 時間 | **ホイール応答時間** | ホイール応答時間 |
-| ドングル LED の「信号品質」 | **信号** | 信号 |
-| このプロファイルを初期化 / 工場出荷状態に戻す | **プロファイルをリセット** / **完全初期化** | 公式名に合わせる |
-| Adaptive DPI | AdaDPI (中国語「DPI自适应」) | AdaDPI (速度連動 DPI) |
+| Motion sync | **Movement sync** (MotionSync) | Movement sync (Motion Sync) |
+| Ripple control | **Ripple** | Ripple |
+| Lift-off distance | **LOD** | LOD (lift-off distance) |
+| Tracking mode (20K FPS) | **20K FPS** | 20K FPS |
+| DPI X/Y separate | **X-Y axis separation** | X-Y axis separation |
+| Sensor angle | **Angle adjustment** | Angle adjustment |
+| Sensor offset | Chinese "center offset" / English SensorCenterOffset | Sensor center offset |
+| Time until sleep | **Sleep time** | Sleep time |
+| B-hop (wheel misoperation) / up / down | **Scroll Bhop** / scroll up / scroll down / off | Scroll Bhop |
+| B-hop time | **Wheel response time** | Wheel response time |
+| Dongle LED's "signal quality" | **Signal** | Signal |
+| Reset this profile / Restore factory state | **Reset profile** / **Full reset** | Match the official names |
+| Adaptive DPI | AdaDPI (Chinese "DPI adaptive") | AdaDPI (speed-linked DPI) |
 
-説明文の食い違い: リップルは公式「高速なマウス動作中にポインタの波状の揺れを排除」(アプリは「高DPI時の細かい揺れ」)。
-スクロール Bhop は公式「最初のスクロール信号を無効化し、応答時間内に 2 回目が無ければスクロールしない」。
-20K FPS は公式「20kHz スキャン、競技モードより電力消費大、先に競技モードを有効に」。
-一致している名前: デバウンスタイム、直線補正、ポーリングレート、高速トリガー、競技モード、ドングル LED、左クリック/右クリック/ホイールクリック/戻る/進む。
-製品名: 公式機種行は `Maya X(LM20)`、製品ページは `LAMZU MAYA X V2`。アプリの `LAMZU Maya X V2` は許容範囲。
+Differences in descriptions: for ripple the official says "eliminates wavy pointer jitter during fast mouse movement" (the app says "fine jitter at high DPI").
+For Scroll Bhop the official says "disables the first scroll signal, and does not scroll if there is no second one within the response time".
+For 20K FPS the official says "20kHz scanning, higher power consumption than competitive mode, enable competitive mode first".
+Names that match: debounce time, straight-line correction, polling rate, fast trigger, competitive mode, dongle LED, left click / right click / wheel click / back / forward.
+Product name: the official model row is `Maya X(LM20)` and the product page is `LAMZU MAYA X V2`. The app's `LAMZU Maya X V2` is acceptable.
 
-## 5. 解析書 (PROTOCOL_NOTES.md §5) の訂正
+## 5. Corrections to the analysis document (PROTOCOL_NOTES.md §5)
 
-1. §5.5 `SpeedEnable` を「左右それぞれの**連打**機能」としている → 公式名は **高速トリガー** (キー応答の最速化、誤ダブルクリックの可能性)。連打 (X クリック) は別機能 (ボタン type2)。
-2. §5.4 「LOD: 公式は 0.7 を値 3 で書く」→ それは別メーカー経路 (`K2`)。**LM20 (センサー 3955) は `0x87` で書く** (`T2` + `setLOD`)。
-3. §5.5 `defaultDevice` の行に「無線では 1 秒後に `defaultDevice_id(0)` で受信機も初期化 (`Xv`)」「応答を読まない」を追記。
-4. §5.1 にポーリングの無線候補 (1000–8000、500 なし) と、20K FPS が競技モードに従属すること (`s2`) を追記。
+1. §5.5 describes `SpeedEnable` as "the **rapid fire** function for left and right each" → the official name is **fast trigger** (fastest key response, possibility of accidental double clicks). Rapid fire (X click) is a separate function (button type2).
+2. §5.4 "LOD: the official writes 0.7 as value 3" → that is the path for another manufacturer (`K2`). **LM20 (sensor 3955) writes `0x87`** (`T2` + `setLOD`).
+3. In the `defaultDevice` row of §5.5, add "for wireless, also resets the receiver with `defaultDevice_id(0)` after 1 second (`Xv`)" and "does not read the response".
+4. In §5.1, add the wireless polling candidates (1000–8000, no 500) and that 20K FPS depends on competitive mode (`s2`).
 
-## 6. 別エージェントへの作業指示 (この順で)
+## 6. Work instructions for another agent (in this order)
 
-1. `sleep_min` から OFF を外す (P1)。
-2. `factory_reset` を送信のみ + 無線は受信機も (P1)。`cmd()` の再送を読み取り系と冪等な書き込みに限定。
-3. 無線のポーリング候補から 500 を外し、`16` を 1000 Hz と読む (P2)。
-4. 競技モード OFF 時に 20K FPS も OFF (P2)。
-5. `read()` の失敗を既定値で埋めない (P2)。
-6. ペア先 PID → 機種表 (Maya/Maya M/Orcus V2) と caps の出し分け、未知は `supported=false` (P2)。
-7. 表示名を §4 の修正案に変更 (`build_caps` のラベルと help)。
-8. ガラスモードを公式フレームで再検証。AdaDPI のプリセット書き込み (契約追加はフロントと相談)。
-9. `PROTOCOL_NOTES.md §5` を §5 のとおり訂正。
-10. 実機確認は Aurora とこのアプリの両方を閉じた状態で、**書き込み前に現在値を保存**し、1 項目ずつ読み戻す。完全初期化はテストしない。
+1. Remove OFF from `sleep_min` (P1).
+2. Make `factory_reset` send-only + also the receiver for wireless (P1). Limit `cmd()`'s resend to read-type and idempotent writes.
+3. Remove 500 from the wireless polling candidates and read `16` as 1000 Hz (P2).
+4. When competitive mode is OFF, also set 20K FPS OFF (P2).
+5. Do not fill failed `read()` results with default values (P2).
+6. Paired PID → model table (Maya/Maya M/Orcus V2) and caps selection, unknown ones `supported=false` (P2).
+7. Change the display names to the proposals in §4 (labels and help of `build_caps`).
+8. Re-verify Glass mode with the official frame. Write the AdaDPI presets (discuss the contract addition with the frontend).
+9. Correct `PROTOCOL_NOTES.md §5` as described in §5.
+10. Do real-device checks with both Aurora and this app closed, **save the current values before writing**, and read back one item at a time. Do not test the full reset.

@@ -1,4 +1,4 @@
-//! 解析プローブ #12: [2,8,0] ライト領域クエリ — 公式 EffectAreaQuery の全バイト
+//! Analysis probe #12: [2,8,0] light-area query — all bytes of the official EffectAreaQuery
 fn main() {
     let api = hidapi::HidApi::new().unwrap();
     let dev = api

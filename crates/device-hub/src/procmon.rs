@@ -1,27 +1,27 @@
-//! プロセス監視 — フォアグラウンドの exe 名を見て、プロファイルを自動適用する。
+//! Process monitor — watches the foreground exe name and applies profiles automatically.
 //!
-//! `prefs.proc_rules` の各ルールについて「exe 名がフォアグラウンドか」を ~1 秒おきに
-//! 評価し、立ち上がり/立ち下がりの遷移で `on_fg`/`on_leave` のプロファイルを
-//! `hub.apply` で順に流す。最小化中も 33ms ティッカー経由で動く。
+//! For each rule in `prefs.proc_rules`, evaluates "is the exe in the foreground" about once per second,
+//! and on the rising/falling transitions sends the `on_fg`/`on_leave` profiles in order
+//! through `hub.apply`. It also runs while minimized, via the 33ms ticker.
 //!
-//! 遷移の評価ルール:
-//! - 前面 exe が解決できない tick は遷移しない (権限の高い窓で誤って復帰しない)。
-//! - 前面が 2 tick 連続で同じときだけ評価 (高速 alt-tab の中間状態へ書かない)。
-//! - 復帰 (leave) を全部先に、新規 (enter) を後に適用 — 管理下のアプリ間を
-//!   直接移っても新しい側が必ず最後に書く。
-//! - 同一 process+device のルールはキーで集約し、複数一致時は並び順に適用
-//!   (下のルールほど優先)。
-//! - 適用中にルールが削除/無効化/編集されても、記録した on_leave で復帰する。
+//! Transition evaluation rules:
+//! - A tick where the foreground exe cannot be resolved makes no transition (so we do not restore by mistake on a high-privilege window).
+//! - Evaluate only when the foreground is the same for 2 consecutive ticks (do not write for the intermediate state of a fast alt-tab).
+//! - Apply all restores (leave) first and new entries (enter) after — so even when moving
+//!   directly between managed apps, the new side always writes last.
+//! - Rules with the same process+device are aggregated by key; when several match they are applied in order
+//!   (lower rules take priority).
+//! - Even if a rule is deleted/disabled/edited while applied, it is restored with the recorded on_leave.
 //!
-//! デバイスが書き込みを受理できない (読み込み中・構成切替中・スリープ中) 時点の
-//! 変更は `proc_pending` に積み、受理可能になってから drain する — 無言で消えない。
+//! Changes made while the device cannot accept writes (loading, switching configuration, asleep)
+//! are queued in `proc_pending` and drained once it can accept them — they do not vanish silently.
 
 use crate::app::Shell;
 use crate::prefs::ProcRule;
 use devhub_core::{Change, DeviceId};
 use gpui_kit::prelude::*;
 
-/// 前面ウィンドウの exe 名 (小文字・拡張子つき)。
+/// Foreground window's exe name (lowercase, with extension).
 #[cfg(windows)]
 pub fn foreground_app() -> Option<String> {
     use windows::Win32::Foundation::CloseHandle;
@@ -66,9 +66,9 @@ pub fn foreground_app() -> Option<String> {
     None
 }
 
-/// 可視ウィンドウを持つプロセスの一覧 `(exe 名, 代表ウィンドウタイトル)`。
-/// フォアグラウンドになり得るプロセスだけ = ルールが実際に発火し得るものだけ。
-/// 先頭は現在フォアグラウンドのプロセス。
+/// List of processes that have a visible window: `(exe name, representative window title)`.
+/// Only processes that can become foreground = only those for which a rule can actually fire.
+/// The first is the current foreground process.
 #[cfg(windows)]
 pub fn running_apps() -> Vec<(String, String)> {
     use std::collections::BTreeMap;
@@ -82,7 +82,7 @@ pub fn running_apps() -> Vec<(String, String)> {
         EnumWindows, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible,
     };
     unsafe {
-        // 可視窓の (pid, タイトル) を集める。
+        // Collect (pid, title) of visible windows.
         struct Acc {
             v: Vec<(u32, String)>,
         }
@@ -108,7 +108,7 @@ pub fn running_apps() -> Vec<(String, String)> {
         }
         let mut acc = Acc { v: vec![] };
         let _ = EnumWindows(Some(cb), LPARAM(&mut acc as *mut _ as isize));
-        // pid → exe 名を引き、exe でまとめる (代表タイトルは最初の非空のもの)。
+        // Look up pid → exe name and group by exe (the representative title is the first non-empty one).
         let mut map: BTreeMap<String, String> = BTreeMap::new();
         for (pid, title) in acc.v {
             let Ok(h) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else {
@@ -152,50 +152,50 @@ pub fn running_apps() -> Vec<(String, String)> {
     vec![]
 }
 
-/// exe 名がルールの process に一致するか (小文字・部分一致)。
+/// Whether the exe name matches the rule's process (lowercase, substring).
 fn rule_matches(rule: &ProcRule, fg: &str) -> bool {
     let pat = rule.process.trim().to_lowercase();
     !pat.is_empty() && fg.contains(&pat)
 }
 
-/// ルールの識別キー (index ではなく内容で持つ — 削除/並び替えに強い)。
+/// Identification key of a rule (held by content, not index — robust against deletion/reordering).
 fn rule_key(rule: &ProcRule) -> String {
     format!("{}|{}", rule.process.trim().to_lowercase(), rule.device)
 }
 
-/// 適用中のルール 1 件分の記録 (離脱時の復帰に必要な情報)。
+/// Record for one rule being applied (information needed to restore on leaving).
 #[derive(Clone, Debug, Default)]
 pub struct ProcApplied {
-    /// ルールの対象デバイス (profile 検索のフィルタに使う)。
+    /// Target device of the rule (used as the filter for profile lookup).
     pub device: String,
-    /// 離脱時に適用するプロファイル名 (空 = 復帰しない)。
+    /// Profile name to apply on leaving (empty = do not restore).
     pub on_leave: String,
 }
 
-/// 1 tick 分の評価結果。適用順は leaves (復帰) → enters (新規) 固定 —
-/// 管理下のアプリ A から管理下の B へ直接切り替えたとき、A の復帰が
-/// B の適用を上書きしないようにするため。
+/// Evaluation result of one tick. The apply order is fixed: leaves (restore) → enters (new) —
+/// so that when switching directly from a managed app A to a managed B, A's restore
+/// does not overwrite B's apply.
 #[derive(Default)]
 struct ProcEval {
-    /// 現在アクティブなキー → 次の離脱で使う記録。
+    /// Currently active keys → record used at the next leave.
     now: std::collections::HashMap<String, ProcApplied>,
-    /// (デバイス, プロファイル名) — ルールの並び順に発火。
+    /// (device, profile name) — fire in rule order.
     leaves: Vec<(String, String)>,
-    /// (デバイス, on_fg プロファイル名の列) — ルールの並び順に発火。
+    /// (device, list of on_fg profile names) — fire in rule order.
     enters: Vec<(String, Vec<String>)>,
 }
 
-/// ルール集合と前面 exe から今 tick の遷移を決める (純粋関数 — 副作用なし)。
+/// Decides this tick's transitions from the rule set and the foreground exe (pure function — no side effects).
 ///
-/// キー (process|device) ごとに集約するので、同一 process+device のルールが
-/// 複数あっても 1 遷移として扱う。`states` は前回アクティブだったキーの記録で、
-/// ルールが削除・編集されて実体が無くなっても記録値で復帰できる。
+/// Rules are aggregated per key (process|device), so even several rules with the same process+device
+/// count as one transition. `states` is the record of keys that were active last time;
+/// even if a rule is deleted or edited and nothing is left, it can be restored from the recorded value.
 fn eval_rules(
     rules: &[ProcRule],
     fg: &str,
     states: &std::collections::HashMap<String, ProcApplied>,
 ) -> ProcEval {
-    // 有効 & マッチするルールをキーで集約 (出現順を保つ)。
+    // Aggregate enabled & matching rules by key (keeping order of appearance).
     let mut order: Vec<String> = vec![];
     let mut contributors: std::collections::HashMap<String, Vec<&ProcRule>> =
         std::collections::HashMap::new();
@@ -212,9 +212,9 @@ fn eval_rules(
     let mut ev = ProcEval::default();
     let mut emitted: std::collections::HashSet<String> = Default::default();
 
-    // 離脱 (以前アクティブだったが今は contributors 無し)。
-    // 実体が残っているキーはルールの並び順で発火し、on_leave は
-    // 同キーの最新の定義 (最後尾の非空) を優先 — 無ければ記録値。
+    // Leave (was active before but has no contributors now).
+    // Keys whose rule still exists fire in rule order, and on_leave prefers
+    // the latest definition of the same key (the last non-empty one) — otherwise the recorded value.
     for r in rules {
         let k = rule_key(r);
         if !states.contains_key(&k)
@@ -233,7 +233,7 @@ fn eval_rules(
             ev.leaves.push((states[&k].device.clone(), name));
         }
     }
-    // 実体の無くなったキー (ルール削除) は最後に — 記録値で復帰。
+    // Keys whose rule is gone (rule deleted) come last — restored with the recorded value.
     let mut orphans: Vec<&String> = states
         .keys()
         .filter(|k| !emitted.contains(*k) && !contributors.contains_key(*k))
@@ -246,7 +246,7 @@ fn eval_rules(
         }
     }
 
-    // 遷入/継続。on_leave の記録は寄与ルールの最後尾の非空。
+    // Enter/continue. The on_leave record is the last non-empty one among the contributing rules.
     for k in order {
         let rs = &contributors[&k];
         let leave = rs
@@ -264,9 +264,9 @@ fn eval_rules(
             },
         );
         if states.contains_key(&k) {
-            continue; // 継続 — 再適用しない。
+            continue; // continue — do not re-apply.
         }
-        // 新規: 寄与ルールの on_fg を順に適用 (連続する同名はまとめる)。
+        // New: apply on_fg of the contributing rules in order (consecutive duplicates are merged).
         let mut fgs: Vec<String> = vec![];
         for r in rs {
             if !r.on_fg.is_empty() && fgs.last() != Some(&r.on_fg) {
@@ -281,7 +281,7 @@ fn eval_rules(
 }
 
 impl Shell {
-    /// デバイスが今書き込みを受理できるか (読み込み済み・切替中でない・起きている)。
+    /// Whether the device can accept writes now (loaded, not switching, awake).
     fn device_applyable(&self, id: &DeviceId) -> bool {
         let Some(s) = self.hub.session(id) else {
             return false;
@@ -289,15 +289,15 @@ impl Shell {
         if !s.ready() || s.switching_profile {
             return false;
         }
-        // スリープ中の実機は書き込みが応答タイムアウトする (mf8 系) → 覚醒を待つ。
+        // A sleeping real device times out on writes (mf8 family) → wait for it to wake.
         !self.hub.devices.iter().any(|d| d.id == *id && d.asleep)
     }
 
-    /// `changes` を先頭から受理できるだけ `hub.apply` で送り、残りを `proc_pending`
-    /// に積む。戻り値は (送れた件数, 保留した件数)。
+    /// Sends `changes` from the head with `hub.apply` as far as they are accepted, and puts the rest in `proc_pending`.
+    /// The return value is (number sent, number held).
     ///
-    /// `Change::Profile` (構成切替) を途中に含んでいても、切替が始まった時点で
-    /// 以降を保留に回すので順序が守られる。
+    /// Even if `Change::Profile` (configuration switch) is included midway, everything after it is held as soon as
+    /// the switch starts, so the order is preserved.
     pub fn apply_changes(&mut self, id: &DeviceId, changes: Vec<Change>) -> (usize, usize) {
         let n = changes.len();
         let mut i = 0;
@@ -306,8 +306,8 @@ impl Shell {
             i += 1;
         }
         if i < n {
-            // 同じデバイスの滞留があれば末尾のキューへ追記 (順序を保ち、
-            // 未接続のまま遷移を繰り返してもエントリ数が増えない)。
+            // If the same device already has a backlog, append to the tail of its queue (keeps order, and
+            // the entry count does not grow even if transitions repeat while it stays disconnected).
             let rest = changes[i..].to_vec();
             if let Some((_, q)) = self.proc_pending.iter_mut().find(|(d, _)| *d == id.0) {
                 q.extend(rest);
@@ -318,7 +318,7 @@ impl Shell {
         (i, n - i)
     }
 
-    /// 保留分を、受理可能になったデバイスへ流す (proc_tick から毎回呼ぶ)。
+    /// Flushes held changes to devices that can now accept them (called every proc_tick).
     fn proc_drain(&mut self, cx: &mut Context<Self>) {
         if self.proc_pending.is_empty() {
             return;
@@ -327,13 +327,13 @@ impl Shell {
         let mut progress = false;
         for (did, q) in pending.iter_mut() {
             let id = DeviceId(did.clone());
-            // 未接続だったデバイスが後から挿された → セッションを開いて読み込み開始。
+            // A device that was not connected was plugged in later → open a session and start loading.
             if self.hub.session(&id).is_none()
                 && self.hub.devices.iter().any(|d| d.id == id && d.supported)
             {
                 self.hub.open(&id, false);
             }
-            // 開き損ねたセッション (Failed) は 10 秒おきに開き直す。
+            // Sessions that failed to open (Failed) are reopened every 10 seconds.
             if let Some(s) = self.hub.session(&id) {
                 if matches!(s.status, crate::store::Status::Failed(_)) {
                     let due = self
@@ -355,7 +355,7 @@ impl Shell {
             }
             if had > 0 && q.is_empty() {
                 self.toast(
-                    format!("予約していたプロファイル分を適用しました ({did})"),
+                    format!("Applied the queued profile changes ({did})"),
                     false,
                     cx,
                 );
@@ -368,8 +368,8 @@ impl Shell {
         }
     }
 
-    /// プロファイル名で適用 (rule の device でフィルタしてバンドル全体を流す)。
-    /// 戻り値は (送れた件数, 保留した件数, 全件数)。見つからなければ None。
+    /// Applies by profile name (filters by the rule's device and sends the whole bundle).
+    /// Returns (sent, held, total). None if not found.
     fn apply_profile_named(&mut self, device: &str, name: &str) -> Option<(usize, usize, usize)> {
         let profile = self
             .prefs
@@ -380,8 +380,8 @@ impl Shell {
         let (mut sent, mut held, mut n) = (0usize, 0usize, 0usize);
         for t in &profile.devices {
             let id = DeviceId(t.device.clone());
-            // セッションを開けるなら開く。未接続/未 ready でも諦めず、変更は
-            // apply_changes が保留キューへ積む (接続・覚醒・読み込み後に drain)。
+            // Open the session if possible. Even if not connected / not ready, do not give up; the changes
+            // are put in the held queue by apply_changes (drained after connection, wake-up and loading).
             if self.hub.session(&id).is_none()
                 && self.hub.devices.iter().any(|d| d.id == id && d.supported)
             {
@@ -395,17 +395,17 @@ impl Shell {
         Some((sent, held, n))
     }
 
-    /// ~1 秒おきに呼ぶ。フォアグラウンド遷移でプロファイルを適用する。
+    /// Called about every second. Applies profiles on foreground transitions.
     ///
-    /// - 前面 exe の解決に失敗した tick は遷移評価しない (権限の高い窓などで
-    ///   None になると全ルールが「離脱」と誤判定されて復帰を書き込むのを防ぐ)。
-    /// - 前面が 2 tick 連続で同じときだけ評価する (alt-tab を速く往復した
-    ///   中間状態へ EEPROM 書き込みをしない = フラッシュ保護)。
-    /// - 遷移は復帰→新規の順で、管理下のアプリ間を直接移っても新しい側が勝つ。
+    /// - Ticks where resolving the foreground exe fails are not evaluated for transitions (prevents all rules being
+    ///   misjudged as "left" and restores being written when it becomes None, e.g. on a high-privilege window).
+    /// - Evaluate only when the foreground is the same for 2 consecutive ticks (no EEPROM writes for the
+    ///   intermediate state of fast alt-tab back and forth = flash protection).
+    /// - Transitions go restore → new, so even when moving directly between managed apps the new side wins.
     pub fn proc_tick(&mut self, cx: &mut Context<Self>) {
         self.proc_drain(cx);
         if self.prefs.proc_rules.is_empty() {
-            // ルールが全削除 = 管理下から外れた。適用中だった分は記録値で復帰する。
+            // All rules deleted = no longer managed. Whatever was applied is restored with the recorded value.
             let states = std::mem::take(&mut self.proc_states);
             if !states.is_empty() {
                 let mut restored = 0;
@@ -420,7 +420,7 @@ impl Shell {
                 }
                 if restored > 0 {
                     self.toast(
-                        format!("復帰: ルール解除に伴い {restored} 件のプロファイルを適用"),
+                        format!("Restored: applied {restored} profile(s) because the rules were removed"),
                         false,
                         cx,
                     );
@@ -441,27 +441,27 @@ impl Shell {
         let changed = !ev.leaves.is_empty() || !ev.enters.is_empty();
         let mut msgs: Vec<String> = vec![];
         let detail = |res: Option<(usize, usize, usize)>| match res {
-            None => "未検出".to_string(),
+            None => "not found".to_string(),
             Some((sent, held, n)) => {
                 if held > 0 {
                     if sent > 0 {
-                        format!("{sent}/{n} 件・残り予約")
+                        format!("{sent}/{n} changes, rest queued")
                     } else {
-                        format!("{n} 件を予約")
+                        format!("{n} changes queued")
                     }
                 } else {
-                    format!("{n} 件")
+                    format!("{n} changes")
                 }
             }
         };
         for (device, name) in &ev.leaves {
             let res = self.apply_profile_named(device, name);
-            msgs.push(format!("復帰「{name}」{}", detail(res)));
+            msgs.push(format!("Restored \"{name}\": {}", detail(res)));
         }
         for (device, names) in &ev.enters {
             for name in names {
                 let res = self.apply_profile_named(device, name);
-                msgs.push(format!("適用「{name}」{}", detail(res)));
+                msgs.push(format!("Applied \"{name}\": {}", detail(res)));
             }
         }
         self.proc_states = ev.now;
@@ -473,7 +473,7 @@ impl Shell {
         }
     }
 
-    /// ルールに今マッチしているか (UI の状態表示用)。
+    /// Whether it currently matches the rule (for status display in the UI).
     pub fn proc_rule_active(&self, idx: usize) -> bool {
         self.prefs
             .proc_rules
@@ -539,7 +539,7 @@ mod tests {
 
     #[test]
     fn prefs_old_single_device_profile_migrates() {
-        // 旧形式 (device + changes 直書き) のプロファイルが devices に移行されること。
+        // Profiles in the old format (device + changes written directly) are migrated to devices.
         let q: Prefs = serde_json::from_str(
             r#"{"profiles":[{"name":"fps","device":"dev0","changes":[{"Profile":1}]}]}"#,
         )
@@ -552,7 +552,7 @@ mod tests {
 
     #[test]
     fn prefs_old_file_without_new_fields_loads() {
-        // 旧 prefs.json (profiles/proc_rules 無し) が読めること。
+        // An old prefs.json (without profiles/proc_rules) can be loaded.
         let q: Prefs = serde_json::from_str(r#"{"theme":"dark"}"#).unwrap();
         assert!(q.profiles.is_empty());
         assert!(q.proc_rules.is_empty());
@@ -588,15 +588,15 @@ mod tests {
     #[test]
     fn eval_enter_then_leave() {
         let rules = vec![rule_full("valorant", "mouse", "fps", "desk")];
-        // 遷入: states 空 → on_fg が enters に、on_leave が記録される。
+        // Enter: states empty → on_fg goes to enters, on_leave is recorded.
         let ev = eval_rules(&rules, "valorant.exe", &Default::default());
         assert_eq!(ev.enters, vec![("mouse".into(), vec!["fps".into()])]);
         assert!(ev.leaves.is_empty());
         assert_eq!(ev.now["valorant|mouse"].on_leave, "desk");
-        // 継続: 同じ状態なら何も起きない。
+        // Continue: nothing happens in the same state.
         let ev = eval_rules(&rules, "valorant.exe", &ev.now);
         assert!(ev.enters.is_empty() && ev.leaves.is_empty());
-        // 離脱: fg が変わると on_leave が leaves に。
+        // Leave: when fg changes, on_leave goes to leaves.
         let ev = eval_rules(&rules, "chrome.exe", &ev.now);
         assert_eq!(ev.leaves, vec![("mouse".into(), "desk".into())]);
         assert!(ev.now.is_empty());
@@ -604,14 +604,14 @@ mod tests {
 
     #[test]
     fn eval_leave_before_enter_new_app_wins() {
-        // valorant→mouse(A) と apex→mouse(B)。valorant から apex へ直接切替。
+        // valorant→mouse(A) and apex→mouse(B). Direct switch from valorant to apex.
         let rules = vec![
             rule_full("apex", "mouse", "b_prof", "desk_b"),
             rule_full("valorant", "mouse", "a_prof", "desk_a"),
         ];
         let states = states_of(&[("valorant|mouse", "mouse", "desk_a")]);
         let ev = eval_rules(&rules, "apex.exe", &states);
-        // leaves が先、enters が後 → apex (B) が最後に書いて勝つ。
+        // leaves come first, enters after → apex (B) writes last and wins.
         assert_eq!(ev.leaves, vec![("mouse".into(), "desk_a".into())]);
         assert_eq!(ev.enters, vec![("mouse".into(), vec!["b_prof".into()])]);
         assert_eq!(ev.now["apex|mouse"].on_leave, "desk_b");
@@ -619,7 +619,7 @@ mod tests {
 
     #[test]
     fn eval_deleted_rule_restores_stored_leave() {
-        // ルールを消しても適用中だった分は記録値で復帰する。
+        // Even if a rule is deleted, what was applied is restored from the recorded value.
         let rules = vec![rule_full("other", "mouse", "x", "")];
         let states = states_of(&[("valorant|mouse", "mouse", "desk")]);
         let ev = eval_rules(&rules, "other.exe", &states);
@@ -628,7 +628,7 @@ mod tests {
 
     #[test]
     fn eval_disabled_rule_leaves_with_live_on_leave() {
-        // 無効化でも離脱扱い。on_leave が編集されていたら最新値を使う。
+        // Disabling also counts as leaving. If on_leave was edited, use the latest value.
         let mut r = rule_full("valorant", "mouse", "fps", "desk_new");
         r.enabled = false;
         let states = states_of(&[("valorant|mouse", "mouse", "desk_old")]);
@@ -638,7 +638,7 @@ mod tests {
 
     #[test]
     fn eval_same_key_rules_aggregate() {
-        // 同一 process+device のルール 2 件 → 1 遷移に集約、on_fg は順に適用。
+        // Two rules with the same process+device → aggregated into one transition, on_fg applied in order.
         let rules = vec![
             rule_full("valorant", "mouse", "a", "desk"),
             rule_full("valorant", "mouse", "b", "desk2"),
@@ -646,13 +646,13 @@ mod tests {
         let ev = eval_rules(&rules, "valorant.exe", &Default::default());
         assert_eq!(ev.enters.len(), 1);
         assert_eq!(ev.enters[0].1, vec!["a".to_string(), "b".to_string()]);
-        // 片方を無効化してもキーは生きている → 誤って復帰しない。
+        // Even if one is disabled, the key is still alive → no wrong restore.
         let mut r2 = rules.clone();
         r2[0].enabled = false;
         let ev = eval_rules(&r2, "valorant.exe", &ev.now);
         assert!(ev.leaves.is_empty());
         assert!(ev.enters.is_empty());
-        // 両方無効 → 離脱。on_leave は最後尾の非空 "desk2"。
+        // Both disabled → leave. on_leave is the last non-empty "desk2".
         r2[1].enabled = false;
         let ev = eval_rules(&r2, "valorant.exe", &ev.now);
         assert_eq!(ev.leaves, vec![("mouse".into(), "desk2".into())]);
@@ -660,7 +660,7 @@ mod tests {
 
     #[test]
     fn eval_empty_on_leave_no_restore() {
-        // on_leave 空のルールは離脱時に何も出さない。
+        // A rule with empty on_leave emits nothing on leaving.
         let rules = vec![rule_full("valorant", "mouse", "fps", "")];
         let ev = eval_rules(&rules, "valorant.exe", &Default::default());
         let ev = eval_rules(&rules, "chrome.exe", &ev.now);

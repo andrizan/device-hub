@@ -1,14 +1,14 @@
-//! 実測 input report レートを 1 秒ごとに表示 (バックグラウンド計測の検証用)。
+//! Print the measured input report rate every second (for verifying background measurement).
 //!   cargo run -p devhub-obs --example rate
-//! マウスを動かしながら見る。窓を他アプリに隠しても INPUTSINK で計測できるはず。
+//! Watch it while moving the mouse. It should still measure via INPUTSINK even if the window is hidden behind other apps.
 fn main() {
-    devhub_obs::rawinput::start(); // マウス+キーボード両方登録
+    devhub_obs::rawinput::start(); // registers both mouse and keyboard
     let targets: &[(u16, u16, &str)] = &[
         (0x33E4, 0x3854, "HTS Plus Pro (2.4G)"),
-        (0x33E4, 0x5219, "HTS Plus Pro (有線)"),
+        (0x33E4, 0x5219, "HTS Plus Pro (wired)"),
         (0x1CA6, 0x3009, "SU66 Max"),
-        (0x373B, 0x1278, "ATK ドングル"),
-        (0x373B, 0x12A7, "ATK 有線"),
+        (0x373B, 0x1278, "ATK dongle"),
+        (0x373B, 0x12A7, "ATK wired"),
     ];
     loop {
         for &(v, p, name) in targets {

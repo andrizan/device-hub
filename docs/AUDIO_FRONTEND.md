@@ -1,31 +1,31 @@
-# オーディオ (USB DAC / PEQ) フロントエンド — TP55 対応
+# Audio (USB DAC / PEQ) frontend — TP55 support
 
-担当: フロントエンド。`crates/device-hub/src/pages/audio.rs`。
-バックエンド (walkplay.rs / peq.rs / registry / demo) は別エージェント実装済みで、契約は変えていない。
+Owner: frontend. `crates/device-hub/src/pages/audio.rs`.
+The backend (walkplay.rs / peq.rs / registry / demo) was implemented by another agent, and the contract is unchanged.
 
-## 使っている契約
-- `Capabilities::peq: Option<PeqCaps>` → あれば EQ カードを出す (バンド数・範囲・使えるフィルター種別はすべて caps から)。
-- `DeviceState::peq` / `Change::Peq { band, value }` / `Change::PeqAll { bands }`。
-- プリアンプは汎用設定 `eq_volume` (Slider)。EQ カード内に出すので、peq がある機種では generic カードから除外。
-- `eq_def` アクションも EQ カードのプリセット「DEF (公式)」に統合したため generic から除外。
-- グラフは `devhub_core::peq::response_db` (ドライバと同じ biquad / 96kHz) なので実機の特性と一致する。
+## Contract in use
+- `Capabilities::peq: Option<PeqCaps>` → if present, show the EQ card (band count, ranges, and usable filter types all come from caps).
+- `DeviceState::peq` / `Change::Peq { band, value }` / `Change::PeqAll { bands }`.
+- The preamp is the generic setting `eq_volume` (Slider). It is shown inside the EQ card, so it is excluded from the generic card on models that have peq.
+- The `eq_def` action is also merged into the EQ card's "DEF (official)" preset, so it is excluded from generic too.
+- The graph uses `devhub_core::peq::response_db` (the same biquad / 96kHz as the driver), so it matches the real device's response.
 
-## 画面
-1. 応答グラフ: 合成カーブ + 選択バンド単体のカーブ (塗り)。番号付きハンドルを
-   ドラッグ = 周波数 + ゲイン同時変更 (差分ドラッグ。クリックだけでは動かない)、ホイール = Q。ホバーでカーソル位置の Hz / 合成 dB。
-2. プリアンプ行: 合成カーブのピークから「余裕 / クリップの可能性」を表示、「自動」でクリップしない最大値に。
-3. バンド一覧 (公式の縦列相当): 種別 / 周波数 / ゲイン / Q。クリックで選択。
-4. 選択バンド編集: ◀▶ 切替、種別 (LS/PK/HS/LP/HP)、0dB に戻す、周波数 (対数スライダー) / Q / ゲインを数値入力 + スライダー。
-5. ツールバー: プリセット (内蔵 8 種: フラット, DEF, 低音, V 字, ボーカル, FPS 足音, ハーマン風, 高域を抑える + 保存したもの)、保存、削除、
-   **AutoEQ / Equalizer APO (ParametricEQ.txt) の貼り付け**、APO 形式でコピー。
-   保存プリセットは `prefs.json` の `eq_presets` (デバイス共通)。内蔵プリセットのプリアンプはピークから自動計算。
+## Screen
+1. Response graph: composite curve + the curve of the selected band alone (filled). Numbered handles:
+   drag = change frequency + gain at once (delta drag; a click alone does not move them), wheel = Q. Hovering shows Hz / composite dB at the cursor position.
+2. Preamp row: shows "headroom / possible clipping" from the peak of the composite curve; "Auto" sets the largest value that does not clip.
+3. Band list (equivalent to the official vertical column): type / frequency / gain / Q. Click to select.
+4. Selected-band editing: ◀▶ to switch, type (LS/PK/HS/LP/HP), reset to 0dB, frequency (log slider) / Q / gain as numeric input + slider.
+5. Toolbar: presets (8 built in: Flat, DEF, Bass boost, V-shape, Vocal, FPS footsteps, Harman-style, Reduce treble + saved ones), save, delete,
+   **paste AutoEQ / Equalizer APO (ParametricEQ.txt)**, copy in APO format.
+   Saved presets are `eq_presets` in `prefs.json` (shared across devices). The preamp of built-in presets is computed automatically from the peak.
 
-## 追加した汎用部品
-- `Shell::begin_drag_xy` / `CbXY` (2D ドラッグ。`Drag::xy`)。
-- `Prefs::eq_presets` / `prefs::EqPreset`。
-- サイドバー/ホーム/ヘッダーのアイコン: `DriverKind::Walkplay` は `headphones`。
+## Generic parts added
+- `Shell::begin_drag_xy` / `CbXY` (2D drag. `Drag::xy`).
+- `Prefs::eq_presets` / `prefs::EqPreset`.
+- Icon for the sidebar / home / header: `DriverKind::Walkplay` uses `headphones`.
 
-## バックエンドへの要望 (任意)
-- バンドの ON/OFF (バイパス) を wire で持てるなら `PeqBand::enabled` を追加してほしい (UI はバンド一覧にトグルを足すだけ)。
-- 公式の「ONLINE / SHARE」(クラウド EQ) はログイン必須の walkplay-api のため未対応。やるなら devhub-update と同様の別 crate で。
-- 別の WalkPlay 系 DAC を足すときは registry に VID/PID を足し、`PeqCaps` をその機種の値にするだけで UI は自動で合う。
+## Requests to the backend (optional)
+- If a band ON/OFF (bypass) can be held on the wire, please add `PeqBand::enabled` (the UI would only add a toggle to the band list).
+- The official "ONLINE / SHARE" (cloud EQ) is not supported because it uses the login-only walkplay-api. If it is ever done, make it a separate crate, like devhub-update.
+- When adding another WalkPlay-family DAC, just add its VID/PID to the registry and set `PeqCaps` to that model's values; the UI adapts automatically.

@@ -1,4 +1,4 @@
-//! ATK ドングル (373b:1278) 生コマンドプローブ。
+//! ATK dongle (373b:1278) raw-command probe.
 use devhub_hid::transport;
 use std::time::{Duration, Instant};
 
@@ -65,7 +65,7 @@ fn main() {
         .open_device(&api)
         .unwrap();
     d.set_blocking_mode(false).ok();
-    // cmd10 ReportMouseStatus を有効化して非同期レポートを観測
+    // Enable cmd10 ReportMouseStatus and observe the asynchronous reports
     println!("cmd10 resp: {:?}", cmd(&d, 10, 0, &[1]));
     println!("--- listening 10s (move the mouse) ---");
     let start = Instant::now();

@@ -1,49 +1,49 @@
-# vendor/ — GPUI への GPU backdrop-filter 追加 (Liquid Glass の下地)
+# vendor/ — Adding a GPU backdrop-filter to GPUI (the base of Liquid Glass)
 
-`Cargo.toml` の `[patch.crates-io]` が、crates.io の `gpui-pre` / `gpui-pre-windows` **0.3.11** の代わりに
-このディレクトリを使う。どちらも Apache-2.0 (各 `LICENSE-APACHE` を参照)。元は Zed の GPUI。
-改変箇所には `DEVHUB` のコメントを付けている。
+The `[patch.crates-io]` in `Cargo.toml` makes the build use this directory instead of crates.io's `gpui-pre` / `gpui-pre-windows` **0.3.11**.
+Both are Apache-2.0 (see each `LICENSE-APACHE`). The upstream is Zed's GPUI.
+Modified places carry a `DEVHUB` comment.
 
-## 原本との差分 (crates.io 0.3.11 比)
+## Differences from the original (vs. crates.io 0.3.11)
 
-| ファイル | 内容 |
+| File | Contents |
 | --- | --- |
-| `gpui-pre/src/elements/div.rs`, `style.rs`, `window.rs`, `scene.rs` | backdrop 要素の API と `Scene::backdrops` の追加 |
-| `gpui-pre-windows/src/backdrop.rs` (新規) | ダウンサンプル → 分離ブラー → 屈折・彩度・明るさ・リムライトの合成 |
-| `gpui-pre-windows/src/gpu_timer.rs` (新規) | `DEVHUB_GPUI_GPUTIME=1` のときだけ動く GPU タイムスタンプ計測 |
-| `gpui-pre-windows/src/directx_renderer.rs`, `shaders.hlsl`, `build.rs` | backdrop 用パスとシェーダーの組み込み |
+| `gpui-pre/src/elements/div.rs`, `style.rs`, `window.rs`, `scene.rs` | Added the backdrop element API and `Scene::backdrops` |
+| `gpui-pre-windows/src/backdrop.rs` (new) | Downsample → separable blur → composition of refraction, saturation, brightness, and rim light |
+| `gpui-pre-windows/src/gpu_timer.rs` (new) | GPU timestamp measurement that runs only when `DEVHUB_GPUI_GPUTIME=1` |
+| `gpui-pre-windows/src/directx_renderer.rs`, `shaders.hlsl`, `build.rs` | Integrated the backdrop pass and shader |
 
-`Cargo.toml.orig` は crates.io 配布物のもの。行末が原本と違うため、単純な diff は行数が膨らむ。
-差分を取るなら `diff --strip-trailing-cr` を使う。
+`Cargo.toml.orig` is from the crates.io distribution. Its line endings differ from the original, so a plain diff balloons in line count.
+To take a diff, use `diff --strip-trailing-cr`.
 
-## 更新手順
+## Update procedure
 
-1. `Cargo.toml` の gpui-pre のバージョンを上げる前に、新版の原本を `~/.cargo/registry/src/` から取り出す。
-2. 上の表のファイルへ `DEVHUB` 付きの変更を移植し、`cargo test --locked` と `cargo check --locked --features perf` を通す。
-3. 背景 (`/tech` と GPUI の glass) が崩れていないことを実機で見る。
+1. Before bumping the gpui-pre version in `Cargo.toml`, extract the new version's original from `~/.cargo/registry/src/`.
+2. Port the changes marked `DEVHUB` into the files in the table above, and make `cargo test --locked` and `cargo check --locked --features perf` pass.
+3. Check on a real device that the background (`/tech` and GPUI's glass) is not broken.
 
-## 履歴
+## History
 
-- 2026-11-11: `liquid_glass.hlsl` に面ごとの「右辺・下辺のリム」を消す手段を足した。
-  GPU の Liquid Glass 経路は面自身の縁 (`Material::edge`) を描かないため、ナビの右辺に出る
-  1px の明るい線は素材の 값을変えても消せなかった (`Backdrop::rim[1]` を流用して強さを渡す:
-  0 = 既定 / 正 = その倍率 / 負 = 消灯)。既定の値は 1.0 のままなので、参照実装との一致は
-  変わらない (tools/glass-fidelity.ps1 の比較対象も同じ)。
+- 2026-11-11: Added to `liquid_glass.hlsl` a way to turn off the per-surface "right and bottom edge rim".
+  The GPU Liquid Glass path does not draw the surface's own edge (`Material::edge`), so the
+  1px bright line that appears on the right edge of the nav could not be removed by changing the material's values (`Backdrop::rim[1]` is reused to pass the strength:
+  0 = default / positive = that multiplier / negative = off). The default value stays 1.0, so the match with the reference implementation
+  does not change (the comparison target of tools/glass-fidelity.ps1 is the same).
 
-- 2026-11-10: `shaders.hlsl` の外側の影を要素の輪郭で切り抜くよう修正。
-  半透明のガラスが自身の影を背景として取り込み、白いカードとナビが灰色になる不具合を解消。
-  内側の影は従来どおり要素の内側に描く。
+- 2026-11-10: Fixed the outer shadow in `shaders.hlsl` to be clipped by the element's outline.
+  Fixes the bug where translucent glass took in its own shadow as the background, turning white cards and the nav gray.
+  The inner shadow is still drawn inside the element as before.
 
-- 2026-11-10: `1234igor/gpui-liquid-glass` の固定リビジョン `c002c4d3758f934fdfaf173e8214a24eb65a05cd` から
-  Regular / Clear の素材式を `gpui-pre-windows/src/liquid_glass.hlsl` へ移植。Windows の領域単位の
-  snapshot、縮小 Gaussian と組み合わせ、dark tint と light Clear のコントラストを調整。
-  `Backdrop::glass` で素材と操作エネルギーを渡す。同一層の隣り合う同一素材を統合する。
-  移植元の MIT ライセンスは [gpui-liquid-glass-LICENSE-MIT](../licenses/gpui-liquid-glass-LICENSE-MIT)、
-  GPUI の Apache-2.0 は各 vendor ディレクトリ内の `LICENSE-APACHE` を参照。どちらも Windows 配布物に同梱する。
+- 2026-11-10: From the pinned revision `c002c4d3758f934fdfaf173e8214a24eb65a05cd` of `1234igor/gpui-liquid-glass`,
+  ported the Regular / Clear material formulas to `gpui-pre-windows/src/liquid_glass.hlsl`. Combined with Windows per-region
+  snapshots and a downscaled Gaussian, and tuned the contrast of the dark tint and light Clear.
+  `Backdrop::glass` passes the material and interaction energy. Adjacent identical materials in the same layer are merged.
+  The MIT license of the port source is [gpui-liquid-glass-LICENSE-MIT](../licenses/gpui-liquid-glass-LICENSE-MIT),
+  and for GPUI's Apache-2.0 see `LICENSE-APACHE` in each vendor directory. Both are bundled with the Windows distribution.
 
-- 2026-10-13: gpui-kit 0.7.3 に合わせて 0.3.7 → 0.3.9。上の表の差分はそのまま当たった (window.rs は 182 行ずれただけ)。
-  描画 (directx_renderer.rs / shaders.hlsl / style.rs) は上流で変化なし。旧版 (0.1.15) と 5 画面の撮影が画素単位で一致。
-- 2026-11-05: gpui-kit 0.9.0 に合わせて 0.3.9 → 0.3.11。
-  div.rs / window.rs / scene.rs / directx_renderer.rs / shaders.hlsl は上流が変わっていたため三方マージした
-  (div.rs の smooth_wheel 宣言 2 行と scene.rs の 1 ハンクは手当て)。shaders.hlsl と directx_renderer.rs は
-  そのまま当たった。build.rs は上流で変更なし。
+- 2026-10-13: 0.3.7 → 0.3.9 to match gpui-kit 0.7.3. The differences in the table above applied cleanly (window.rs only shifted by 182 lines).
+  Rendering (directx_renderer.rs / shaders.hlsl / style.rs) is unchanged upstream. Captures of 5 screens match the old version (0.1.15) pixel for pixel.
+- 2026-11-05: 0.3.9 → 0.3.11 to match gpui-kit 0.9.0.
+  div.rs / window.rs / scene.rs / directx_renderer.rs / shaders.hlsl had changed upstream, so a three-way merge was done
+  (the 2-line smooth_wheel declaration in div.rs and 1 hunk in scene.rs were fixed by hand). shaders.hlsl and directx_renderer.rs
+  applied cleanly. build.rs is unchanged upstream.

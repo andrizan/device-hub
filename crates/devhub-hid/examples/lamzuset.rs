@@ -1,6 +1,6 @@
-//! LAMZU 64B feature コマンドの手動送信 (診断用)。
+//! Manually send LAMZU 64B feature commands (for diagnostics).
 //! `cargo run -p devhub-hid --example lamzuset -- <b2> <sub> <f> <cmd> [args…]`
-//! 例: ポーリングを p1 に 8K → `lamzuset 2 2 1 0 1 128`
+//! Example: set polling to 8K on p1 → `lamzuset 2 2 1 0 1 128`
 
 use devhub_hid::transport;
 
@@ -13,7 +13,7 @@ fn main() {
         })
         .collect();
     if bytes.len() < 4 {
-        eprintln!("usage: lamzuset <b2> <sub> <f> <cmd> [args…]  (10進 or 0x16進)");
+        eprintln!("usage: lamzuset <b2> <sub> <f> <cmd> [args…]  (decimal or 0x hex)");
         std::process::exit(2);
     }
     let api = transport::open().expect("hidapi");

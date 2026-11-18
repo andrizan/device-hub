@@ -1,7 +1,7 @@
-//! SU66 ライティングモード掃引 — 実機に effect 0..=19 を順に書き込み、
-//! 各モードの開始時刻をミリ秒で標準出力する。連続撮影したカメラ映像と
-//! タイムスタンプで対応付けて、実機の実際の光り方を分類する。
-//! 終了時に元の LightingState を復元する。
+//! SU66 lighting-mode sweep — writes effects 0..=19 to the real device in order and
+//! prints each mode's start time in milliseconds to stdout. By matching it against continuously filmed camera footage
+//! via timestamps, the actual lighting behavior of the device is classified.
+//! Restores the original LightingState on exit.
 use devhub_core::{Change, DeviceKind};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 

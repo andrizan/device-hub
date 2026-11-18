@@ -21,9 +21,9 @@ float3 liquid_glass_shade(float3 color, bool clear, float edge,
     color = color * 1.01 + 2.0 / 255.0;
 
     float top_left = saturate((-normal.x - normal.y) * 0.5 + 0.5);
-    // DEVHUB: `rim_k` は「光っていない側 (右辺・下辺) のリム」の強さ。
-    // 0 = 既定 (1.0) / 正 = その倍率 / 負 = 消灯 (0)。
-    // 右上・左上のハイライト (top_left の項) は残し、暗い側の縁だけを消せる。
+    // DEVHUB: `rim_k` is the strength of "the rim on the unlit side (right and bottom edges)".
+    // 0 = default (1.0) / positive = that multiplier / negative = off (0).
+    // The top-right and top-left highlights (the top_left term) remain, so only the edge on the dark side can be turned off.
     float bright_rim = clear
         ? pow(edge, 6.0) * (0.12 * rim_k + 0.58 * top_left)
         : pow(edge, 5.0) * (0.06 * rim_k + 0.18 * top_left);
@@ -53,8 +53,8 @@ float3 liquid_glass_material(Backdrop b, float2 p, float sdf) {
     float2 normal = backdrop_normal(p, b.bounds, b.corner_radii);
     float2 sample_pixel = p - normal * (clear ? 26.0 : 3.2) * scale * lens;
     float3 sample_color = clear ? liquid_glass_sharp(sample_pixel) : backdrop_sample(sample_pixel);
-    // DEVHUB: 右辺・下辺のリムの強さ。`Backdrop::rim[1]` はこの経路では
-    // 別の用途で使われていないのでここに使う。0 = 既定 (1.0) / 負 = 消灯。
+    // DEVHUB: strength of the right and bottom edge rim. `Backdrop::rim[1]` is not used
+    // for any other purpose on this path, so it is used here. 0 = default (1.0) / negative = off.
     float rim_k = b.rim.y < 0.0 ? 0.0 : (b.rim.y > 0.0 ? b.rim.y : 1.0);
     float3 color = liquid_glass_shade(sample_color, clear, edge, normal, b.glass.y, light, rim_k);
 

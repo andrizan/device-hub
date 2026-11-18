@@ -1,25 +1,25 @@
-//! アプリ (Device HUB) 側で編集する OBS オーバーレイの見た目と表示キー。
+//! Look and displayed keys of the OBS overlay, edited on the app (Device HUB) side.
 //!
-//! `%APPDATA%\DeviceHub\obs_overlay.json` を Device HUB の「OBS オーバーレイ」画面が書き、
-//! OBS プラグインは 1 秒ごとに更新時刻を見て読み直す (OBS を再起動しなくても反映)。
-//! OBS 側のプロパティ (キー単位チェック等) と**和集合**で効く。
+//! The "OBS overlay" screen of Device HUB writes `%APPDATA%\DeviceHub\obs_overlay.json`,
+//! and the OBS plugin checks its modification time every second and re-reads it (applied without restarting OBS).
+//! It takes effect as a **union** with the OBS-side properties (per-key checks, etc.).
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime};
 
-/// 見た目のテーマ。
+/// Look theme.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum Theme {
-    /// 半透明の暗いパネル (既定)。
+    /// Translucent dark panel (default).
     #[default]
     Glass,
-    /// 明るいパネル。
+    /// Light panel.
     Light,
-    /// 背景なし (キーだけ。配信画面に直接重ねる用)。
+    /// No background (keys only; for overlaying directly on the stream).
     Clear,
-    /// 黒地 + アクセントの輪郭と発光。
+    /// Black base + accent outline and glow.
     Neon,
 }
 
@@ -27,23 +27,23 @@ impl Theme {
     pub const ALL: [Theme; 4] = [Theme::Glass, Theme::Light, Theme::Clear, Theme::Neon];
     pub fn label(self) -> &'static str {
         match self {
-            Theme::Glass => "グラス",
-            Theme::Light => "ライト",
-            Theme::Clear => "背景なし",
-            Theme::Neon => "ネオン",
+            Theme::Glass => "Glass",
+            Theme::Light => "Light",
+            Theme::Clear => "No background",
+            Theme::Neon => "Neon",
         }
     }
 }
 
-/// マウスの描き方。
+/// How the mouse is drawn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum MouseStyle {
-    /// マウスの形 + 横バー (既定)。
+    /// Mouse shape + horizontal bars (default).
     #[default]
     Both,
-    /// マウスの形だけ。
+    /// Mouse shape only.
     Shape,
-    /// 横バーだけ。
+    /// Horizontal bars only.
     Bars,
 }
 
@@ -51,22 +51,22 @@ impl MouseStyle {
     pub const ALL: [MouseStyle; 3] = [MouseStyle::Both, MouseStyle::Shape, MouseStyle::Bars];
     pub fn label(self) -> &'static str {
         match self {
-            MouseStyle::Both => "形 + バー",
-            MouseStyle::Shape => "形だけ",
-            MouseStyle::Bars => "バーだけ",
+            MouseStyle::Both => "Shape + bars",
+            MouseStyle::Shape => "Shape only",
+            MouseStyle::Bars => "Bars only",
         }
     }
 }
 
-/// 押し込みフィルの方向。
+/// Direction of the press fill.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum FillMode {
-    /// 下から満ちる (既定)。
+    /// Fills from the bottom (default).
     #[default]
     Bottom,
-    /// 上から沈む。
+    /// Sinks from the top.
     Top,
-    /// 深さに応じてキー全体が発色する。
+    /// The whole key lights up according to depth.
     Fade,
 }
 
@@ -74,22 +74,22 @@ impl FillMode {
     pub const ALL: [FillMode; 3] = [FillMode::Bottom, FillMode::Top, FillMode::Fade];
     pub fn label(self) -> &'static str {
         match self {
-            FillMode::Bottom => "下から",
-            FillMode::Top => "上から",
-            FillMode::Fade => "フェード",
+            FillMode::Bottom => "From bottom",
+            FillMode::Top => "From top",
+            FillMode::Fade => "Fade",
         }
     }
 }
 
-/// 統合ソースの配置。
+/// Layout of the combined source.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum Arrange {
-    /// キーボード左・マウス右 (既定)。
+    /// Keyboard left, mouse right (default).
     #[default]
     Side,
-    /// キーボード上・マウス下。
+    /// Keyboard top, mouse bottom.
     Stack,
-    /// マウス左・キーボード右。
+    /// Mouse left, keyboard right.
     Swap,
 }
 
@@ -97,9 +97,9 @@ impl Arrange {
     pub const ALL: [Arrange; 3] = [Arrange::Side, Arrange::Stack, Arrange::Swap];
     pub fn label(self) -> &'static str {
         match self {
-            Arrange::Side => "横並び",
-            Arrange::Stack => "縦積み",
-            Arrange::Swap => "左右入替",
+            Arrange::Side => "Side by side",
+            Arrange::Stack => "Stacked",
+            Arrange::Swap => "Swapped",
         }
     }
 }
@@ -108,62 +108,62 @@ impl Arrange {
 #[serde(default)]
 pub struct OverlayCfg {
     pub theme: Theme,
-    /// アクセント色 (RGB)。OBS 側で色を選んだソースはそちらが優先。
+    /// Accent color (RGB). A source whose color was chosen on the OBS side takes priority.
     pub accent: [u8; 3],
-    /// 解像度の倍率 (1.0 / 1.5 / 2.0)。大きくすると拡大してもにじまない。
+    /// Resolution multiplier (1.0 / 1.5 / 2.0). Larger values stay sharp when scaled up.
     pub scale: f32,
     pub title: bool,
     pub labels: bool,
-    /// 押し込み量 (mm / %) の数字を出す。
+    /// Show the press amount (mm / %) as numbers.
     pub numbers: bool,
     pub mouse_style: MouseStyle,
-    /// 表示するキー (`LayoutKey::id`)。**空 = すべて表示**。選んだキーだけが出る。
+    /// Keys to show (`LayoutKey::id`). **Empty = show all**. Only the selected keys appear.
     pub show_keys: Vec<u16>,
-    /// 表示するマウスボタン (表示名)。空 = すべて表示。
+    /// Mouse buttons to show (display names). Empty = show all.
     pub show_buttons: Vec<String>,
-    /// 非表示にするキー (`LayoutKey::id`)。旧フィールド — 保存済み設定の互換用に残す。
+    /// Keys to hide (`LayoutKey::id`). Legacy field - kept for compatibility with saved settings.
     pub hide_keys: Vec<u16>,
-    /// 非表示にするマウスボタン (表示名)。
+    /// Mouse buttons to hide (display names).
     pub hide_buttons: Vec<String>,
 
-    // ---- レイアウト ----
-    /// キーの大きさ係数 (0.7–1.4)。scale とは別にキー密度だけ変える。
+    // ---- Layout ----
+    /// Key size factor (0.7–1.4). Changes only the key density, separately from scale.
     #[serde(default = "one")]
     pub key_size: f32,
-    /// 角丸係数 (0–2)。1 = 標準の丸み。
+    /// Corner radius factor (0–2). 1 = standard roundness.
     #[serde(default = "one")]
     pub radius: f32,
-    /// パネルの余白係数 (0.5–2)。
+    /// Panel padding factor (0.5–2).
     #[serde(default = "one")]
     pub pad: f32,
-    /// 統合ソースの配置。
+    /// Layout of the combined source.
     pub arrange: Arrange,
 
-    // ---- 色 ----
-    /// 背景パネルの不透明度 % (0–100)。テーマ色に掛ける。
+    // ---- Color ----
+    /// Background panel opacity % (0–100). Multiplied onto the theme color.
     #[serde(default = "hundred")]
     pub panel_alpha: u8,
-    /// 押し込み色 (RGB)。None = アクセントと同じ。
+    /// Press color (RGB). None = same as the accent.
     pub pressed: Option<[u8; 3]>,
 
-    // ---- 表示要素 ----
-    /// 押下時の発光強度 % (0–200)。
+    // ---- Display elements ----
+    /// Glow intensity % when pressed (0–200).
     #[serde(default = "hundred")]
     pub glow: u8,
-    /// 押し込みフィルの方向。
+    /// Direction of the press fill.
     pub fill_mode: FillMode,
-    /// 作動点ライン (キー内の横線)。
+    /// Actuation point line (the horizontal line inside the key).
     #[serde(default = "yes")]
     pub trigger_line: bool,
-    /// キー内の AP/FT/R テキスト。
+    /// AP/FT/R text inside the key.
     #[serde(default = "yes")]
     pub badges: bool,
-    /// 数字を mm ではなく % で出す。
+    /// Show numbers in % instead of mm.
     pub num_pct: bool,
-    /// タイトル文字 (空 = デバイス名)。
+    /// Title text (empty = device name).
     #[serde(default)]
     pub title_text: String,
-    /// キーとパネルの影。
+    /// Shadows of the keys and panel.
     #[serde(default = "yes")]
     pub shadow: bool,
 }
@@ -242,7 +242,7 @@ struct Cache {
 
 static CACHE: Mutex<Option<Cache>> = Mutex::new(None);
 
-/// 現在の設定と世代番号 (変わったら +1)。ファイルの確認は 1 秒に 1 回まで。
+/// Current settings and generation number (+1 when they change). The file is checked at most once per second.
 pub fn current() -> (OverlayCfg, u64) {
     let mut g = CACHE.lock().unwrap_or_else(|p| p.into_inner());
     let c = g.get_or_insert_with(|| Cache {
@@ -276,7 +276,7 @@ mod tests {
 
     #[test]
     fn old_file_without_new_fields_loads_with_defaults() {
-        // 新フィールドを持たない旧フォーマットが既定値で読める。
+        // An old format without the new fields loads with the defaults.
         let c: OverlayCfg = serde_json::from_str(r#"{"theme":"Neon","accent":[1,2,3]}"#).unwrap();
         assert_eq!(c.theme, Theme::Neon);
         assert_eq!(c.key_size, 1.0);
