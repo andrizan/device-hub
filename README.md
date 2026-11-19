@@ -84,9 +84,19 @@ Archive the contents of `dist/` for the full release or the contents of
 
 ### Releasing
 
-1. Set `version` in `crates/device-hub/Cargo.toml`, update `Cargo.lock`
-   (`cargo check`), commit and push to `main`.
-2. Tag that commit with the release notes as the tag message, then push the tag:
+Commit messages follow [Conventional Commits](https://www.conventionalcommits.org);
+[git-cliff](https://git-cliff.org) turns them into `CHANGELOG.md` and the
+release notes (`cliff.toml`).
+
+1. Set `version` in `crates/device-hub/Cargo.toml` and update `Cargo.lock`
+   (`cargo check`).
+2. Regenerate the changelog and commit both as `chore(release): vX.Y.Z`, then push to `main`:
+
+   ```sh
+   git cliff --tag v0.4.0 -o CHANGELOG.md
+   ```
+
+3. Tag that commit with the highlights as the tag message, then push the tag:
 
    ```sh
    git tag -a v0.4.0 --cleanup=verbatim -F notes.md
@@ -96,7 +106,9 @@ Archive the contents of `dist/` for the full release or the contents of
 CI then runs every check on the tagged commit. When all pass, it publishes the
 GitHub release with `device-hub-<tag>-windows-x64.zip`,
 `devhub-obs-<tag>-plugin.zip` and `SHA256SUMS.txt`, built by the tested job.
-A tag that does not match the crate version fails the run.
+The notes are the tag message followed by the git-cliff list of commits since
+the previous tag. A tag that does not match the crate version, or a
+`CHANGELOG.md` without that version, fails the run.
 
 ## Repository layout
 
