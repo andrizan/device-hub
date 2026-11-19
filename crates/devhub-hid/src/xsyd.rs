@@ -1259,7 +1259,7 @@ impl XsydDriver {
     /// The passphrase is hardcoded in the official SDK bundle.
     /// Plain JSON that has `keyboards` is returned as is.
     fn official_plain(&self, v: &serde_json::Value) -> HubResult<serde_json::Value> {
-        use aes::cipher::{block_padding::Pkcs7, BlockDecryptMut, KeyIvInit};
+        use aes::cipher::{block_padding::Pkcs7, BlockModeDecrypt, KeyIvInit};
         use base64::Engine;
         const PASS: &[u8] = b"fDPy6vvnpPsYm2T0g1bh";
         let Some(b64) = v.get("data").and_then(|d| d.as_str()) else {
@@ -1286,7 +1286,7 @@ impl XsydDriver {
         let mut ct = raw[16..].to_vec();
         let pt = cbc::Decryptor::<aes::Aes256>::new_from_slices(&keyiv[..32], &keyiv[32..48])
             .map_err(|e| HubError::Invalid(format!("AES: {e}")))?
-            .decrypt_padded_mut::<Pkcs7>(&mut ct)
+            .decrypt_padded::<Pkcs7>(&mut ct)
             .map_err(|_| HubError::Invalid("Decryption failed".into()))?;
         serde_json::from_slice(pt).map_err(|e| HubError::Invalid(format!("decrypted JSON: {e}")))
     }
@@ -3788,5 +3788,26 @@ mod tests {
         // SingleLighting area is a boolean
         assert_eq!(d.compose_open(1, &mk(vec![], true)), 1);
         assert_eq!(d.compose_open(1, &mk(vec![], false)), 0);
+    }
+
+    /// The official export is CryptoJS `AES.encrypt` = OpenSSL `Salted__` +
+    /// EVP_BytesToKey(MD5). The vector was made with OpenSSL itself:
+    /// `openssl enc -aes-256-cbc -md md5 -salt -pass pass:<PASS> -base64 -A`.
+    #[test]
+    fn official_export_decrypts_like_openssl() {
+        let d = mock_driver();
+        let v = serde_json::json!({
+            "data": "U2FsdGVkX18ZKqE4GBzY7wDA+mdxVbKnnzSO4cB1jmN2TU5BEFW9B0PmdSt8Og3lAKaTAEJrgf6G8kZegB1NtA=="
+        });
+        let plain = d.official_plain(&v).unwrap();
+        assert_eq!(
+            plain,
+            serde_json::json!({"keyboards": [{"name": "SU66 Max"}], "v": 1})
+        );
+        // Plain JSON passes through; a wrong header is refused.
+        let raw = serde_json::json!({"keyboards": []});
+        assert_eq!(d.official_plain(&raw).unwrap(), raw);
+        let bad = serde_json::json!({"data": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"});
+        assert!(d.official_plain(&bad).is_err());
     }
 }

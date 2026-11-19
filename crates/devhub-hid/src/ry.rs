@@ -329,7 +329,9 @@ fn default_table(hex: &str) -> Vec<[u8; 4]> {
         .map(|c| (c as char).to_digit(16).unwrap_or(0) as u8)
         .collect();
     digits
-        .chunks_exact(8)
+        .as_chunks::<8>()
+        .0
+        .iter()
         .map(|c| {
             [
                 c[0] << 4 | c[1],
@@ -688,7 +690,7 @@ impl RyDriver {
         let mut slots = Vec::with_capacity(96);
         for page in 0..6u8 {
             let r = self.get_raw(&[opcode, profile, page])?;
-            slots.extend(r.chunks_exact(4).map(|c| [c[0], c[1], c[2], c[3]]));
+            slots.extend(r.as_chunks::<4>().0.iter().copied());
         }
         Ok(slots)
     }

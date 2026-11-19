@@ -97,7 +97,7 @@ cp target/release/devhub_obs.dll "/c/ProgramData/obs-studio/plugins/devhub_obs/b
 ```
 ```
 
-The Rust toolchain is pinned to 1.95.0 in `rust-toolchain.toml` (required by gpui-kit 0.9.1).
+The Rust toolchain is pinned to 1.100.0 in `rust-toolchain.toml` (gpui-kit 0.10 needs 1.95+).
 On Linux, `cargo check` used to need a 2-line wgpu patch because gpui-pre-wgpu did not know the vendor
 backdrop. The backdrop was removed on 2026-11-19, so that patch should no longer be needed (not re-checked on Linux).
 

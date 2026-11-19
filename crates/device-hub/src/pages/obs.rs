@@ -98,7 +98,7 @@ impl Shell {
         let (w, h) = (pix.w, pix.h);
         let mut buf = pix.buf;
         // RenderImage is BGRA.
-        for px in buf.chunks_exact_mut(4) {
+        for px in buf.as_chunks_mut::<4>().0 {
             px.swap(0, 2);
         }
         let img = image::RgbaImage::from_raw(w, h, buf)?;

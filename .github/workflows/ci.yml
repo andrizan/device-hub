@@ -3,29 +3,95 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "licenses/**"
+      - "LICENSE"
   pull_request:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - "licenses/**"
+      - "LICENSE"
+  workflow_dispatch:
 
-# 同じブランチへの連続 push では古い run を自動キャンセル。
+# A newer push to the same ref cancels the run still in progress.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  # No debug info in dev/test builds: faster compiles and a much smaller cache.
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_PROFILE_TEST_DEBUG: 0
+
 jobs:
-  build:
+  windows:
+    name: Windows (test + package)
     runs-on: windows-latest
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Rust toolchain (rust-toolchain.toml)
-        run: rustup show
-      - name: Check
-        run: cargo check --workspace --locked
+        run: rustup toolchain install
+      # Caches the registry and dependency builds. Only main writes the cache,
+      # so pull requests reuse it without filling the 10 GB repository quota.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # `cargo test` builds every library, binary, test and example, so a
+      # separate `cargo check` would only repeat the work.
       - name: Test
         run: cargo test --workspace --locked
+      # The optimized build and the package are only needed for main.
       - name: Release build
+        if: github.event_name != 'pull_request'
         run: cargo build --release --locked -p device-hub -p devhub-obs
       - name: Stage Windows distribution
+        if: github.event_name != 'pull_request'
         run: ./scripts/package-windows.ps1
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
+        if: github.event_name != 'pull_request'
         with:
           name: device-hub-windows-x64
           path: dist/
+          retention-days: 14
+
+  # Linux and macOS: prove the whole workspace builds and links, and run the
+  # tests of the crates that do not open a window.
+  unix:
+    name: ${{ matrix.name }} (build)
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux
+            os: ubuntu-24.04
+          - name: macOS
+            os: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: System libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            libudev-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
+            libfontconfig1-dev libfreetype-dev libx11-xcb-dev libxcb1-dev
+      - name: Rust toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Build
+        run: cargo build --workspace --locked
+      - name: Test
+        run: cargo test --locked -p devhub-core -p devhub-hid -p devhub-update

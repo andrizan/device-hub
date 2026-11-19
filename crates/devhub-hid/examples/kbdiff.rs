@@ -5,7 +5,7 @@ fn main() {
     let raw = std::fs::read_to_string(&path).unwrap();
     let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
     let plain = {
-        use aes::cipher::{block_padding::Pkcs7, BlockDecryptMut, KeyIvInit};
+        use aes::cipher::{block_padding::Pkcs7, BlockModeDecrypt, KeyIvInit};
         use base64::Engine;
         let b64 = v.get("data").and_then(|d| d.as_str()).unwrap();
         let r = base64::engine::general_purpose::STANDARD
@@ -25,7 +25,7 @@ fn main() {
         let mut ct = r[16..].to_vec();
         let pt = cbc::Decryptor::<aes::Aes256>::new_from_slices(&keyiv[..32], &keyiv[32..48])
             .unwrap()
-            .decrypt_padded_mut::<Pkcs7>(&mut ct)
+            .decrypt_padded::<Pkcs7>(&mut ct)
             .unwrap();
         serde_json::from_slice::<serde_json::Value>(&pt).unwrap()
     };

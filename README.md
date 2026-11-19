@@ -40,7 +40,7 @@ detected automatically by capability, not by device name.
 ## Requirements
 
 - Windows 10/11 (x64)
-- Rust 1.95.0 (pinned in `rust-toolchain.toml`)
+- Rust 1.100.0 (pinned in `rust-toolchain.toml`)
 
 ## Build & run
 

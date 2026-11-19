@@ -9,9 +9,22 @@ use core::ffi::c_void;
 
 type CStr8 = *const u8;
 
+#[cfg(windows)]
 extern "C" {
     fn GetModuleHandleA(name: CStr8) -> *mut c_void;
     fn GetProcAddress(m: *mut c_void, name: CStr8) -> *mut c_void;
+}
+
+// The plugin loader is Windows-only for now. On other systems nothing
+// resolves, so `resolve` returns None and the plugin stays inert; the crate
+// still builds, which the app needs for the overlay renderer.
+#[cfg(not(windows))]
+unsafe fn GetModuleHandleA(_name: CStr8) -> *mut c_void {
+    core::ptr::null_mut()
+}
+#[cfg(not(windows))]
+unsafe fn GetProcAddress(_m: *mut c_void, _name: CStr8) -> *mut c_void {
+    core::ptr::null_mut()
 }
 
 fn sym(m: *mut c_void, name: &'static [u8]) -> *mut c_void {

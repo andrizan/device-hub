@@ -121,9 +121,7 @@ impl Shell {
                 // Master toggle: on models with zones, opens/closes all zones together.
                 let s2 = send(Rc::new(|l| {
                     l.on = !l.on;
-                    for z in &mut l.zone_on {
-                        *z = l.on;
-                    }
+                    l.zone_on.fill(l.on);
                 }));
                 body = body.child(ui::row_first(
                     "On",

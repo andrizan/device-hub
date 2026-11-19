@@ -3,25 +3,25 @@
 **/*.rs.bk
 Cargo.lock.orig
 
-# エディタ
+# Editors
 .vscode/
 .idea/
 
-# Windows の事故ファイル・一時物
+# Windows leftovers and temporary files
 nul
 *.tmp
 Thumbs.db
 desktop.ini
 
-# 生成物 (obs-overlay の gallery/preview PNG など)
+# Generated files (obs-overlay gallery/preview PNGs and the like)
 /*.png
 obs-preview*.png
 obs-gallery*.png
 
-# ローカル実行用の設定 (実機/個人設定は配布物に入れない)
+# Settings for local runs (device and personal settings stay out of the distribution)
 prefs.json
 dist/
 
-# メーカー配布原本・解析用の抜粋（公開ツリーには入れない）
+# Vendor originals and analysis excerpts (kept out of the public tree)
 /analysis/
 /.private-analysis/

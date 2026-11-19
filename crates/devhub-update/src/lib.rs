@@ -48,7 +48,7 @@ pub fn check(
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    let agent = ureq::AgentBuilder::new().timeout(TIMEOUT).build();
+    let agent = agent();
     let mut st = match feed {
         FirmwareFeed::MouseFit { ui_folder } => mousefit(&agent, ui_folder)?,
         FirmwareFeed::Sparklink { vid, pid, board_id } => {
@@ -89,13 +89,30 @@ fn is_new(fp: &str, last_fp: &str) -> bool {
 }
 
 /// mouse.fit: use the HTTP headers of the zip that FWLINK.txt points to as the fingerprint.
+/// HTTP agent with an overall timeout per request.
+fn agent() -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .timeout_global(Some(TIMEOUT))
+        .build()
+        .into()
+}
+
+/// A response header as text (empty when absent or not valid text).
+fn header<'a>(res: &'a ureq::http::Response<ureq::Body>, name: &str) -> &'a str {
+    res.headers()
+        .get(name)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+}
+
 fn mousefit(agent: &ureq::Agent, ui_folder: &str) -> Result<UpdateStatus, UpdateError> {
     let feed_url = format!("{MOUSEFIT_BASE}/Config/{ui_folder}/FWLINK.txt");
     let body = agent
         .get(&feed_url)
         .call()
         .map_err(|e| UpdateError(format!("FWLINK: {e}")))?
-        .into_string()
+        .into_body()
+        .read_to_string()
         .map_err(|e| UpdateError(format!("FWLINK read: {e}")))?;
     let zip = body
         .lines()
@@ -112,9 +129,9 @@ fn mousefit(agent: &ureq::Agent, ui_folder: &str) -> Result<UpdateStatus, Update
         .head(&zip_url)
         .call()
         .map_err(|e| UpdateError(format!("zip HEAD: {e}")))?;
-    let etag = head.header("ETag").unwrap_or("");
-    let lastmod = head.header("Last-Modified").unwrap_or("");
-    let len = head.header("Content-Length").unwrap_or("");
+    let etag = header(&head, "ETag");
+    let lastmod = header(&head, "Last-Modified");
+    let len = header(&head, "Content-Length");
     let fingerprint = format!("{etag}|{lastmod}|{len}");
     // Pick a version-like number string from the file name (…/3955/xxx_3955JM.zip → "3955").
     let version = zip_url
@@ -147,11 +164,12 @@ fn sparklink(
     );
     let res = agent
         .get(&url)
-        .set("Xs-API-Key", SPARKLINK_KEY)
+        .header("Xs-API-Key", SPARKLINK_KEY)
         .call()
         .map_err(|e| UpdateError(format!("api: {e}")))?;
     let json: serde_json::Value = res
-        .into_json()
+        .into_body()
+        .read_json()
         .map_err(|e| UpdateError(format!("json: {e}")))?;
     let code = json.get("code").and_then(|v| v.as_i64()).unwrap_or(-1);
     // 415 ("firmware not uploaded") is a normal "nothing published". Any other non-0 code is also conservatively treated as none.
@@ -244,14 +262,15 @@ pub fn sparklink_axis_names(
         fmt_vidpid(vid),
         fmt_vidpid(pid)
     );
-    let agent = ureq::AgentBuilder::new().timeout(TIMEOUT).build();
+    let agent = agent();
     let res = agent
         .get(&url)
-        .set("Xs-API-Key", SPARKLINK_KEY)
+        .header("Xs-API-Key", SPARKLINK_KEY)
         .call()
         .map_err(|e| UpdateError(format!("axis api: {e}")))?;
     let json: serde_json::Value = res
-        .into_json()
+        .into_body()
+        .read_json()
         .map_err(|e| UpdateError(format!("axis json: {e}")))?;
     let mut out = std::collections::BTreeMap::new();
     // data: [{list:[{axis_id, axis_name}, …]}, …]

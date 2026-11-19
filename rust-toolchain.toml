@@ -1,4 +1,4 @@
 [toolchain]
-# gpui-kit (gpui-pre 0.3.11) uses slice::as_array (Rust 1.95+).
-channel = "1.95.0"
+# Pinned for reproducible builds. gpui-kit needs Rust 1.95+ (slice::as_array).
+channel = "1.100.0"
 profile = "minimal"
