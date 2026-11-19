@@ -745,7 +745,9 @@ pub enum KeyAction {
     None,
     /// Transparent (uses the layer below).
     Transparent,
-    /// A code of `KeyboardCaps::catalog`.
+    /// A code of `KeyboardCaps::catalog`. A plain key uses its HID usage
+    /// (keyboard page 0x07) as the code, as `keys::basic_group` does; the key
+    /// test matches OS key events to keys through it.
     Code(u32),
     /// Modifiers + code (a key combination).
     Combo { mods: u8, code: u32 },

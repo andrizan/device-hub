@@ -282,10 +282,24 @@ fn identify(link: &Link) -> HubResult<&'static Board> {
 
 // ==================================================================== keymap values
 
-/// A keymap slot is four bytes; the contract carries it as a big-endian u32
-/// so a plain key reads `0x0000_UU00`.
+/// A keymap slot is four bytes `[kind, 0, value, value_hi]`. A plain key
+/// (`[0, 0, usage, 0]`) is carried as its HID usage, like on the other
+/// keyboards, so the UI can match OS key events to it (key test). Every other
+/// slot is carried as its big-endian u32, which is always 0x100 or more.
 fn code_of(v: [u8; 4]) -> u32 {
-    u32::from_be_bytes(v)
+    match v {
+        [0, 0, usage, 0] => usage as u32,
+        _ => u32::from_be_bytes(v),
+    }
+}
+
+/// Slot bytes of a code (the inverse of `code_of`).
+fn slot_of(code: u32) -> [u8; 4] {
+    if code < 0x100 {
+        [0, 0, code as u8, 0]
+    } else {
+        code.to_be_bytes()
+    }
 }
 
 const KEY_FN: u32 = 0x0A01_0000;
@@ -354,7 +368,7 @@ fn keyboard_catalog(layout: &[LayoutKey]) -> Vec<KeyGroup> {
     let basic = keys::basic_group()
         .keys
         .into_iter()
-        .map(|k| (k.code << 8, k.label, k.short))
+        .map(|k| (k.code, k.label, k.short))
         .collect();
     let consumer = |usage: u16, label: &str, short: &str| {
         (
@@ -772,7 +786,7 @@ impl RyDriver {
                     .id as u8;
                 let v = match action {
                     KeyAction::None | KeyAction::Transparent => [0u8; 4],
-                    KeyAction::Code(c) => c.to_be_bytes(),
+                    KeyAction::Code(c) => slot_of(*c),
                     other => {
                         return Err(HubError::Invalid(format!(
                             "this keyboard cannot take {other:?}"
@@ -1174,6 +1188,22 @@ mod tests {
     }
 
     #[test]
+    fn key_codes_round_trip() {
+        // Plain keys are their HID usage; every other slot keeps all four bytes.
+        assert_eq!(code_of([0, 0, 0x29, 0]), 0x29);
+        assert_eq!(code_of([3, 0, 0xE9, 0]), 0x0300_E900);
+        for v in [
+            [0, 0, 0x29, 0],
+            [0, 0, 0xE0, 0],
+            [0, 0, 0x04, 0x02],
+            [3, 0, 0xE9, 0],
+            [0x0A, 1, 0, 0],
+        ] {
+            assert_eq!(slot_of(code_of(v)), v, "{v:02x?}");
+        }
+    }
+
+    #[test]
     fn mouse_actions_round_trip() {
         for v in [
             [1, 0, 0xF0, 0],
@@ -1404,7 +1434,7 @@ mod tests {
         d.apply(&Change::KeyMap {
             layer: 1,
             key: q,
-            action: KeyAction::Code(0x0000_2900),
+            action: KeyAction::Code(0x29),
         })
         .unwrap();
         let key = d.link.ch.mock_sent().pop().unwrap();
