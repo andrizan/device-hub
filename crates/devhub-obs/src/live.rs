@@ -240,22 +240,6 @@ impl Poller {
     }
 }
 
-/// Poller shared by all sources (HID polling stays at one even with 3 sources registered).
-/// It lives as long as the module, so it is never stopped.
-pub fn shared() -> &'static Mutex<Live> {
-    static S: std::sync::OnceLock<Arc<Mutex<Live>>> = std::sync::OnceLock::new();
-    S.get_or_init(|| {
-        let shared = Arc::new(Mutex::new(Live {
-            status: "Starting…".into(),
-            ..Live::default()
-        }));
-        let (s2, st2) = (shared.clone(), Arc::new(AtomicBool::new(false)));
-        let _ = std::thread::Builder::new()
-            .name("devhub-obs-poll".into())
-            .spawn(move || loop_body(&s2, &st2));
-        shared
-    })
-}
 
 impl Drop for Poller {
     fn drop(&mut self) {
@@ -263,5 +247,75 @@ impl Drop for Poller {
         if let Some(j) = self.join.take() {
             let _ = j.join();
         }
+    }
+}
+
+/// Poller shared by all sources (HID polling stays at one even with 3 sources registered).
+/// When the last holder drops, stop the worker and join it — so HID reads don't keep
+/// running after all sources are removed or the DLL is unloaded.
+struct Pool {
+    live: Arc<Mutex<Live>>,
+    stop: Arc<AtomicBool>,
+    join: Mutex<Option<std::thread::JoinHandle<()>>>,
+}
+
+impl Pool {
+    fn spawn() -> Arc<Self> {
+        let live = Arc::new(Mutex::new(Live {
+            status: "Starting…".into(),
+            ..Live::default()
+        }));
+        let stop = Arc::new(AtomicBool::new(false));
+        let (s2, st2) = (live.clone(), stop.clone());
+        let join = std::thread::Builder::new()
+            .name("devhub-obs-poll".into())
+            .spawn(move || loop_body(&s2, &st2))
+            .ok();
+        Arc::new(Self {
+            live,
+            stop,
+            join: Mutex::new(join),
+        })
+    }
+}
+
+impl Drop for Pool {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(j) = self.join.lock().unwrap().take() {
+            let _ = j.join();
+        }
+    }
+}
+
+static POOL: Mutex<std::sync::Weak<Pool>> = Mutex::new(std::sync::Weak::new());
+
+/// Handle holding the shared poller. The worker stays alive as long as a strong reference exists.
+pub struct LiveRef(Arc<Pool>);
+
+impl LiveRef {
+    /// Snapshot read by the drawing side.
+    pub fn live(&self) -> &Mutex<Live> {
+        &self.0.live
+    }
+}
+
+/// Acquire the shared poller — bump the refcount if a pool exists,
+/// otherwise start one. Dropping all `LiveRef`s stops the worker.
+pub fn shared() -> LiveRef {
+    let mut slot = POOL.lock().unwrap();
+    if let Some(p) = slot.upgrade() {
+        return LiveRef(p);
+    }
+    let p = Pool::spawn();
+    *slot = Arc::downgrade(&p);
+    LiveRef(p)
+}
+
+/// Safety net on DLL unload — if a pool is running, only set the stop flag
+/// (normally already stopped once all sources are closed).
+pub fn shutdown() {
+    if let Some(p) = POOL.lock().unwrap().upgrade() {
+        p.stop.store(true, Ordering::Relaxed);
     }
 }

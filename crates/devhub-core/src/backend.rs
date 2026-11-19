@@ -10,7 +10,7 @@
 //! - Methods of the same driver are never called **concurrently** (one worker).
 //!   However, `HubBackend::scan` is called in parallel from another (polling) thread.
 //! - `apply` arrives continuously while a slider is being dragged. The UI drops stale changes
-//!   to the same target before sending (`Change::same_target`), so drivers need no throttling.
+//!   to the same target before sending (`Change::is_superseded_by`), so drivers need no throttling.
 //! - Errors are `HubError`. The UI shows the Display string as-is in a toast.
 
 use crate::model::*;

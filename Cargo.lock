@@ -1290,10 +1290,18 @@ version = "0.1.0"
 dependencies = [
  "devhub-core",
  "devhub-hid",
+ "devhub-polling",
  "fontdue",
  "image",
  "serde",
  "serde_json",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "devhub-polling"
+version = "0.1.0"
+dependencies = [
  "windows-sys 0.61.2",
 ]
 
@@ -1308,11 +1316,12 @@ dependencies = [
 
 [[package]]
 name = "device-hub"
-version = "0.2.6"
+version = "0.3.0"
 dependencies = [
  "devhub-core",
  "devhub-hid",
  "devhub-obs",
+ "devhub-polling",
  "devhub-update",
  "fontdue",
  "futures",

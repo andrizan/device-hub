@@ -166,13 +166,11 @@ fn main() {
     let mut f = [0u8; 16];
     f[0] = 4; // battery
     if let Some(r) = cmd(&d, &f) {
-        let mv = ((r[7] as u16) << 8) | r[8] as u16;
         println!(
-            "op04 battery   : {}  -> {}% state={} {}mV",
+            "op04 battery   : {}  -> {}% charging={}",
             hex(&r),
             r[6],
-            r[7] & 0,
-            mv
+            r[7] != 0
         );
         println!("               raw [6]={} [7]={} [8]={}", r[6], r[7], r[8]);
     } else {

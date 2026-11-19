@@ -8,6 +8,7 @@ without leaving a browser (www.mouse.fit / hub.xsyd.top) open. The design is fla
 ```
 crates/devhub-core   contract v2 (model / backend traits) + keys + registry + demo backend   ← boundary between UI and HID
 crates/devhub-hid    real-device drivers (HID)                                                ← backend side
+crates/devhub-polling USBPcap measured polling rate (Target/Snapshot/Capture)                 ← shared by the app and OBS
 crates/device-hub    GPUI frontend (flat design)                                              ← frontend side
 vendor/              gpui-pre with one small patch (spring wheel scrolling)
 docs/NEXT_TASKS.md      what to do next (v4)

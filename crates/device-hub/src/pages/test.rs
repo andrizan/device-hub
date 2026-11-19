@@ -167,13 +167,13 @@ impl Shell {
             .unwrap_or((false, false));
         if is_mouse {
             col = col.child(self.mouse_test(cx));
-            if let Some(c) = self.rate_card(false, cx) {
+            if let Some(c) = self.rate_card(false, window, cx) {
                 col = col.child(c);
             }
         }
         if is_kb {
             col = col.child(self.key_test(window, cx));
-            if let Some(c) = self.rate_card(true, cx) {
+            if let Some(c) = self.rate_card(true, window, cx) {
                 col = col.child(c);
             }
         }
@@ -419,15 +419,34 @@ impl Shell {
         col
     }
 
-    /// Card for the measured polling rate — peak + segment rate + estimated period + line chart.
-    /// With `keyboard=true`, a note "counts only while typing" is shown (the 5-second measurement is mouse only).
-    fn rate_card(&self, keyboard: bool, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let s = self.cur()?;
-        let st = s.poll.clone()?;
+    /// Measured polling rate card — switches the measurement method (OS delivery via Raw Input / USB transfer via USBPcap)
+    /// and shows the values per method. `keyboard=true` offers OS delivery only (measuring key input is Raw Input only).
+    fn rate_card(
+        &mut self,
+        keyboard: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let (id, st) = {
+            let s = self.cur()?;
+            (s.id.clone(), s.poll.clone())
+        };
+        // Measuring USB transfers can be selected only when the Windows USBPcap path is available.
+        let usb_ok = devhub_polling::supported();
+        let method = if keyboard || !usb_ok {
+            0
+        } else {
+            self.meas_method
+        };
+        let st = if keyboard || !usb_ok {
+            st?
+        } else {
+            st.unwrap_or_default()
+        };
         let hist = st.hist.clone();
         let min_gap = st.min_gap_ms;
-        // In the background, Windows 11 restricts raw input delivery so the value drops — not reliable.
-        let bg = !self.last_window_active;
+        // In the background Windows 11 throttles raw input delivery, so the value drops — do not trust it.
+        let bg = !keyboard && !self.last_window_active;
         let p = theme::pal();
         // The big number is the "peak" (the max rate in the moving segment — excludes idle time).
         // The average (1 s) is a lower bound that also mixes in deceleration and stops.
@@ -458,127 +477,538 @@ impl Shell {
         .h(px(64.))
         .w_full();
 
-        // "Measure 5 s" — while measuring, the cursor is pinned inside the window (game style).
-        // The end is handled by the tick in app.rs watching poll_meas_end.
-        let measuring = self.poll_meas_end.is_some();
-        let meas_btn = (!keyboard).then(|| {
-            let label = if measuring { "Measuring…" } else { "Measure 5 s" };
-            ui::button("poll-measure", label, Some("timer"), Btn::Ghost, cx, |this, w, cx| {
-                if this.poll_meas_end.is_some() {
-                    return;
-                }
-                this.poll_meas_end = Some(std::time::Instant::now() + std::time::Duration::from_secs(5));
-                this.poll_meas_result = None;
-                crate::cursor::clip_to_window(w);
-                cx.notify();
-            })
-            .when(measuring, |d| d.opacity(0.5))
-        });
-
-        let mut col = ui::body()
-            .pt(px(8.))
-            .pb(px(14.))
-            .gap(px(6.))
-            .child(
-                div()
-                    .flex()
-                    .items_baseline()
-                    .gap(px(10.))
-                    .child(
-                        ui::big_number(format!("{big:.0} Hz"), 28.)
-                            .when(bg, |d| d.text_color(p.faint)),
-                    )
-                    .child(ui::faint(if bg {
-                        "In the background, so the OS is restricting input — bring this window to the front to measure".to_string()
-                    } else if big < 1. {
-                        if keyboard {
-                            "— press a key to measure".to_string()
-                        } else {
-                            "— move the mouse to measure".to_string()
-                        }
-                    } else if keyboard {
-                        "(key events/s — not the same as the configured polling rate)".to_string()
-                    } else {
-                        let mut s = format!("Peak · average {:.0}", st.hz);
-                        if let Some(seg) = st.seg_hz {
-                            s = format!("{s} · now {seg:.0}");
-                        }
-                        format!("{s} (while moving)")
-                    })),
-            )
-            .child(spark)
-            .when_some(st.gap_stats, |d, (med, p95)| {
-                // Median-based measurement — more robust against dropped events than counts per second.
-                // If 8K is working it shows up near ~0.125ms (=8000Hz).
-                let mut line = format!("Estimated interval {med:.3} ms → ~{:.0} Hz", 1000. / med);
-                if let Some(g) = min_gap {
-                    line = format!("{line} · min {g:.2} ms");
-                }
-                if p95 > med * 2. {
-                    line = format!("{line} · p95 {p95:.2} ms (high variance)");
-                }
-                d.child(ui::faint(line))
-            })
-            .when(st.gap_stats.is_none(), |d| {
-                d.when_some(min_gap, |d, g| {
-                    d.child(ui::faint(format!(
-                        "{}{:.2} ms → ~{:.0} Hz equivalent",
-                        if keyboard {
-                            "Min event interval "
-                        } else {
-                            "Min report interval "
+        // "Measure for 5 s" — the cursor is clipped to the window while measuring (game-style).
+        // The end is handled by the tick in app.rs, which watches poll_trial.
+        let measuring = self
+            .poll_trial
+            .as_ref()
+            .is_some_and(|(_, tid, ..)| tid == &id);
+        let usb_running = self.usb_cap.as_ref().is_some_and(|(cid, _)| cid == &id);
+        let usb_busy = self.usb_cap.as_ref().is_some_and(|(cid, _)| cid != &id);
+        let meas_btn = if method == 1 {
+            if usb_running {
+                Some(
+                    ui::button(
+                        "usb-stop",
+                        "Stop",
+                        Some("square"),
+                        Btn::Ghost,
+                        cx,
+                        |this, _, cx| {
+                            this.usb_stop();
+                            cx.notify();
                         },
-                        g,
-                        1000. / g
-                    )))
-                })
-            });
-        // Upper-limit diagnosis from motion amount — counts/s ≈ the upper limit reachable at this speed and DPI.
-        // If most are ±1 count, the DPI or speed is insufficient and reports are being thinned out.
-        if !keyboard {
-            col = col.when_some(st.counts_per_sec, |d, c| {
-                let mut line = format!("Motion {c:.0}/s → upper limit at this speed and DPI ≈ {c:.0} Hz");
-                if st.low_frac.is_some_and(|f| f > 0.5) {
-                    line = format!("{line} (about 1 count per report — raise DPI and move faster to push it higher)");
-                }
-                d.child(ui::faint(line))
-            });
-        }
-        // Guidance while measuring / result.
-        if measuring {
-            let left = self
-                .poll_meas_end
-                .map(|e| e.saturating_duration_since(std::time::Instant::now()).as_secs_f32())
-                .unwrap_or(0.);
-            col = col.child(
-                div()
-                    .text_size(px(12.))
-                    .text_color(p.accent)
-                    .child(format!("Measuring — the cursor is pinned inside the window. Draw fast, large circles in the window ({left:.1} s left)")),
-            );
-        } else if let Some((peak, med, cnt)) = self.poll_meas_result {
-            let mut line = format!("Measurement result: peak {peak:.0} Hz");
-            if med > 0. {
-                line = format!("{line} · median interval {med:.3} ms (~{:.0} Hz)", 1000. / med);
+                    )
+                    .into_any_element(),
+                )
+            } else if usb_busy {
+                None
+            } else {
+                Some(
+                    ui::button(
+                        "usb-start",
+                        "Start",
+                        Some("play"),
+                        Btn::Ghost,
+                        cx,
+                        |this, _, cx| {
+                            this.usb_start();
+                            cx.notify();
+                        },
+                    )
+                    .into_any_element(),
+                )
             }
-            if cnt > 0. {
-                line = format!("{line} · motion {cnt:.0}/s");
-            }
-            col = col.child(div().text_size(px(12.)).text_color(p.accent).child(line));
-        }
-        col = col.child(ui::faint(if keyboard {
-            "Measured from keyboard input reports that reached the OS. A report arrives each time the key state changes, so only typing is counted (polling while idle never reaches the OS)."
         } else {
-            "Measured from input reports that reached the OS (Raw Input). A mouse only sends reports for movement, so \"Peak\" is the value closest to the actual polling rate. For an accurate reading, set DPI to 3200 or higher and draw fast, large circles."
-        }));
+            (!keyboard)
+                .then(|| {
+                    let label = if measuring {
+                        "Measuring…"
+                    } else {
+                        "Measure for 5 s"
+                    };
+                    ui::button(
+                        "poll-measure",
+                        label,
+                        Some("timer"),
+                        Btn::Ghost,
+                        cx,
+                        |this, w, cx| {
+                            if this.poll_trial.is_some() {
+                                return;
+                            }
+                            let Some(device) = this.cur() else { return };
+                            let start = Instant::now();
+                            let end = start + std::time::Duration::from_secs(5);
+                            this.poll_trial =
+                                Some((end, device.id.clone(), device.info.vid, device.info.pid));
+                            crate::rawinput::begin_trial(start, end);
+                            this.poll_meas_result = None;
+                            crate::cursor::clip_to_window(w);
+                            cx.notify();
+                        },
+                    )
+                    .when(measuring, |d| d.opacity(0.5))
+                })
+                .map(|b| b.into_any_element())
+        };
+
+        let mut col = ui::body().pt(px(8.)).pb(px(14.)).gap(px(6.));
+        // Switch the measurement method (USB transfer only when the Windows USBPcap path is available).
+        if !keyboard && usb_ok {
+            col = col.child(ui::segmented(
+                "meas-method",
+                &[
+                    "OS delivery (Raw Input)".to_string(),
+                    "USB transfer (USBPcap)".to_string(),
+                ],
+                method,
+                cx,
+                |this, i, _| this.meas_method = i,
+            ));
+        }
+        if method == 1 {
+            col = self.usb_rate_body(col, &id, window, cx);
+        } else {
+            col = col
+                .child(
+                    div()
+                        .flex()
+                        .items_baseline()
+                        .gap(px(10.))
+                        .child(
+                            ui::big_number(format!("{big:.0} Hz"), 28.)
+                                .when(bg, |d| d.text_color(p.faint)),
+                        )
+                        .child(ui::faint(if bg {
+                            format!(
+                                "Background: {:.0} reports/s (approximate) · Windows batches input",
+                                st.hz
+                            )
+                        } else if big < 1. {
+                            if keyboard {
+                                "— Press a key to start measuring".to_string()
+                            } else {
+                                "— Move the mouse to start measuring".to_string()
+                            }
+                        } else if keyboard {
+                            "(key events/s — not the same as the configured polling rate)".to_string()
+                        } else {
+                            let mut s = format!("Peak · avg {:.0}", st.hz);
+                            if let Some(seg) = st.seg_hz {
+                                s = format!("{s} · now {seg:.0}");
+                            }
+                            format!("{s} (moving segment)")
+                        })),
+                )
+                .child(spark)
+                .when_some(st.gap_stats, |d, (med, p95)| {
+                    // Median-based measurement — more robust against dropped reports than a per-second count.
+                    // With 8K active it lands around ~0.125ms (=8000Hz).
+                    let mut line = format!("Median delivery interval {med:.3} ms → ~{:.0} Hz", 1000. / med);
+                    if let Some(g) = min_gap {
+                        line = format!("{line} · min {g:.2} ms");
+                    }
+                    if p95 > med * 2. {
+                        line = format!("{line} · p95 {p95:.2} ms (high jitter)");
+                    }
+                    d.child(ui::faint(line))
+                })
+                .when(st.gap_stats.is_none(), |d| {
+                    d.when_some(min_gap, |d, g| {
+                        d.child(ui::faint(format!(
+                            "{}{:.2} ms → ~{:.0} Hz equivalent",
+                            if keyboard {
+                                "Min event interval "
+                            } else {
+                                "Min report interval "
+                            },
+                            g,
+                            1000. / g
+                        )))
+                    })
+                });
+            // Movement-based upper-bound diagnostic — counts/s ≈ the cap reachable at this speed and DPI.
+            // If most reports are ±1 count, DPI or speed is too low and reports are being thinned out.
+            if !keyboard {
+                col = col.when_some(st.counts_per_sec, |d, c| {
+                    let mut line = format!("Movement {c:.0}/s → cap at this speed and DPI: ~{c:.0} Hz");
+                    if st.low_frac.is_some_and(|f| f > 0.5) {
+                        line = format!(
+                            "{line} (about 1 count per report — raise DPI and move faster to go higher)"
+                        );
+                    }
+                    d.child(ui::faint(line))
+                });
+            }
+            // Guidance / result while measuring.
+            if measuring {
+                let left = self
+                    .poll_trial
+                    .as_ref()
+                    .map(|(e, ..)| {
+                        e.saturating_duration_since(std::time::Instant::now())
+                            .as_secs_f32()
+                    })
+                    .unwrap_or(0.);
+                col = col.child(
+                    div()
+                        .text_size(px(12.))
+                        .text_color(p.accent)
+                        .child(format!("Measuring — the cursor is locked inside the window. Draw fast, large circles inside it ({left:.1} s left)")),
+                );
+            } else if let Some((_, result)) =
+                self.poll_meas_result.as_ref().filter(|(rid, _)| rid == &id)
+            {
+                let mut line = match result.peak_hz {
+                    Some(peak) => format!("Result: peak {peak:.0} Hz"),
+                    None => "Result: no continuous movement of 100 ms or more was detected".to_string(),
+                };
+                if let Some((med, _)) = result.gap_stats {
+                    line = format!("{line} · latest median delivery interval {med:.3} ms");
+                }
+                if let Some(cnt) = result.counts_per_sec {
+                    line = format!("{line} · movement {cnt:.0}/s");
+                }
+                col = col.child(div().text_size(px(12.)).text_color(p.accent).child(line));
+            }
+            // If USB measurement is running behind the scenes, tell the user they can return to it by switching methods.
+            if usb_running {
+                col = col.child(ui::faint(
+                    "USB measurement is running — choose \"USB transfer\" to see the current value and stop it",
+                ));
+            }
+            col = col.child(ui::faint(if keyboard {
+                "Measured from keyboard input reports that reached the OS. A report arrives each time the key state changes, so only typing is counted (idle polling never reaches the OS)."
+            } else {
+                "Source: OS delivery (Raw Input). A mouse only sends reports while it moves, so \"Peak\" is the value closest to the real polling rate. For an accurate reading, set DPI to 3200 or higher and draw fast, large circles."
+            }));
+        }
         Some(
-            ui::card_titled("Polling rate measurement", "gauge", meas_btn.map(|b| b.into_any_element()))
+            ui::card_titled("Measured polling rate", "gauge", meas_btn)
                 .child(col)
                 .into_any_element(),
         )
     }
 
-    /// The "Button press depth" card — left/right vertical bars + stats + a line chart of the last 5 s.
+    /// USB transfer (USBPcap) panel — manual target entry, current value, peak over the period, and the reason for errors.
+    fn usb_rate_body(
+        &mut self,
+        mut col: Div,
+        id: &DeviceId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        use devhub_polling::Status;
+        let p = theme::pal();
+        if self.usb_cap.as_ref().is_some_and(|(cid, _)| cid == id) {
+            // While measuring: live current value and peak over the period (a game etc. may be in the foreground).
+            let (target, snap) = self
+                .usb_cap
+                .as_ref()
+                .map(|(_, c)| (c.target, self.usb_snap.unwrap_or_else(|| c.snapshot())))
+                .unwrap();
+            let (big, note) = match snap.status {
+                Status::Waiting => (
+                    "Waiting".to_string(),
+                    "No transfers from the target yet — operate the target device".to_string(),
+                ),
+                Status::Live => (
+                    format!("{} Hz", snap.hz),
+                    if snap.hz == 0 {
+                        "No transfers in the last 1 s (idle)".to_string()
+                    } else {
+                        "USB transfers in the last 1 s".to_string()
+                    },
+                ),
+                st => (usb_status_reason(st).0, String::new()),
+            };
+            return col
+                .child(
+                    div()
+                        .flex()
+                        .items_baseline()
+                        .gap(px(10.))
+                        .child(ui::big_number(big, 28.))
+                        .when(!note.is_empty(), |d| d.child(ui::faint(note))),
+                )
+                .child(ui::faint(format!(
+                    "Target: {} · period peak {} Hz (sustained 1 s)",
+                    target_spec(&target),
+                    snap.peak_hz
+                )))
+                .child(ui::faint(
+                    "Source: USB transfer (USBPcap). Keeps running when the window is minimized — put a game or another app in the foreground and use the device (measurement stops when you quit).",
+                ));
+        }
+        if self.usb_cap.as_ref().is_some_and(|(cid, _)| cid != id) {
+            let name = self
+                .usb_cap
+                .as_ref()
+                .and_then(|(cid, _)| self.hub.session(cid))
+                .map(|s| s.info.name.clone())
+                .unwrap_or_else(|| "another device".into());
+            return col.child(ui::faint(format!(
+                "USB measurement is running on {name} — stop it from that device's screen"
+            )));
+        }
+        // Target device picker — choose by product name or connection location. Enumeration needs no privileges and is
+        // loaded on first display. Hub number and USB address are filled in automatically from the selection
+        // (re-resolved with "Refresh" after replugging or a port change). Manual entry also stays below.
+        if self.usb_devs.is_none() {
+            self.usb_refresh();
+        }
+        let t = self.usb_target;
+        if let Some(devs) = self.usb_devs.as_ref().filter(|v| !v.is_empty()) {
+            let mut order: Vec<usize> = (0..devs.len()).collect();
+            order.sort_by_key(|&i| !devs[i].is_mouse);
+            let pick = self.prefs.usb_pick.clone();
+            // Normally show only devices with HID input (mouse-type collections).
+            // Others, and those that could not be matched to a hub, are folded under "Other" — a nested
+            // vertical scroll would conflict with the page's vertical scroll, so it is collapsible instead.
+            let hidden = order
+                .iter()
+                .filter(|&&i| {
+                    !devs[i].is_mouse
+                        && !devs[i].instance_id.eq_ignore_ascii_case(&pick)
+                })
+                .count();
+            let show_all = self.usb_show_all;
+            let mut list = div().id("usb-dev-list").flex().flex_col().gap(px(3.));
+            for i in order {
+                let d = &devs[i];
+                if !show_all && !d.is_mouse && !d.instance_id.eq_ignore_ascii_case(&pick) {
+                    continue;
+                }
+                let sel = !pick.is_empty() && d.instance_id.eq_ignore_ascii_case(&pick);
+                let mut row = div()
+                    .id(format!("usbdev-{i}"))
+                    .flex()
+                    .items_center()
+                    .gap(px(10.))
+                    .px(px(10.))
+                    .py(px(5.))
+                    .rounded(px(theme::R_CTRL))
+                    .border_1()
+                    .border_color(if sel {
+                        p.accent
+                    } else {
+                        theme::alpha(p.fg, 0.08)
+                    })
+                    .when(sel, |d| d.bg(theme::alpha(p.accent, 0.08)))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(div().text_size(px(12.)).child(d.name.clone()))
+                            .child(ui::faint(format!(
+                                "{:04x}:{:04x} · {}",
+                                d.vid, d.pid, d.location
+                            ))),
+                    )
+                    .child(ui::faint(if d.hub == 0 {
+                        "Hub unknown — enter manually".to_string()
+                    } else {
+                        format!("USBPcap{} addr {}", d.hub, d.address)
+                    }));
+                if d.hub != 0 {
+                    row = row.cursor_pointer().when(!sel, |d| {
+                        d.hover(|s| s.bg(p.ctrl))
+                    });
+                } else {
+                    row = row.opacity(0.55);
+                }
+                list = list.child(row.on_click(cx.listener(move |this, _, _, cx| {
+                    this.usb_pick_device(i);
+                    cx.notify();
+                })));
+            }
+            if hidden > 0 {
+                let toggle = if show_all {
+                    format!("Hide other devices ({hidden})")
+                } else {
+                    format!("Show other devices ({hidden})")
+                };
+                list = list.child(
+                    div()
+                        .id("usb-dev-more")
+                        .cursor_pointer()
+                        .px(px(10.))
+                        .py(px(4.))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.usb_show_all = !this.usb_show_all;
+                            cx.notify();
+                        }))
+                        .child(ui::faint(toggle)),
+                );
+            }
+            col = col
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .child(ui::faint("Target device".to_string()))
+                        .child(ui::button(
+                            "usb-dev-refresh",
+                            "Refresh",
+                            Some("refresh-cw"),
+                            Btn::Ghost,
+                            cx,
+                            |this, _, cx| {
+                                this.usb_refresh();
+                                cx.notify();
+                            },
+                        )),
+                )
+                .child(list);
+        }
+        // EP auto-detect — count the target's interrupt IN transfers for 3 s and pick the EP with the most.
+        // Opens the hub for read/write, so it needs privileges (same as measuring).
+        let scanning = self.usb_scan.is_some();
+        col = col
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(10.))
+                    .child(ui::button(
+                        "usb-ep-scan",
+                        if scanning { "Detecting…" } else { "Auto-detect EP" },
+                        Some("search"),
+                        Btn::Ghost,
+                        cx,
+                        |this, _, cx| {
+                            this.usb_detect_ep();
+                            cx.notify();
+                        },
+                    ))
+                    .child(ui::faint(if scanning {
+                        "Operate the target device (3 s)".to_string()
+                    } else {
+                        "Picks the EP with the most transfers".to_string()
+                    })),
+            )
+            .when_some(self.usb_scan_msg.as_ref(), |d, m| {
+                d.child(ui::faint(m.clone()))
+            });
+        let hub_in = self.num_field(
+            "usb-hub",
+            t.hub as f32,
+            1.,
+            255.,
+            1.,
+            "",
+            window,
+            cx,
+            Rc::new(|this, v, _| {
+                this.prefs.usb_pick.clear();
+                this.usb_target.hub = v as u16;
+                this.prefs.usb_hub = this.usb_target.hub;
+                this.prefs.save();
+            }),
+        );
+        let addr_in = self.num_field(
+            "usb-addr",
+            t.device as f32,
+            1.,
+            127.,
+            1.,
+            "",
+            window,
+            cx,
+            Rc::new(|this, v, _| {
+                this.prefs.usb_pick.clear();
+                this.usb_target.device = v as u8;
+                this.prefs.save();
+            }),
+        );
+        let ep_in = self.num_field(
+            "usb-ep",
+            (t.endpoint & 0x7f) as f32,
+            1.,
+            15.,
+            1.,
+            "",
+            window,
+            cx,
+            Rc::new(|this, v, _| {
+                this.usb_target.endpoint = 0x80 | v as u8;
+                this.prefs.usb_ep = v as u8;
+                this.prefs.save();
+            }),
+        );
+        let rid_in = self.num_field(
+            "usb-rid",
+            t.report.map_or(-1., |r| r as f32),
+            -1.,
+            255.,
+            1.,
+            "",
+            window,
+            cx,
+            Rc::new(|this, v, _| {
+                this.usb_target.report = if v < 0. { None } else { Some(v as u8) };
+                this.prefs.usb_report = v as i16;
+                this.prefs.save();
+            }),
+        );
+        let field = |label: &str, e: &Entity<gpui_kit::component::input::InputState>| {
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(4.))
+                .child(ui::faint(label.to_string()))
+                .child(
+                    div()
+                        .w(px(72.))
+                        .child(gpui_kit::component::input::Input::new(e)),
+                )
+        };
+        col = col
+            .child(
+                div()
+                    .flex()
+                    .gap(px(14.))
+                    .child(field("Hub number", &hub_in))
+                    .child(field("USB address", &addr_in))
+                    .child(field("IN EP number", &ep_in))
+                    .child(field("Report ID", &rid_in)),
+            )
+            .child(ui::faint(
+                "Check the target values in the USBPcap or Wireshark capture settings. EP is the number only (0x81 → 1); Report ID -1 means all. The address changes when you replug.",
+            ));
+        // Latest result (tied to the device that started it — changing the selection does not carry it over to another unit).
+        if let Some((_, target, snap)) = self.usb_result.as_ref().filter(|(rid, ..)| rid == id) {
+            if snap.status.is_error() {
+                let (reason, hint) = usb_status_reason(snap.status);
+                col = col
+                    .child(div().text_size(px(12.)).text_color(p.danger).child(reason))
+                    .when(!hint.is_empty(), |d| d.child(ui::faint(hint.to_string())));
+            } else {
+                col = col.child(
+                    div()
+                        .text_size(px(12.))
+                        .text_color(p.accent)
+                        .child(format!("Result: peak {} Hz (sustained 1 s)", snap.peak_hz)),
+                );
+            }
+            let name = self
+                .hub
+                .session(id)
+                .map(|s| s.info.name.clone())
+                .unwrap_or_default();
+            col = col.child(ui::faint(format!(
+                "Target: {name} — {} · source: USB transfer (USBPcap)",
+                target_spec(target)
+            )));
+        }
+        col.child(ui::faint(
+            "Source: USB transfer (USBPcap) — counts completed device→PC interrupt IN transfers over the last 1 s. Not subject to OS delivery limits, so you can measure with a game in the foreground.",
+        ))
+    }
+
+    /// "Button press depth" card — left/right vertical bars + stats + a line chart of the last 5 s.
     fn btn_depth_card(&mut self, live_slots: &[usize]) -> AnyElement {
         let p = theme::pal();
         let names: Vec<String> = live_slots
@@ -896,5 +1326,49 @@ impl Shell {
                 .when(!unknown.is_empty(), |d| d.child(ui::faint(format!("Keys not in the diagram: {}", unknown.join(" "))))),
         )
         .into_any_element()
+    }
+}
+
+/// Short display of the USB measurement target ("USBPcap2 addr 2 · EP 0x81 · ID 3").
+fn target_spec(t: &devhub_polling::Target) -> String {
+    let mut s = format!(
+        "USBPcap{} addr {} · EP 0x{:02X}",
+        t.hub, t.device, t.endpoint
+    );
+    if let Some(r) = t.report {
+        s = format!("{s} · ID {r}");
+    }
+    s
+}
+
+/// Error status → (reason, guidance on what to use instead). The OS code is kept too.
+fn usb_status_reason(st: devhub_polling::Status) -> (String, &'static str) {
+    use devhub_polling::Status::*;
+    let os = |o: Option<i32>| o.map(|c| format!(" (OS error {c})")).unwrap_or_default();
+    match st {
+        DriverMissing { os: o } => (
+            format!(
+                "USBPcap not found — the driver is not installed or the hub number is wrong{}",
+                os(o)
+            ),
+            "Install USBPcap and restart, or estimate with the \"OS delivery\" method",
+        ),
+        AccessDenied { os: o } => (
+            format!("Cannot open the hub: insufficient privileges{}", os(o)),
+            "Restart Device HUB as administrator, or use the \"OS delivery\" method",
+        ),
+        HubBusy { os: o } => (
+            format!("Another process is measuring the same hub{}", os(o)),
+            "Stop OBS's USB source or TShark/USBPcapCMD, then start again",
+        ),
+        Disconnected { os: o } => (
+            format!("The capture was disconnected{}", os(o)),
+            "The USB address may change when you replug — check the target and start again",
+        ),
+        Failed { os: o } => (
+            format!("USB capture failed{}", os(o)),
+            "Check the target values and start again",
+        ),
+        _ => (String::new(), ""),
     }
 }

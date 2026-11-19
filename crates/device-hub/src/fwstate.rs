@@ -46,10 +46,7 @@ impl FwState {
             let _ = std::fs::create_dir_all(dir);
         }
         if let Ok(s) = serde_json::to_string_pretty(self) {
-            let tmp = p.with_extension("json.tmp");
-            if std::fs::write(&tmp, s).is_ok() {
-                let _ = std::fs::rename(&tmp, &p);
-            }
+            let _ = crate::atomic::write(&p, &s);
         }
     }
 

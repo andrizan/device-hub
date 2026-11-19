@@ -7,6 +7,8 @@ USB DACs — no browser required. Replaces keeping the vendor web configurators
 Built with [GPUI](https://github.com/zed-industries/zed) (Zed's GPU UI framework)
 with a flat design that keeps CPU and GPU use low.
 
+[How to install the Windows build, measure over USB and stream with OBS](docs/QUICKSTART.md)
+
 ![Device HUB](docs/screenshot.png)
 
 ## Features
@@ -82,6 +84,7 @@ crates/devhub-core    contract: capabilities, device model, backend traits, regi
 crates/devhub-hid     Windows HID drivers (mouse.fit report-8/EEPROM, xsyd)
 crates/device-hub     GPUI frontend (flat design)
 crates/devhub-obs     OBS source plugin + CPU renderer
+crates/devhub-polling shared USBPcap polling-rate meter (app + OBS)
 crates/devhub-update  firmware update notifications
 vendor/               gpui-pre with a small patch (spring wheel scrolling)
 docs/                 protocol notes, frontend structure, OBS overlay, add-device guide

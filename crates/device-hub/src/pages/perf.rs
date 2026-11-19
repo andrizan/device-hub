@@ -219,17 +219,36 @@ impl Shell {
         let labels: Vec<String> = options.iter().map(|o| o.label.clone()).collect();
         let sel = cur.and_then(|c| options.iter().position(|o| o.value == c));
         let (sp2, opts) = (sp.clone(), options.clone());
-        // Measured (Raw Input).
-        let live = self.cur().and_then(|s| s.poll.clone()).map(|st| {
+        // Measured (Raw Input). While USB measurement runs, the same snapshot is shown alongside, labeled with its source.
+        let live = self.cur().and_then(|s| s.poll.as_ref()).map(|st| {
             let v = st.peak_hz.or(st.seg_hz).unwrap_or(st.hz);
             if !self.last_window_active {
-                "Measured: limited by the OS in the background".to_string()
+                format!("Background: {:.0} reports/s (approximate)", st.hz)
             } else if v < 1. {
                 "Measured: move the mouse to see it".to_string()
             } else {
                 format!("Measured peak {v:.0} Hz")
             }
         });
+        let live = match self.cur().and_then(|s| {
+            self.usb_cap
+                .as_ref()
+                .filter(|(cid, _)| cid == &s.id)
+                .map(|(_, c)| self.usb_snap.unwrap_or_else(|| c.snapshot()))
+        }) {
+            Some(snap) => {
+                let u = match snap.status {
+                    devhub_polling::Status::Waiting => "USB measurement: waiting".to_string(),
+                    devhub_polling::Status::Live => format!("USB measured {} Hz", snap.hz),
+                    _ => "USB measurement: stopped".to_string(),
+                };
+                Some(match live {
+                    Some(l) => format!("{l} · {u}"),
+                    None => u,
+                })
+            }
+            None => live,
+        };
         let body = div()
             .flex()
             .flex_col()

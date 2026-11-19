@@ -511,7 +511,18 @@ impl Fonts<'_> {
     }
 }
 
-/// The same Geist as Device HUB is bundled for Latin text (169KB).
+pub(crate) const RATE_WIDTH: u32 = 360;
+pub(crate) const RATE_HEIGHT: u32 = 72;
+
+pub(crate) fn usb_rate_label(label: &str) -> Pix {
+    let mut p = Pix::new(RATE_WIDTH, RATE_HEIGHT);
+    p.rrect(2., 2., 356., 68., 18., [18, 25, 37, 220]);
+    let fonts = Fonts { latin: latin(), jp: None };
+    p.text_fit(&fonts, 180., 36., 324., 36., [190, 236, 255, 255], label);
+    p
+}
+
+/// Bundle the same Geist as Device HUB for Latin text (169KB).
 fn latin() -> Option<&'static fontdue::Font> {
     static F: std::sync::OnceLock<Option<fontdue::Font>> = std::sync::OnceLock::new();
     F.get_or_init(|| {

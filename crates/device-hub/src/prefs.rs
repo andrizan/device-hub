@@ -34,6 +34,28 @@ pub struct Prefs {
     /// Process watch rules (apply a profile in step with the foreground app).
     #[serde(default)]
     pub proc_rules: Vec<ProcRule>,
+    /// Manually entered target for USB measurement (USBPcap): hub number, IN EP number, Report ID (-1 = all).
+    /// The USB address changes on every connection, so it is not saved.
+    #[serde(default = "default_usb_hub")]
+    pub usb_hub: u16,
+    #[serde(default = "default_usb_ep")]
+    pub usb_ep: u8,
+    #[serde(default = "default_usb_report")]
+    pub usb_report: i16,
+    /// Product selection for the USB target: PnP instance ID (`USB\VID_xxxx&PID_yyyy\<serial>`).
+    /// Used to re-resolve the target even when the address changes after a reconnect or port change.
+    #[serde(default)]
+    pub usb_pick: String,
+}
+
+fn default_usb_hub() -> u16 {
+    1
+}
+fn default_usb_ep() -> u8 {
+    1
+}
+fn default_usb_report() -> i16 {
+    -1
 }
 
 /// Settings profile — applies by replaying the recorded `Change`s in order.
@@ -134,6 +156,10 @@ impl Default for Prefs {
             livefx: Default::default(),
             profiles: vec![],
             proc_rules: vec![],
+            usb_hub: default_usb_hub(),
+            usb_ep: default_usb_ep(),
+            usb_report: default_usb_report(),
+            usb_pick: String::new(),
         }
     }
 }
@@ -159,10 +185,7 @@ impl Prefs {
             let _ = std::fs::create_dir_all(dir);
         }
         if let Ok(s) = serde_json::to_string_pretty(self) {
-            let tmp = p.with_extension("json.tmp");
-            if std::fs::write(&tmp, s).is_ok() {
-                let _ = std::fs::rename(&tmp, &p);
-            }
+            let _ = crate::atomic::write(&p, &s);
         }
     }
 

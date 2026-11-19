@@ -1,11 +1,36 @@
 # Device HUB Live: OBS overlay
 
 - When the displayed keys are narrowed down, empty rows and gaps within rows are closed up. With all keys shown, the original physical layout is kept.
-- On a key, `FT` is first travel, `AP` is the actuation point (the re-ON amount for RT), and `R` is reset. The unit is mm. Normal keys show `AP` / `R`; with Rapid Trigger they show `FT` / `AP` / `R`. The values are read when the target device is detected.
-- ~~The mouse Hz chip~~ was removed (Windows 11 restricts raw input delivery to background processes, so when OBS was in the background at delivery time the value could not be trusted). Check the measured polling rate on the app's Performance / Test screen while it is in the foreground.
-- Magnetic buttons use a display with bars that distinguishes the current depth, the trigger position (% of the stroke), and the RT sensitivity (`OFF` when disabled).
+- For keys, `FT` is first travel, `AP` is the actuation point (the re-ON amount with RT), and `R` is reset. The unit is mm. Normal keys show `AP` / `R`, and Rapid Trigger shows `FT` / `AP` / `R`. The values are read when the target device is detected.
+- To overlay the measured Hz of a USB mouse, see "Live USB rate display" below.
+- Magnetic buttons use a bar display that distinguishes the current depth, the trigger position (% of the stroke), and the RT sensitivity (`OFF` when disabled).
 
 `cargo build --locked --release -p devhub-obs` produces `target/release/devhub_obs.dll`. To apply it to an existing OBS, close OBS, replace the installed DLL, and restart OBS. The source's render size changes, so adjust the placement or crop in the scene if needed.
+
+## Live USB rate display
+
+In OBS's "Add Source", choose **Device HUB USB Polling Rate**. The plugin opens the Windows USBPcap driver directly. USBPcap only needs to be installed once. Python, Wireshark, and the text source are not needed while streaming. The measurement code is `crates/devhub-polling` — it gives the same value as the "USB transfer" method on the app's "Test" tab (only 1 process can hold the same hub at a time).
+
+1. Install [USBPcap](https://desowin.org/usbpcap/) and restart as the installer instructs. Start OBS with the updated DLL.
+2. Pick the product from the "Target device (product)" list in the properties — the hub number and USB address are resolved automatically from its current values (after unplugging/replugging or changing ports, stop measuring, select the target again, and resume). For the IN endpoint, enter only the number (0x81 → 1, which is what most mice use). Report ID defaults to -1 (all). If your product is not listed or you want to set it manually, leave the list at "(manual hub/address below)" and enter the hub number and address by hand — you can find them with the [steps for identifying the target USB](POLLING_RATE.md).
+3. Enable "Measure USB input" and move the mouse. It shows the number of successful target transfers in the last 1 second, updated every 250 ms. It shows a waiting display until the first input is received, and 0 Hz while idle after that. With a receiver, it measures the USB transfers to the PC.
+4. If access is denied, start OBS as administrator. Only 1 source can measure the same hub at a time. In other scenes, share it with "Add Existing". Clearing the measurement checkbox or deleting the source releases the hub. After unplugging/replugging, check the address and turn measurement on again.
+
+### Using a text source (legacy path for comparison — normally use the USB source above)
+
+It counts the movement interrupt IN transfers of a wired USB mouse or a 2.4 GHz receiver and passes the count for the last 1 second to OBS's "Text (GDI+)" source. It can be placed freely on top of Device HUB Live. The capture side updates the displayed value every 250 ms, and it is reflected in the stream when OBS reloads the file. For wireless, the observed span is from the receiver to the PC. USB polling attempts while idle are not included in the count.
+
+1. Prepare Python 3.8 or later and USBPcap on Windows, and identify the target with [the steps for checking the USB device and endpoint](POLLING_RATE.md).
+2. Run the following in an administrator PowerShell at the repository root. In the example, 1, 5, and 0x81 are the USBPcap number, the USB address, and the mouse movement IN endpoint, respectively. If several functions share the same endpoint, specify the Report ID you confirmed for the mouse with `--report-id`.
+
+   ```powershell
+   python .\scripts\obs-usb-rate.py --hub 1 --device 5 --endpoint 0x81
+   ```
+
+3. In OBS, choose "Sources" → "+" → "Text (GDI+)", select "Read from file", and specify the absolute path of `obs_usb_rate.txt` shown in the console. Even after you switch to the game, it keeps updating while the script is running.
+4. Until the first target input it shows `USB  -- Hz`; if no input arrives for 1 second or more after receiving, it shows `USB  0 Hz`. Quitting with Ctrl+C returns it to the waiting display. If the USB address changed after reconnecting, restart with the new value.
+
+[USBPcap capture format](https://desowin.org/usbpcap/captureformat.html) / [OBS text sources](https://obsproject.com/kb/text-sources)
 
 ## Standalone use (no Device HUB app needed, OSS distribution)
 

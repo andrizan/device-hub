@@ -42,7 +42,17 @@ fn file_name(name: &str) -> String {
             }
         })
         .collect();
-    format!("{}.json", s.trim())
+    let s = s.trim();
+    // When replacing invalid characters merges distinct names ("a/b" and "a\b" → "a_b"),
+    // append a hash of the original name to prevent an unintended overwrite.
+    if s == name.trim() {
+        format!("{s}.json")
+    } else {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        name.hash(&mut h);
+        format!("{s}-{:08x}.json", h.finish() as u32)
+    }
 }
 
 pub fn list(model: &str) -> Vec<Preset> {
@@ -73,7 +83,7 @@ pub fn save(model: &str, name: &str, st: &DeviceState) -> Result<(), String> {
     let d = dir(model).ok_or("Save location not found")?;
     std::fs::create_dir_all(&d).map_err(|e| e.to_string())?;
     let s = serde_json::to_string_pretty(st).map_err(|e| e.to_string())?;
-    std::fs::write(d.join(file_name(name)), s).map_err(|e| e.to_string())
+    crate::atomic::write(&d.join(file_name(name)), &s).map_err(|e| e.to_string())
 }
 
 pub fn load(p: &Preset) -> Result<DeviceState, String> {

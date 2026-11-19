@@ -402,10 +402,31 @@ pub struct Shell {
     /// In the background Windows 11 throttles raw input delivery, so the measured polling
     /// display uses this flag to decide whether the value can be trusted.
     pub(crate) last_window_active: bool,
-    /// End time of the 5-second polling measurement (Some = measuring — cursor pinned).
-    pub(crate) poll_meas_end: Option<std::time::Instant>,
-    /// Latest 5-second measurement result (peak Hz, median interval ms, counts/s).
-    pub(crate) poll_meas_result: Option<(f32, f32, f32)>,
+    /// End time of the 5 s polling measurement (while Some, measuring — cursor locked).
+    pub(crate) poll_trial: Option<(std::time::Instant, DeviceId, u16, u16)>,
+    /// Latest 5 s measurement result (peak Hz, median interval ms, counts/s).
+    pub(crate) poll_meas_result: Option<(DeviceId, crate::rawinput::PollStats)>,
+    /// Measurement method on the test screen (0 = OS-delivered Raw Input, 1 = USB transfer via USBPcap).
+    pub(crate) meas_method: usize,
+    /// Manually entered target for USB measurement. USB addresses change on every connection, so they are not kept in prefs.
+    pub(crate) usb_target: devhub_polling::Target,
+    /// Running USB measurement — tied to the device it was started for
+    /// (so the result does not move to another unit when the selected device changes).
+    pub(crate) usb_cap: Option<(DeviceId, devhub_polling::Capture)>,
+    /// Latest snapshot of `usb_cap` (updated every ~264ms by tick).
+    pub(crate) usb_snap: Option<devhub_polling::Snapshot>,
+    /// Latest USB measurement result — (device, target, final snapshot).
+    pub(crate) usb_result: Option<(DeviceId, devhub_polling::Target, devhub_polling::Snapshot)>,
+    /// Enumeration result of `discover::devices()` (None = not read yet — read on first display).
+    pub(crate) usb_devs: Option<Vec<devhub_polling::UsbDevice>>,
+    /// Channel awaiting completion of the EP auto-detect scan (hub, addr, result).
+    #[allow(clippy::type_complexity)]
+    pub(crate) usb_scan:
+        Option<std::sync::mpsc::Receiver<(u16, u8, std::io::Result<Vec<(u8, u32)>>)>>,
+    /// Result display of the EP scan (detected EP on success, reason on failure).
+    pub(crate) usb_scan_msg: Option<String>,
+    /// Also show non-HID-input devices in the target device list (open/close of "Other").
+    pub(crate) usb_show_all: bool,
 }
 
 /// State to apply after the config switch completes (undo/redo to another config, etc.).
@@ -551,29 +572,20 @@ impl Shell {
                                 this.hub.poll_rate(&id);
                             }
                         }
-                        // End of the 5-second measurement — finalize the result and release the cursor lock.
-                        if this
-                            .poll_meas_end
-                            .is_some_and(|end| std::time::Instant::now() >= end)
-                        {
-                            this.poll_meas_end = None;
+                        // End of the 5 s measurement — finalize the result and release the cursor lock.
+                        if let Some((_, id, vid, pid)) = this.poll_trial.take_if(|(end, ..)| {
+                            std::time::Instant::now() >= *end
+                        }) {
                             crate::cursor::unclip();
-                            if let Some(id) = this.device_id() {
-                                if let Some(st) =
-                                    this.hub.session(&id).and_then(|s| s.poll.clone())
-                                {
-                                    let peak = st
-                                        .segs
-                                        .iter()
-                                        .filter(|s| s.age_s <= 5.5)
-                                        .map(|s| s.rate_hz)
-                                        .chain(st.seg_hz)
-                                        .fold(0f32, f32::max);
-                                    let med = st.gap_stats.map(|(m, _)| m).unwrap_or(0.);
-                                    let cnt = st.counts_per_sec.unwrap_or(0.);
-                                    this.poll_meas_result = Some((peak, med, cnt));
-                                }
-                            }
+                            let stats = crate::rawinput::finish_trial(vid, pid).unwrap_or_default();
+                            this.poll_meas_result = Some((id, stats));
+                            cx.notify();
+                        }
+                        // USB measurement snapshot (~264ms) — pick up an error termination and move it to the result.
+                        if n.is_multiple_of(8)
+                            && (this.usb_cap.is_some() || this.usb_scan.is_some())
+                        {
+                            this.usb_tick();
                             cx.notify();
                         }
                         // Process monitoring (~1s): apply a profile on foreground transitions.
@@ -593,6 +605,13 @@ impl Shell {
         window.focus(&focus, cx);
 
         let route = Route::Home;
+        // USB addresses change on every connection, so they are not restored (hub number, EP, Report ID are in prefs).
+        let usb_target = devhub_polling::Target {
+            hub: prefs.usb_hub.max(1),
+            device: 1,
+            endpoint: 0x80 | prefs.usb_ep.clamp(1, 15),
+            report: u8::try_from(prefs.usb_report).ok(),
+        };
         Self {
             hub,
             prefs,
@@ -652,10 +671,19 @@ impl Shell {
             hwnd: window_hwnd(window),
             #[cfg(windows)]
             mem_low: false,
+            meas_method: 0,
+            usb_target,
+            usb_cap: None,
+            usb_snap: None,
+            usb_result: None,
+            usb_devs: None,
+            usb_scan: None,
+            usb_scan_msg: None,
+            usb_show_all: false,
             #[cfg(windows)]
             mem_ticks: 0,
             last_window_active: true,
-            poll_meas_end: None,
+            poll_trial: None,
             poll_meas_result: None,
         }
     }
@@ -820,7 +848,7 @@ impl Shell {
                 if let Some(p) = self.prefs.profiles.get_mut(pi) {
                     if let Some(t) = p.devices.iter_mut().find(|t| t.device == id.0) {
                         match t.changes.last_mut() {
-                            Some(last) if last.same_target(&change) => *last = change.clone(),
+                            Some(last) if last.is_superseded_by(&change) => *last = change.clone(),
                             _ => t.changes.push(change.clone()),
                         }
                         self.prefs.save();
@@ -2015,4 +2043,140 @@ impl Shell {
 
     #[cfg(not(windows))]
     fn mem_tick(&mut self) {}
+
+    fn usb_resolve_target(&mut self) -> bool {
+        if self.prefs.usb_pick.is_empty() { return true; }
+        let Some(d) = devhub_polling::discover::resolve(&self.prefs.usb_pick, 0, 0) else {
+            self.usb_scan_msg = Some("Target not found. Check the connection, refresh, and pick the product again.".into());
+            return false;
+        };
+        self.usb_target.hub = d.hub;
+        self.usb_target.device = d.address;
+        self.usb_scan_msg = None;
+        true
+    }
+
+    /// Start the USB measurement. The blocking read of `Capture` runs on its own worker,
+    /// so it blocks neither the UI thread nor the HID write worker.
+    pub(crate) fn usb_start(&mut self) {
+        let Some(id) = self.device_id() else {
+            return;
+        };
+        self.usb_snap = None;
+        self.usb_result = None;
+        if !self.usb_resolve_target() { return; }
+        self.usb_cap = Some((id, devhub_polling::Capture::start(self.usb_target)));
+    }
+
+    /// Stop the USB measurement and keep the final snapshot as the result.
+    pub(crate) fn usb_stop(&mut self) {
+        if let Some((id, cap)) = self.usb_cap.take() {
+            let target = cap.target;
+            let snap = cap.snapshot();
+            // Drop cap here — release the worker's read and join (normally a few ms).
+            self.usb_result = Some((id, target, snap));
+            self.usb_snap = None;
+        }
+    }
+
+    /// Periodic USB measurement refresh (~264ms). If it reached an error termination, fold it into the result.
+    pub(crate) fn usb_tick(&mut self) {
+        if let Some((_, cap)) = self.usb_cap.as_ref() {
+            let snap = cap.snapshot();
+            self.usb_snap = Some(snap);
+            if snap.status.is_error() {
+                if let Some((id, cap)) = self.usb_cap.take() {
+                    self.usb_result = Some((id, cap.target, snap));
+                }
+            }
+        }
+        // Pick up completion of the EP auto-detect scan.
+        if let Some(rx) = &self.usb_scan {
+            match rx.try_recv() {
+                Ok((hub, dev, result)) => {
+                    self.usb_scan = None;
+                    self.usb_scan_msg = Some(match result {
+                        Ok(eps)
+                            if hub == self.usb_target.hub
+                                && dev == self.usb_target.device =>
+                        {
+                            match eps.first() {
+                                Some((ep, n)) => {
+                                    self.usb_target.endpoint = *ep;
+                                    self.prefs.usb_ep = ep & 0x7f;
+                                    self.prefs.save();
+                                    format!("Detected EP 0x{ep:02X} ({n} transfers) — you can start measuring")
+                                }
+                                None => {
+                                    "No transfers — retry while operating the target device".to_string()
+                                }
+                            }
+                        }
+                        Ok(_) => "Target changed, so the detection result was discarded".to_string(),
+                        Err(e) => match e.raw_os_error() {
+                            Some(5) => "EP detection failed — insufficient permissions (run as administrator)".into(),
+                            Some(32) => "EP detection failed — hub in use".into(),
+                            Some(2 | 3) => "EP detection failed — USBPcap hub not found".into(),
+                            _ => format!("EP detection failed: {e}"),
+                        },
+                    });
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.usb_scan = None;
+                }
+            }
+        }
+    }
+
+    /// Re-enumerate USB target candidates (no privileges needed). If a saved device selection exists,
+    /// re-resolve it to the current hub number/address (follows replug and port changes).
+    pub(crate) fn usb_refresh(&mut self) {
+        let all = devhub_polling::discover::devices();
+        if !self.prefs.usb_pick.is_empty() {
+            if let Some(d) = all
+                .iter()
+                .find(|d| d.instance_id.eq_ignore_ascii_case(&self.prefs.usb_pick))
+            {
+                self.usb_target.hub = d.hub;
+                self.usb_target.device = d.address;
+            }
+        }
+        self.usb_devs = Some(all);
+    }
+
+    /// Pick the target from the enumeration result — applies the hub number and current USB address.
+    pub(crate) fn usb_pick_device(&mut self, i: usize) {
+        let Some(d) = self
+            .usb_devs
+            .as_ref()
+            .and_then(|v| v.get(i))
+            .filter(|d| d.hub != 0)
+            .cloned()
+        else {
+            return;
+        };
+        self.prefs.usb_pick = d.instance_id.clone();
+        self.prefs.usb_hub = d.hub;
+        self.prefs.save();
+        self.usb_target.hub = d.hub;
+        self.usb_target.device = d.address;
+        self.usb_scan_msg = None;
+    }
+
+    /// Auto-detect the IN EP with a short 3 s scan. Use it while moving the target mouse.
+    /// While running it occupies that hub (hub read/write permission is required).
+    pub(crate) fn usb_detect_ep(&mut self) {
+        if self.usb_scan.is_some() || !self.usb_resolve_target() {
+            return;
+        }
+        let (hub, dev) = (self.usb_target.hub, self.usb_target.device);
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let r = devhub_polling::scan_interrupt(hub, dev, std::time::Duration::from_secs(3));
+            let _ = tx.send((hub, dev, r));
+        });
+        self.usb_scan = Some(rx);
+        self.usb_scan_msg = None;
+    }
 }

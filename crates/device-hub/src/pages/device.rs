@@ -393,8 +393,8 @@ impl Shell {
         let mut cards = vec![];
         // Measured polling rate (arrival rate of input reports counted with Raw Input).
         // In the background Windows 11 throttles raw input, so the value cannot be trusted.
-        // The big number is the "peak" (maximum over the moving interval — see the Test tab for details).
-        if let Some(st) = self.cur().and_then(|s| s.poll.clone()) {
+        // The big number is the "peak" (max over the moving segment — details on the Test tab).
+        if let Some(st) = self.cur().and_then(|s| s.poll.as_ref()) {
             let bg = !self.last_window_active;
             let p = theme::pal();
             let big = st.peak_hz.or(st.seg_hz).unwrap_or(st.hz);
@@ -412,13 +412,13 @@ impl Shell {
                                     .when(bg, |d| d.text_color(p.faint)),
                             )
                             .child(ui::faint(if bg {
-                                "The OS limits input while this window is in the background — bring it to the front to measure".into()
+                                format!("Background: {:.0} reports/s (approximate)", st.hz)
                             } else if big < 1. {
                                 "— Use the device to start measuring".into()
                             } else {
                                 let mut s = format!("Peak · avg {:.0}", st.hz);
                                 if let Some((med, _)) = st.gap_stats {
-                                    s = format!("{s} · est. interval {med:.3}ms", );
+                                    s = format!("{s} · est. interval {med:.3}ms",);
                                 }
                                 s
                             })),

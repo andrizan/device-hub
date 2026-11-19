@@ -36,8 +36,12 @@ pub enum Msg {
         id: DeviceId,
         err: String,
     },
+    /// `gen` is the `submit_seq` at the time that read was issued — pending changes
+    /// submitted after it are layered onto the confirmed state. Carrying the generation in the
+    /// response lets a stale response that arrives after another read still be layered correctly.
     State {
         id: DeviceId,
+        gen: u64,
         state: Box<DeviceState>,
     },
     ReadFailed {
@@ -113,10 +117,12 @@ pub enum Msg {
 
 enum Job {
     Open,
-    Read,
+    /// Read all settings — `gen` is the submit_seq at issue time (used as the response's generation).
+    Read { gen: u64 },
     Apply(Change),
-    /// Config (on-board profile) switch — re-reads all settings after the switch.
-    Profile(u8),
+    /// Config (on-board profile) switch — re-read all settings after switching.
+    /// `gen` is the submit_seq at issue time (the generation of the internal re-read).
+    Profile { profile: u8, gen: u64 },
     Action {
         id: String,
         label: String,
@@ -376,8 +382,13 @@ impl Hub {
             }
             s.switching_profile = true;
             s.switch_failed = false;
-            if s.tx.send(Job::Profile(p)).is_ok() {
-                // The switch job re-reads everything internally — changes made so far are included in the re-read.
+            if s.tx.send(Job::Profile {
+                profile: p,
+                gen: s.submit_seq,
+            })
+            .is_ok()
+            {
+                // The switch job re-reads everything internally — changes up to this point are included in the re-read.
                 s.read_seq = s.submit_seq;
                 s.pending += 1;
             } else {
@@ -708,13 +719,15 @@ impl Hub {
                 }
                 None
             }
-            Msg::State { id, state } => {
+            Msg::State { id, gen, state } => {
                 if let Some(s) = self.sessions.get_mut(&id) {
-                    // Layer on the unconfirmed changes submitted after the read was issued — so a stale
-                    // read does not roll back optimistic changes (they are still running).
+                    // Layer pending changes submitted after this read was issued — don't roll back
+                    // optimistic changes with a stale read (they are still running).
+                    // `gen` is the generation carried by the response, so even a delayed response that arrives
+                    // before a later read is issued is layered correctly.
                     let mut st = *state;
                     for (seq, c) in &s.pending_changes {
-                        if *seq > s.read_seq {
+                        if *seq > gen {
                             apply_local(&mut st, c);
                         }
                     }
@@ -961,7 +974,9 @@ impl Hub {
 /// after it are layered onto the confirmed state when `Msg::State` arrives (no rollback).
 fn send_read(s: &mut Session) {
     s.read_seq = s.submit_seq;
-    let _ = s.tx.send(Job::Read);
+    let _ = s.tx.send(Job::Read {
+        gen: s.read_seq,
+    });
 }
 
 fn send_open(s: &mut Session) {
@@ -976,10 +991,7 @@ fn coalesce_jobs(jobs: impl IntoIterator<Item = Job>) -> (Vec<Job>, usize) {
     let mut skipped_applies = 0;
     for job in jobs {
         let replace = match (kept.last(), &job) {
-            (Some(Job::Apply(prev)), Job::Apply(next))
-                if !matches!((prev, next), (Change::PeqAll { .. }, Change::Peq { .. }))
-                    && prev.same_target(next) =>
-            {
+            (Some(Job::Apply(prev)), Job::Apply(next)) if prev.is_superseded_by(next) => {
                 skipped_applies += 1;
                 true
             }
@@ -1051,9 +1063,10 @@ fn worker(
                         err: e.to_string(),
                     }),
                 },
-                Job::Read => match driver.as_ref().map(|d| d.read()) {
+                Job::Read { gen } => match driver.as_ref().map(|d| d.read()) {
                     Some(Ok(st)) => send(Msg::State {
                         id: id.clone(),
+                        gen,
                         state: Box::new(st),
                     }),
                     Some(Err(e)) => {
@@ -1088,14 +1101,15 @@ fn worker(
                         err,
                     })
                 }
-                // Config switch: on a successful write, re-read all settings before reporting.
-                Job::Profile(p) => {
+                // Config switch: after a successful write, re-read all settings and then report.
+                Job::Profile { profile: p, gen } => {
                     let (err, dead) = match &driver {
                         Some(d) => match d.apply(&Change::Profile(p)) {
                             Ok(()) => match d.read() {
                                 Ok(st) => {
                                     send(Msg::State {
                                         id: id.clone(),
+                                        gen,
                                         state: Box::new(st),
                                     });
                                     (None, false)
@@ -1627,7 +1641,7 @@ mod worker_queue_tests {
         let (jobs, skipped) = coalesce_jobs([
             stage(0),
             stage(1),
-            Job::Read,
+            Job::Read { gen: 0 },
             stage(2),
             Job::Apply(Change::Profile(1)),
             stage(3),
@@ -1637,7 +1651,7 @@ mod worker_queue_tests {
             jobs.as_slice(),
             [
                 Job::Apply(Change::ActiveStage(1)),
-                Job::Read,
+                Job::Read { gen: 0 },
                 Job::Apply(Change::ActiveStage(2)),
                 Job::Apply(Change::Profile(1)),
                 Job::Apply(Change::ActiveStage(3)),
@@ -1661,13 +1675,13 @@ mod worker_queue_tests {
     fn profile_switch_job_is_never_coalesced_into_writes() {
         // A config switch is a dedicated job — it is not mixed up with the writes just before or after it by thinning.
         let stage = |i| Job::Apply(Change::ActiveStage(i));
-        let (jobs, skipped) = coalesce_jobs([stage(0), Job::Profile(2), stage(1)]);
+        let (jobs, skipped) = coalesce_jobs([stage(0), Job::Profile { profile: 2, gen: 0 }, stage(1)]);
         assert_eq!(skipped, 0);
         assert!(matches!(
             jobs.as_slice(),
             [
                 Job::Apply(Change::ActiveStage(0)),
-                Job::Profile(2),
+                Job::Profile { profile: 2, gen: 0 },
                 Job::Apply(Change::ActiveStage(1)),
             ]
         ));
@@ -1867,9 +1881,11 @@ mod worker_queue_tests {
                 name: "RENAMED".into(),
             },
         );
-        // Even if a stale read arrives, changes awaiting confirmation are kept.
+        // Even if a stale read arrives, pending changes are kept
+        // (gen=0 is the response of a read issued before the change was submitted).
         hub.handle(Msg::State {
             id: id.clone(),
+            gen: 0,
             state: Box::new(stale),
         });
         assert_eq!(
@@ -1886,6 +1902,83 @@ mod worker_queue_tests {
         drain_until(&mut hub, &mut rx, Duration::from_secs(5), |h| {
             h.session(&id).is_some_and(|s| s.pending_changes.is_empty())
         });
+    }
+
+    #[test]
+    fn late_read_response_after_newer_read_keeps_edit() {
+        // After issuing read A → edit → read B, even if A's late response arrives it must not
+        // roll back the edited display (the generation is carried by the response, so it is unaffected by
+        // the read_seq advanced by issuing B).
+        let backend: Arc<dyn HubBackend> = Arc::new(devhub_core::demo::DemoHub::new());
+        let (tx, mut rx) = futures::channel::mpsc::unbounded::<Msg>();
+        let mut hub = Hub::new(backend, tx);
+        hub.scan();
+        let mut kb = None;
+        let t = std::time::Instant::now();
+        while kb.is_none() && t.elapsed() < Duration::from_secs(3) {
+            if let Ok(m) = rx.try_recv() {
+                if let Msg::Scanned { res: Ok(ds), .. } = &m {
+                    kb = ds
+                        .iter()
+                        .find(|d| d.kind == DeviceKind::Keyboard)
+                        .map(|d| d.id.clone());
+                }
+                hub.handle(m);
+            } else {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        }
+        let id = kb.expect("demo keyboard");
+        hub.open(&id, false);
+        assert!(drain_until(
+            &mut hub,
+            &mut rx,
+            Duration::from_secs(5),
+            |h| h.session(&id).is_some_and(|s| s.ready())
+        ));
+
+        // Issue read A (gen=0) → submit a change → issue read B (gen=1).
+        hub.reload(&id);
+        let stale = hub.backend.driver(&id).unwrap().read().unwrap();
+        hub.apply(
+            &id,
+            Change::ProfileName {
+                index: 0,
+                name: "RENAMED".into(),
+            },
+        );
+        hub.reload(&id);
+
+        // A's late response (gen=0) arrives — the change is pending, so it is layered on and kept.
+        hub.handle(Msg::State {
+            id: id.clone(),
+            gen: 0,
+            state: Box::new(stale),
+        });
+        assert_eq!(
+            hub.session(&id)
+                .unwrap()
+                .state
+                .as_ref()
+                .unwrap()
+                .profile
+                .names[0],
+            "RENAMED",
+            "a stale read response rolled back a pending edit"
+        );
+        drain_until(&mut hub, &mut rx, Duration::from_secs(5), |h| {
+            h.session(&id).is_some_and(|s| s.pending_changes.is_empty())
+        });
+        assert_eq!(
+            hub.session(&id)
+                .unwrap()
+                .state
+                .as_ref()
+                .unwrap()
+                .profile
+                .names[0],
+            "RENAMED"
+        );
     }
 
     #[test]

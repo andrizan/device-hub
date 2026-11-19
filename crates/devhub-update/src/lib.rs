@@ -50,7 +50,7 @@ pub fn check(
         .as_secs();
     let agent = agent();
     let mut st = match feed {
-        FirmwareFeed::MouseFit { ui_folder } => mousefit(&agent, ui_folder)?,
+        FirmwareFeed::MouseFit { ui_folder } => mousefit(&agent, ui_folder, last_fp)?,
         FirmwareFeed::Sparklink { vid, pid, board_id } => {
             sparklink(&agent, *vid, *pid, *board_id, current_fw)?
         }
@@ -88,7 +88,6 @@ fn is_new(fp: &str, last_fp: &str) -> bool {
     !fp.is_empty() && !last_fp.is_empty() && fp != last_fp
 }
 
-/// mouse.fit: use the HTTP headers of the zip that FWLINK.txt points to as the fingerprint.
 /// HTTP agent with an overall timeout per request.
 fn agent() -> ureq::Agent {
     ureq::Agent::config_builder()
@@ -105,7 +104,8 @@ fn header<'a>(res: &'a ureq::http::Response<ureq::Body>, name: &str) -> &'a str 
         .unwrap_or("")
 }
 
-fn mousefit(agent: &ureq::Agent, ui_folder: &str) -> Result<UpdateStatus, UpdateError> {
+/// mouse.fit: use the HTTP headers of the zip that FWLINK.txt points to as the fingerprint.
+fn mousefit(agent: &ureq::Agent, ui_folder: &str, last_fp: &str) -> Result<UpdateStatus, UpdateError> {
     let feed_url = format!("{MOUSEFIT_BASE}/Config/{ui_folder}/FWLINK.txt");
     let body = agent
         .get(&feed_url)
@@ -132,15 +132,18 @@ fn mousefit(agent: &ureq::Agent, ui_folder: &str) -> Result<UpdateStatus, Update
     let etag = header(&head, "ETag");
     let lastmod = header(&head, "Last-Modified");
     let len = header(&head, "Content-Length");
+    if etag.is_empty() && lastmod.is_empty() && len.is_empty() {
+        return Err(UpdateError("zip HEAD: missing fingerprint headers".into()));
+    }
     let fingerprint = format!("{etag}|{lastmod}|{len}");
-    // Pick a version-like number string from the file name (…/3955/xxx_3955JM.zip → "3955").
+    // The distributed file name is used for display. Whether there is an update is decided by comparing the HEAD fingerprint.
     let version = zip_url
         .rsplit('/')
         .next()
         .and_then(|f| f.strip_suffix(".zip"))
         .map(|f| f.to_string());
     Ok(UpdateStatus {
-        new_available: false,
+        new_available: is_new(&fingerprint, last_fp),
         version,
         url: Some("https://www.mouse.fit/".into()),
         fingerprint,

@@ -44,6 +44,7 @@ pub fn connect() -> HubResult<Arc<dyn HubBackend>> {
         api: Mutex::new(api),
         paths: Mutex::new(HashMap::new()),
         drivers: Mutex::new(HashMap::new()),
+        creating: Mutex::new(HashMap::new()),
         names: Mutex::new(HashMap::new()),
         watcher: Mutex::new(None),
         detected: Arc::new(Mutex::new(HashMap::new())),
@@ -70,6 +71,9 @@ pub struct RealHub {
     paths: Mutex<HashMap<String, CString>>,
     /// `DeviceId.0` → driver (an opened one is reused).
     drivers: Mutex<HashMap<String, Arc<dyn DeviceDriver>>>,
+    /// `DeviceId.0` → creation lock. Serializes driver creation for the same ID
+    /// (if the cache check and registration were separate sections, concurrent calls would open the same HID twice).
+    creating: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     /// `DeviceId.0` → product name reported by HID (recorded at scan time).
     names: Mutex<HashMap<String, String>>,
     /// `DeviceId.0` → determined model behind the dongle (model, display name).
@@ -208,23 +212,82 @@ impl HubBackend for RealHub {
         {
             return Ok(d.clone());
         }
-        if let Some(addr) = bt_addr(id) {
-            return self.bt_driver(id, addr);
-        }
-        let path = self
-            .paths
+        // Serialize creation for the same ID. Communication on other IDs does not wait on this lock.
+        let guard = self
+            .creating
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .entry(id.0.clone())
+            .or_default()
+            .clone();
+        let _guard = guard.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(d) = self
+            .drivers
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .get(&id.0)
-            .cloned()
-            .ok_or_else(|| HubError::NotFound(id.clone()))?;
+        {
+            return Ok(d.clone());
+        }
+        if let Some(addr) = bt_addr(id) {
+            return self.bt_driver(id, addr);
+        }
         let (vid, pid) = parse_id(id).ok_or_else(|| HubError::NotFound(id.clone()))?;
         let spec = known_spec(vid, pid).ok_or_else(|| HubError::NotFound(id.clone()))?;
-        let api = self.api.lock().unwrap_or_else(|p| p.into_inner());
-        let dev = api
-            .open_path(&path)
-            .map_err(|e| HubError::Io(format!("open {}: {e}", spec.name)))?;
-        drop(api);
+        // If an enumeration refresh overlaps creation, we could register a driver opened
+        // on a stale, disconnected path — re-check the path generation before registering and redo if it changed.
+        for _ in 0..3 {
+            let path = self
+                .paths
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .get(&id.0)
+                .cloned()
+                .ok_or_else(|| HubError::NotFound(id.clone()))?;
+            let api = self.api.lock().unwrap_or_else(|p| p.into_inner());
+            let dev = match api.open_path(&path) {
+                Ok(d) => d,
+                Err(e) => return Err(HubError::Io(format!("open {}: {e}", spec.name))),
+            };
+            drop(api);
+            let drv = self.make_driver(spec, dev, id)?;
+            let same = self
+                .paths
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .get(&id.0)
+                == Some(&path);
+            if same {
+                self.drivers
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .insert(id.0.clone(), drv.clone());
+                return Ok(drv);
+            }
+            // The path was updated — discard the handle opened on the stale connection target and reopen.
+        }
+        Err(HubError::Io(
+            "Device connection changed — please retry".into(),
+        ))
+    }
+
+    fn invalidate(&self, id: &DeviceId) {
+        self.drivers
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(&id.0);
+    }
+}
+
+impl RealHub {
+    /// Create one driver (resolve info/detected/events + registry branch).
+    /// The caller registers it after re-checking the path generation.
+    fn make_driver(
+        &self,
+        spec: &registry::KnownDevice,
+        dev: hidapi::HidDevice,
+        id: &DeviceId,
+    ) -> HubResult<Arc<dyn DeviceDriver>> {
         let name = self
             .names
             .lock()
@@ -283,18 +346,7 @@ impl HubBackend for RealHub {
                 return Err(HubError::NotImplemented("a driver for this device"))
             }
         };
-        self.drivers
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .insert(id.0.clone(), drv.clone());
         Ok(drv)
-    }
-
-    fn invalidate(&self, id: &DeviceId) {
-        self.drivers
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .remove(&id.0);
     }
 }
 

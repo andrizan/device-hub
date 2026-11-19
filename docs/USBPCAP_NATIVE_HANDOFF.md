@@ -1,0 +1,78 @@
+# Implementation handoff: USBPcap integration in the app and OBS, and overall Device HUB improvements
+
+2026-11-18 / Windows / Reviewed: the working tree, which is HEAD `706203e` plus uncommitted changes
+
+## For the next owner
+
+**The first deliverable is to get the same measured USB value as the current OBS from the Device HUB Test screen, without Python.** The Rust implementation in OBS is already working on a real device. From there, share the measurement code, then add selection by product name, and finally simultaneous measurement by the app and OBS. Defects unrelated to measurement are listed in the second half as independent work.
+
+If you start from a different checkout, first compare `git status --short` with the file contents. At the time of this review, **`crates/devhub-obs/src/usb_rate.rs` is untracked**, and the source registration, FFI, and locale changes are also in the working tree. Handing over only HEAD would lose the verified implementation. Work in the handoff source that includes the existing changes, or receive the needed changes and the untracked files together.
+
+## 1. Current state and what was verified on a real device
+
+| Area | Current behavior and evidence | Next change |
+|---|---|---|
+| OBS | `devhub_usb_rate` opens the USBPcap driver directly from Rust. It filters by target address, parses records, aggregates the last 1 second, and draws every 250 ms. Saved scenes refer to this source ID and these setting keys. [Measurement code](../crates/devhub-obs/src/usb_rate.rs) / [Source registration and properties](../crates/devhub-obs/src/lib.rs) | Keep the existing source ID and manually entered settings, and receive typed measurement values from the shared library. |
+| Device HUB | Registers Raw Input at startup, and `Job::PollRate` in the device worker aggregates by VID/PID. The 5-second measurement has its own window, and the screen side pins the cursor. [Store](../crates/device-hub/src/store.rs) / [Test screen](../crates/device-hub/src/pages/test.rs) / [Timer](../crates/device-hub/src/app.rs) | Add start, stop, and result display for USB measurement. During in-game USB measurement, leave the cursor free and do not request window focus. |
+| Real device | With the LAMZU Orbital 8K Dongle (37B0:0048), after a restart the installed DLL drew real input and showed 0 Hz while idle. In a separately run 30-second USB capture, the densest consecutive 1 second was **7,968 transfers**. This peak comes from a separate measurement and is not a value produced by the current OBS peak-hold feature. | At that time: USBPcap2, address 2, movement IF 0, IN 0x81, no Report ID specified. Use it for tests that change the connection point and re-detect. Do not make it a product default. |
+| Runtime and distribution | The normal streaming path is self-contained with the Rust DLL and an installed USBPcap driver. The Python text source and the TShark PowerShell script are separate paths for comparison. The Windows packaging script prepares the EXE, DLL, locale files, etc. [Packaging script](../scripts/package-windows.ps1) / [Current procedure](OBS_OVERLAY.md) | Acceptance-test both the standalone app and the standalone OBS plugin without Python, TShark, USBPcapCMD, or text files. Treat driver installation and the restart as an explicit first-run action. |
+
+## 2. Implementation order and completion criteria
+
+### A. Extract the Rust measurement code
+
+The recommended location is `crates/devhub-polling`. Move the existing `capture / consume / Samples / Capture` and the tests, and move the OBS-specific log calls and display strings outside the boundary. There is no need to stream raw USB reports to the UI. The shared API handles the target, the measurement handle, a state snapshot, and stop. Put Windows-specific handling inside `cfg(windows)`.
+
+- **Target** is the hub, the current USB address, the IN endpoint, and an optional Report ID. Keep the persisted device identity separate from the address, which can change with each connection.
+- **State** is stopped, waiting for first input, measuring, disconnected, driver not installed, insufficient permissions, hub in use, or another I/O error. Before anything is received, show "waiting"; after reception, if the last 1 second is empty, show "0 Hz". Keep the OS code in errors. On this PC, hub enumeration with normal privileges succeeded, and the read/write open for measurement failed with error 5.
+- **Value** uses the capture timestamp and counts only successful interrupt IN completions of the target that carry data and, if needed, match the Report ID. The USB rate is the number of transfers from the receiver to the PC. The cycle of the wireless segment and bus polling attempts while idle are not included in this value.
+- **Peak** updates the count of the interval `(t − 1 s, t]` on every reception and keeps the maximum over the period. Taking the maximum only at the 250 ms display update timing would drop intermediate peaks. Do not mix in history from before measurement started, and after it ends keep the unit and interval, such as "Peak 7,968 Hz (consecutive 1 s)".
+- **Shutdown** releases the blocking read while idle before joining. The current `Drop` waits until the end, so structure it so that a settings change or release does not occupy the render thread for long. Also confirm that all workers finish before the DLL is unloaded.
+
+**Completion criteria**: Existing OBS scenes open as they are. Rust tests can distinguish simulated 125 Hz / 1 kHz / 8 kHz, the 1-second boundary, a different address / a different Report ID / failed transfers / request-side packets / short records / EOF mid-record. Stopping measurement while idle completes. [USBPcap record format](https://desowin.org/usbpcap/captureformat.html) / [Driver public header](https://github.com/desowin/usbpcap/blob/master/USBPcapDriver/include/USBPcap.h)
+
+### B. Make it usable from normal GPUI operation
+
+Put "Measurement method", "Start / Stop", "Current", and "Peak" on the Test screen. Start and stop the USB backend off the UI thread, and do not block the existing HID settings-write worker with a capture read. The Performance screen refers to the same snapshot. Treat the Raw Input gap, movement, and DPI diagnostics as values that belong to that method. If USB measurement hits insufficient permissions or a missing driver, show the reason and the available methods, and state the measurement source for each value that comes from a different path.
+
+Decide whether the UI is shown from the existing caps and the availability of the measurement backend. Keep VID/PID-specific handling inside the enumeration and driver side. If an extension of contract v2 is needed, only add to it and update the demo too. The keyboard test, the demo, and normal device settings must stay usable even when USB measurement is unavailable. [Project conventions](../AGENTS.md) / [Performance screen](../crates/device-hub/src/pages/perf.rs)
+
+**Completion criteria**: Start only the app, measure from the Test screen, and shake the mouse while another app stays in the foreground. After it ends, the target name, the measurement source, and the peak remain. Even if the selected device is changed midway, the result does not move to a different unit.
+
+### C. Replace manual hub-number entry with product selection
+
+Enumerate Windows USB hubs, connection ports, and configuration descriptors from Rust, and map them to the OS's mouse HID collections and interfaces. The starting point for the mapping from a USBPcap handle to a hub is `IOCTL_USBPCAP_GET_HUB_SYMLINK`. Keep the product name, the serial or container ID, and the connection location as candidates, and choose the interrupt IN that corresponds to the HID movement collection. Treat vendor notifications of a composite HID and keyboard endpoints separately.
+
+Automatic selection can be ambiguous for two units of the same model, multiple Report IDs on a shared endpoint, no serial number, a dongle alone, and so on. Show the candidates' connection locations and a short "move to confirm" step, and keep the current manual entry available from advanced settings. On reconnect, re-resolve from the saved device identity, and do not capture a different device that inherited a previous address.
+
+**Completion criteria**: In both the app and OBS, you can start just by choosing "LAMZU Orbital 8K Dongle". After unplugging/replugging, a port change, and with two units of the same model, it can tell apart the cases where the target is restored automatically and where re-selection is needed.
+
+### D. When the app and OBS use the same hub
+
+The current code opens it with `.share_mode(0)`. **Even if it is moved into a shared crate, hub ownership is not shared across processes.** For the first release, explicit exclusion is also useful. If one is measuring and the other is opened, show "Hub in use" and keep the measurement that started first. Multiple scenes inside OBS can use references to the existing source.
+
+If simultaneous measurement is to be delivered, we recommend having a single Rust helper that opens the hub, with the app and OBS subscribing to the target over a named pipe. Start on the first subscription and stop on the last unsubscription. What is distributed is the target identifier, the state, and timestamped aggregate values. Separate the peak start/reset per client. If administrator rights are limited to the helper, restrict the pipe to the same user and test UAC cancellation, termination of the owning process, and reconnection. Make it a layout that also works when OBS is started alone, and state the same protocol version in both distributables.
+
+**Completion criteria**: Try both app-first and OBS-first. The exclusive version explains the conflict correctly. In the simultaneous-subscription version, closing one still leaves the other's value updating, and closing the last one lets the hub be reacquired.
+
+## 3. Improvement backlog other than polling
+
+The following are findings from reading the implementation. The verification steps in the table are reproduction and acceptance items for the next owner to run.
+
+| Priority / owner | Evidence and user impact | Proposed fix and completion check |
+|---|---|---|
+| P1 / Settings store | `Msg::State` does not carry the generation of the responding request and uses `Session.read_seq` at arrival. If you issue read A → DPI edit → read B in that order, a late response from A can roll back the edited display. Completion of coalesced Applies is sent together at the head of the batch and the UI clears pending from the head, so the mapping between operations and completion notifications also deserves a review. [store.rs](../crates/device-hub/src/store.rs) | Return the read request generation and the write ID in the response. Keep the existing profile switch and failure re-read. Test the order above and "separate write groups with a read in between", and check the UI value, the final value on the real device, and the pending count. |
+| P1 / Settings persistence | Overwriting a preset writes directly to the destination JSON. General settings and the FW notification state use a fixed-name temporary file and do not return save failures to the caller. Running out of space or a conflict can lose the previous value or leave a state that looks saved. [Presets](../crates/device-hub/src/presets.rs) / [General settings](../crates/device-hub/src/prefs.rs) / [FW notifications](../crates/device-hub/src/fwstate.rs) | Use a shared routine that writes to a unique temporary file in the same directory and replaces on success. Return explicit-save failures to the UI. Inject a failure and confirm the old JSON is still readable, and that presets whose names collide after invalid characters are replaced are not overwritten unintentionally. |
+| P1 / OBS depth display | `live::shared()` for key/button depth does not leave a stop flag and JoinHandle with an owner, and `obs_module_unload` is also empty. Even after all corresponding sources are deleted, the thread can keep doing HID reads and rediscovery. [Live data acquisition](../crates/devhub-obs/src/live.rs) / [Source lifetime](../crates/devhub-obs/src/lib.rs) | Consolidate start and stop in the existing `Poller` and manage a reference count of the sources in use. Check in the order 2 sources → 1 → 0 → re-add, and verify that the handle and worker are released at 0. |
+| P2 / Real-device backend | In `RealHub::driver`, the cache check and the registration after driver creation are separate sections. When concurrent calls overlap, the same ID can be opened twice. There is also a case where creation completes with an old path while enumeration is being updated. [HID enumeration and creation](../crates/devhub-hid/src/lib.rs) | Serialize creation for the same ID only, and re-check the path generation at registration. Do not make communication for other IDs wait on a global lock. Simulate concurrent opens and an invalidate midway, and confirm that creation for the valid generation happens once. |
+| P2 / Audio sync | The start is recorded in a `OnceLock`, while the worker can exit on a device acquisition or capture initialization failure. The thing to verify is whether it recovers within the app after the output destination changes. [audio.rs](../crates/device-hub/src/audio.rs) | Distinguish running from stopped, and re-acquire at intervals only while it is in use. After unplugging a USB DAC and switching to a different output, confirm that the audio-reactive lighting recovers without a restart. |
+| P2 / Distribution and verification | CI covers Windows check, test, release, and artifact creation. Adding detection of OBS source registration from the package, locales, and missing files would catch regressions at distribution time. [CI](../.github/workflows/ci.yml) / [Packaging](../scripts/package-windows.ps1) | Inspect the EXE, DLL, both locales, and the license from an empty staging directory. In an environment with a supported OBS, load the distributed DLL and verify the names and properties of the existing source and the new source. Record USB real-device tests separately. |
+
+**Order of work**: For the USB owner, make A → B the first PR, and C and D separate PRs. If working in parallel, the persistence work or HID creation is easier to take on. The settings-generation fix and the app USB integration touch the same `store.rs`, so decide the change boundary between owners first.
+
+## 4. Pre-submission checklist
+
+1. With the pinned toolchain, run `cargo test --locked --workspace`, `cargo clippy --locked --workspace --all-targets`, and `cargo build --locked --release -p device-hub -p devhub-obs`. Create the package from this build with the packaging script.
+2. Without Python or Wireshark, measure separately with only the distributed EXE and with only the distributed OBS plugin. Record the screens for USBPcap not installed, normal privileges, and the required privileges. Treat the driver installation, which involves a restart, as a user action.
+3. With a wired connection or a dongle, run "before input → move for a few seconds → idle → stop → restart". It must update with the game in the foreground, and the peak must be readable after stopping. Attach the configured rate, DPI, the time spent moving, the target, and the window width to the result. 7,968 Hz is one past observation and must not become a threshold to reach every time.
+4. Align the main path of the README and the [measurement steps](POLLING_RATE.md) / [OBS steps](OBS_OVERLAY.md) with GUI operation. Carry over the migration of existing scenes, how to resolve hub in use, the required privileges, and conditions not yet confirmed on a real device.
