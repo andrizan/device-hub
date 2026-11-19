@@ -76,8 +76,11 @@ cargo run --release -p device-hub        # use release for everyday use (lighter
 DEVHUB_DEMO=1 cargo run -p device-hub    # always demo
 cargo run -p devhub-hid --example enum   # HID enumeration
 cargo run -p devhub-obs --example preview # check the overlay rendering as a PNG without OBS
-cargo clippy --workspace
+cargo fmt --all                          # CI fails on unformatted code
+cargo clippy --workspace --all-targets -- -D warnings   # CI fails on any warning
 ```
+
+Releases are published by CI from an annotated `vX.Y.Z` tag (README "Releasing").
 
 ## OBS plugin (devhub-obs)
 

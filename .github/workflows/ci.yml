@@ -1,8 +1,12 @@
 name: CI
 
+# Pushing a tag vX.Y.Z runs every check on that commit and, when all pass,
+# publishes the GitHub release from the Windows package (see README "Releasing").
 on:
   push:
     branches: [main]
+    tags: ["v*"]
+    # Not applied to tags: GitHub ignores path filters for tag pushes.
     paths-ignore:
       - "**.md"
       - "docs/**"
@@ -32,24 +36,64 @@ env:
   CARGO_PROFILE_TEST_DEBUG: 0
 
 jobs:
+  # Formatting and lints. Clippy runs on Windows because most of the code
+  # (HID, Bluetooth, USBPcap, OBS) is only compiled there.
+  quality:
+    name: Quality (fmt + clippy)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Tag matches the app version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          version=$(grep -m 1 '^version = ' crates/device-hub/Cargo.toml | tr -d '\r' | cut -d '"' -f 2)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match device-hub version $version"
+            exit 1
+          fi
+      - name: Rust toolchain (rust-toolchain.toml)
+        run: |
+          rustup toolchain install
+          rustup component add rustfmt clippy
+      - name: Format
+        run: cargo fmt --all --check
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  security:
+    name: Security
+    uses: ./.github/workflows/trivy.yml
+    permissions:
+      contents: read
+      security-events: write
+
   windows:
     name: Windows (test + package)
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Rust toolchain (rust-toolchain.toml)
         run: rustup toolchain install
       # Caches the registry and dependency builds. Only main writes the cache,
-      # so pull requests reuse it without filling the 10 GB repository quota.
-      - uses: Swatinem/rust-cache@v2
+      # so pull requests and tags reuse it without filling the 10 GB quota.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       # `cargo test` builds every library, binary, test and example, so a
       # separate `cargo check` would only repeat the work.
       - name: Test
         run: cargo test --workspace --locked
-      # The optimized build and the package are only needed for main.
+      # The optimized build and the package are only needed for main and tags.
       - name: Release build
         if: github.event_name != 'pull_request'
         run: cargo build --release --locked -p device-hub -p devhub-obs
@@ -79,6 +123,8 @@ jobs:
             os: macos-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: System libraries
         if: runner.os == 'Linux'
         run: |
@@ -88,10 +134,53 @@ jobs:
             libfontconfig1-dev libfreetype-dev libx11-xcb-dev libxcb1-dev
       - name: Rust toolchain (rust-toolchain.toml)
         run: rustup toolchain install
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Build
         run: cargo build --workspace --locked
       - name: Test
         run: cargo test --locked -p devhub-core -p devhub-hid -p devhub-update
+
+  # Publishes the package that the windows job built and tested, so a release
+  # never contains a binary that skipped a check.
+  release:
+    name: Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [quality, security, windows, unix]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: device-hub-windows-x64
+          path: dist
+      - name: Archives and checksums
+        run: |
+          tag="$GITHUB_REF_NAME"
+          (cd dist && zip -qr "../device-hub-$tag-windows-x64.zip" .)
+          (cd dist/devhub_obs && zip -qr "../../devhub-obs-$tag-plugin.zip" .)
+          sha256sum -- *.zip > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+      # The notes are the message of the annotated tag; a lightweight tag gets
+      # notes generated from the merged pull requests.
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          ref=$(gh api "repos/$GH_REPO/git/ref/tags/$tag")
+          notes=(--generate-notes)
+          if [ "$(jq -r .object.type <<<"$ref")" = tag ]; then
+            gh api "repos/$GH_REPO/git/tags/$(jq -r .object.sha <<<"$ref")" -q .message > notes.md
+            [ -s notes.md ] && notes=(--notes-file notes.md)
+          fi
+          files=(*.zip SHA256SUMS.txt)
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "${files[@]}" --clobber
+          else
+            gh release create "$tag" "${files[@]}" --verify-tag --title "Device HUB $tag" "${notes[@]}"
+          fi

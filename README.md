@@ -49,9 +49,14 @@ detected automatically by capability, not by device name.
 ```sh
 cargo run --release -p device-hub      # real devices (falls back to demo if none)
 DEVHUB_DEMO=1 cargo run -p device-hub  # demo mode, no device needed
-cargo clippy --workspace
+cargo fmt --all
+cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
+
+CI runs the same checks: `cargo fmt --check` and clippy with warnings as
+errors, the tests on Windows, a build on Linux and macOS, and a Trivy scan of
+`Cargo.lock` and the tree for vulnerabilities and secrets (also weekly).
 
 `device-hub.exe` is a single portable binary — fonts and the icon are embedded;
 settings live in `%APPDATA%\DeviceHub\`.
@@ -76,6 +81,22 @@ cargo build --release --locked -p device-hub -p devhub-obs
 
 Archive the contents of `dist/` for the full release or the contents of
 `dist/devhub_obs/` for the standalone OBS plugin.
+
+### Releasing
+
+1. Set `version` in `crates/device-hub/Cargo.toml`, update `Cargo.lock`
+   (`cargo check`), commit and push to `main`.
+2. Tag that commit with the release notes as the tag message, then push the tag:
+
+   ```sh
+   git tag -a v0.4.0 --cleanup=verbatim -F notes.md
+   git push origin v0.4.0
+   ```
+
+CI then runs every check on the tagged commit. When all pass, it publishes the
+GitHub release with `device-hub-<tag>-windows-x64.zip`,
+`devhub-obs-<tag>-plugin.zip` and `SHA256SUMS.txt`, built by the tested job.
+A tag that does not match the crate version fails the run.
 
 ## Repository layout
 
