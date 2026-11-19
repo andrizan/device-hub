@@ -4,7 +4,7 @@ members = ["crates/*"]
 
 [workspace.package]
 edition = "2021"
-license = "MIT OR Apache-2.0"
+license = "Apache-2.0"
 
 # The GPUI core is replaced with the patched copy in vendor/ (spring wheel scrolling).
 # See vendor/README.md for the changes.

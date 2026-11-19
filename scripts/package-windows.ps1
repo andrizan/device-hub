@@ -15,7 +15,7 @@ Copy-Item -LiteralPath (Join-Path $root 'target/release/device-hub.exe') -Destin
 Copy-Item -LiteralPath (Join-Path $root 'target/release/devhub_obs.dll') -Destination $bin
 Copy-Item -Path (Join-Path $root 'crates/devhub-obs/data/locale/*.ini') -Destination $locale
 
-foreach ($name in 'LICENSE-MIT', 'LICENSE-APACHE', 'THIRD_PARTY_NOTICES.md') {
+foreach ($name in 'LICENSE', 'THIRD_PARTY_NOTICES.md') {
     $source = Join-Path $root $name
     Copy-Item -LiteralPath $source -Destination $OutputDirectory
     Copy-Item -LiteralPath $source -Destination $plugin

@@ -100,12 +100,11 @@ Protocol notes and test captures are kept in [docs/PROTOCOL_NOTES.md](docs/PROTO
 
 ## License
 
-Licensed under either of [Apache License, Version 2.0](LICENSE-APACHE) or
-[MIT license](LICENSE-MIT) at your option.
+Licensed under the [Apache License, Version 2.0](LICENSE).
 
 Bundled fonts (Geist, IBM Plex Sans JP, Zen Maru Gothic) are under the SIL
 Open Font License — see `THIRD_PARTY_NOTICES.md`. `vendor/` contains a patched
 GPUI (Apache-2.0, © Zed Industries).
 
 Unless you explicitly state otherwise, any contribution intentionally submitted
-for inclusion shall be dual-licensed as above, without additional terms.
+for inclusion shall be licensed as above, without additional terms.
