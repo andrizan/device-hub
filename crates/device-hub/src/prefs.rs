@@ -12,12 +12,8 @@ pub struct Prefs {
     pub accent: u8,
     /// Font (an id in theme::FONT_OPTIONS).
     pub font: String,
-    /// GPU glass (false = opaque surfaces).
-    pub glass: bool,
     /// Animation.
     pub motion: bool,
-    /// Wallpaper image path (None = aurora).
-    pub wallpaper: Option<String>,
     /// Last opened device.
     pub last_device: Option<String>,
     /// Stop drawing when sent to the background (zero load even when open behind a game).
@@ -128,9 +124,7 @@ impl Default for Prefs {
             theme: "dark".into(),
             accent: 0,
             font: "modern".into(),
-            glass: true,
             motion: true,
-            wallpaper: None,
             last_device: None,
             idle_throttle: true,
             fw_check: true,

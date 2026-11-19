@@ -6,7 +6,6 @@
 //!
 //! Environment variables:
 //!   DEVHUB_DEMO=1  always use the demo device
-//!   DEVHUB_FAST=1  turn off GPU glass (to check the fallback)
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 

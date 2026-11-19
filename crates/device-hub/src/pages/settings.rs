@@ -43,7 +43,6 @@ impl Shell {
             );
         }
 
-        let wall = self.prefs.wallpaper.clone();
         let look = ui::card_titled("Appearance", "palette", None).child(
             ui::body()
                 .pb(px(12.))
@@ -94,16 +93,6 @@ impl Shell {
                     ),
                 )
                 .child(ui::row(
-                    "Liquid Glass",
-                    Some("Turning it off makes surfaces opaque and lowers GPU load even further"),
-                    ui::toggle("glass", theme::glass_on(), cx, |this, on, cx| {
-                        theme::set_glass(on);
-                        this.prefs.glass = on;
-                        this.prefs.save();
-                        cx.notify();
-                    }),
-                ))
-                .child(ui::row(
                     "Animations",
                     None,
                     ui::toggle("motion", theme::motion_on(), cx, |this, on, cx| {
@@ -113,47 +102,6 @@ impl Shell {
                         cx.notify();
                     }),
                 ))
-                .child(ui::row(
-                    "Wallpaper",
-                    Some(match &wall {
-                        Some(w) => w.as_str(),
-                        None => "Aurora (auto-generated)",
-                    }),
-                    div()
-                        .flex()
-                        .gap(px(6.))
-                        .child(ui::button(
-                            "wall-pick",
-                            "Choose image",
-                            Some("image"),
-                            Btn::Glass,
-                            cx,
-                            |this, _, cx| {
-                                if let Some(f) = rfd::FileDialog::new()
-                                    .add_filter("Images", &["png", "jpg", "jpeg"])
-                                    .pick_file()
-                                {
-                                    this.prefs.wallpaper = Some(f.display().to_string());
-                                    this.prefs.save();
-                                    cx.notify();
-                                }
-                            },
-                        ))
-                        .when(wall.is_some(), |d| {
-                            d.child(ui::button(
-                                "wall-reset",
-                                "Default",
-                                None,
-                                Btn::Ghost,
-                                cx,
-                                |this, _, cx| {
-                                    this.prefs.wallpaper = None;
-                                    this.prefs.save();
-                                    cx.notify();
-                                },
-                            ))
-                        }),
-                )),
         );
 
         let demo = self.hub.demo;
@@ -195,7 +143,7 @@ impl Shell {
                         "rescan2",
                         "Scan now",
                         Some("refresh-cw"),
-                        Btn::Glass,
+                        Btn::Secondary,
                         cx,
                         |this, _, cx| {
                             this.hub.scan();
@@ -242,7 +190,7 @@ impl Shell {
                         "fw-now",
                         "Check",
                         Some("refresh-cw"),
-                        Btn::Glass,
+                        Btn::Secondary,
                         cx,
                         |this, _, cx| {
                             let n = this.hub.check_all_firmware(true);
@@ -264,7 +212,7 @@ impl Shell {
                 .gap(px(6.))
                 .pt(px(4.))
                 .child(ui::sub(format!("Device Hub {}", env!("CARGO_PKG_VERSION"))))
-                .child(ui::faint("A personal tool for configuring mouse.fit / hub.xsyd.top devices without a browser. GPUI + Liquid Glass."))
+                .child(ui::faint("A personal tool for configuring mouse.fit / hub.xsyd.top devices without a browser. Built with GPUI."))
                 .child(ui::faint("How to add a new device: docs/ADD_DEVICE.md")),
         );
 

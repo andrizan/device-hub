@@ -555,7 +555,7 @@ impl Shell {
             "peq-paste",
             "Paste AutoEQ",
             Some("clipboard-paste"),
-            Btn::Glass,
+            Btn::Secondary,
             cx,
             move |this, _, cx| this.peq_paste(cx),
         ));
@@ -809,7 +809,7 @@ impl Shell {
                             .px(px(8.))
                             .py(px(3.))
                             .rounded(px(7.))
-                            .bg(theme::alpha(p.solid, 0.75))
+                            .bg(theme::alpha(p.bg, 0.75))
                             .text_size(px(11.))
                             .text_color(p.sub)
                             .child(format!("{} Hz · {:+.1} dB", fmt_freq(f.round() as u16), db)),
@@ -1024,7 +1024,7 @@ impl Shell {
                     format!("Auto ({auto:+.0}dB)")
                 },
                 Some("wand-sparkles"),
-                Btn::Glass,
+                Btn::Secondary,
                 cx,
                 move |this, _, cx| this.set_preamp(auto, cx),
             ));

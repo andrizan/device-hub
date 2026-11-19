@@ -180,7 +180,7 @@ impl Shell {
                             "use-stage",
                             "Use this stage",
                             Some("check"),
-                            Btn::Glass,
+                            Btn::Secondary,
                             cx,
                             move |this, _, cx| {
                                 this.apply(Change::ActiveStage(sel), cx);
@@ -232,20 +232,9 @@ impl Shell {
                             .w(px(if on { 34. } else { 26. }))
                             .h(px(hgt))
                             .rounded(px(10.))
-                            .bg(linear_gradient(
-                                180.,
-                                linear_color_stop(c, 0.),
-                                linear_color_stop(theme::alpha(c, 0.25), 1.),
-                            ))
+                            .bg(if on { c } else { theme::alpha(c, 0.7) })
                             .border_1()
-                            .border_color(if on { p.fg } else { theme::alpha(c, 0.6) })
-                            .shadow(vec![BoxShadow {
-                                color: theme::alpha(c, if on { 0.55 } else { 0.25 }),
-                                offset: point(px(0.), px(6.)),
-                                blur_radius: px(18.),
-                                spread_radius: px(-6.),
-                                inset: false,
-                            }]),
+                            .border_color(if on { p.fg } else { theme::alpha(c, 0.6) }),
                     )
                     .child(
                         div()
@@ -286,7 +275,7 @@ impl Shell {
                     "stage-add",
                     "Add",
                     Some("plus"),
-                    Btn::Glass,
+                    Btn::Secondary,
                     cx,
                     move |this, _, cx| {
                         let mut s = stages_add.clone();
@@ -568,11 +557,7 @@ impl Shell {
                     .h(px(250.))
                     .rounded_t(px(70.))
                     .rounded_b(px(62.))
-                    .bg(linear_gradient(
-                        160.,
-                        linear_color_stop(theme::alpha(p.fg, 0.16), 0.),
-                        linear_color_stop(theme::alpha(p.fg, 0.05), 1.),
-                    ))
+                    .bg(theme::alpha(p.fg, 0.08))
                     .border_1()
                     .border_color(p.edge),
             )

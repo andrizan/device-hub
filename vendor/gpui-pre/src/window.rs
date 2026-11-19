@@ -4922,33 +4922,6 @@ impl Window {
         }
     }
 
-    /// DEVHUB: filter what has already been painted beneath `bounds`, like CSS
-    /// `backdrop-filter`, optionally bending the rim band like a convex lens.
-    /// Lengths in `filter` are logical pixels. Must be called during paint.
-    pub fn paint_backdrop(&mut self, bounds: Bounds<Pixels>, corner_radii: Corners<Pixels>, filter: crate::BackdropFilter) {
-        self.invalidator.debug_assert_paint();
-        let scale = self.scale_factor();
-        let backdrop = crate::Backdrop {
-            order: 0,
-            opacity: self.element_opacity() * filter.opacity.clamp(0.0, 1.0),
-            bounds: self.snap_bounds(bounds),
-            content_mask: self.snapped_content_mask(),
-            corner_radii: corner_radii.scale(scale),
-            blur: filter.blur.max(0.0) * scale,
-            saturation: filter.saturation,
-            brightness: filter.brightness,
-            bezel: filter.bezel.max(0.0) * scale,
-            refraction: filter.refraction.max(0.0) * scale,
-            dispersion: filter.dispersion,
-            mask: filter.mask,
-            light: filter.light,
-            rim: [filter.rim[0].max(0.0) * scale, filter.rim[1], filter.rim[2], filter.rim[3]],
-            lens: filter.lens,
-            glass: [filter.glass[0], filter.glass[1].clamp(0.0, 1.0), filter.glass[2], filter.glass[3] * scale],
-        };
-        self.next_frame.scene.insert_primitive(backdrop);
-    }
-
     /// Paint one or more quads into the scene for the next frame at the current stacking context.
     /// Quads are colored rectangular regions with an optional background, border, and corner radius.
     /// see [`fill`], [`outline`], and [`quad`] to construct this type.
@@ -5336,36 +5309,6 @@ impl Window {
         frame_index: usize,
         grayscale: bool,
     ) -> Result<()> {
-        self.paint_image_impl(bounds, image_bounds, corner_radii, data, frame_index, grayscale, false)
-    }
-
-    /// DEVHUB: Same as `paint_image`, but the magnification is done with a **nearest-neighbor (POINT) sampler**.
-    ///
-    /// Used when a low-resolution picture (a pixel-art landscape) is magnified to fill the window. A linear sampler
-    /// blurs the dot edges, so only this surface is drawn with POINT. Other images stay linear as before.
-    pub fn paint_image_nearest(
-        &mut self,
-        bounds: Bounds<Pixels>,
-        image_bounds: Bounds<Pixels>,
-        corner_radii: Corners<Pixels>,
-        data: Arc<RenderImage>,
-        frame_index: usize,
-        grayscale: bool,
-    ) -> Result<()> {
-        self.paint_image_impl(bounds, image_bounds, corner_radii, data, frame_index, grayscale, true)
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn paint_image_impl(
-        &mut self,
-        bounds: Bounds<Pixels>,
-        image_bounds: Bounds<Pixels>,
-        corner_radii: Corners<Pixels>,
-        data: Arc<RenderImage>,
-        frame_index: usize,
-        grayscale: bool,
-        nearest: bool,
-    ) -> Result<()> {
         self.invalidator.debug_assert_paint();
 
         let visible_bounds = bounds.intersect(&image_bounds);
@@ -5444,9 +5387,7 @@ impl Window {
 
         self.next_frame.scene.insert_primitive(PolychromeSprite {
             order: 0,
-            // DEVHUB: `pad` is for alignment and the shader does not read it. Here it is used as the **nearest-neighbor sampler marker**
-            // (the instance layout stays unchanged, so other images and the shader are not affected).
-            pad: u32::from(nearest),
+            pad: 0,
             grayscale: grayscale.into(),
             bounds: visible_bounds_snapped,
             content_mask,

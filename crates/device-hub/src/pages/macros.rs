@@ -306,7 +306,7 @@ impl Shell {
             "ins-key",
             "Insert key",
             Some("keyboard"),
-            Btn::Glass,
+            Btn::Secondary,
             cx,
             |this, _, cx| {
                 this.modal = Some(Modal::CaptureKey {

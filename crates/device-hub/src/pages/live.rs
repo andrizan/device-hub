@@ -224,7 +224,7 @@ impl Shell {
                 "fx-stop",
                 "Stop",
                 Some("square"),
-                Btn::Glass,
+                Btn::Secondary,
                 cx,
                 |this, _, cx| this.fx_stop(cx),
             )

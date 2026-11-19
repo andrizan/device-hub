@@ -2,8 +2,8 @@
 
 > Audience: the implementing agent (**this time everything, frontend included**).
 > Prerequisite reading: `AGENTS.md` → `docs/FRONTEND.md` → `docs/BACKEND_BRIEF.md` → `docs/PROTOCOL_NOTES.md`.
-> Rules (`AGENTS.md`): the UI branches on caps only / the contract (`model.rs`) is additive only / `paint_backdrop` goes through
-> `glass.rs` / do not touch a real device while the Web version's tab is open.
+> Rules (`AGENTS.md`): the UI branches on caps only / the contract (`model.rs`) is additive only / surfaces are flat, through
+> `surface.rs` (no `paint_backdrop`) / do not touch a real device while the Web version's tab is open.
 
 ---
 

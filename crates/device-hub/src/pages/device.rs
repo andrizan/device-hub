@@ -239,14 +239,7 @@ impl Shell {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .bg(theme::accent_grad())
-                    .shadow(vec![BoxShadow {
-                        color: theme::alpha(p.accent, 0.4),
-                        offset: point(px(0.), px(10.)),
-                        blur_radius: px(24.),
-                        spread_radius: px(-8.),
-                        inset: false,
-                    }])
+                    .bg(theme::accent_fill())
                     .child(ui::icon(icon, 30., p.on_accent)),
             )
             .child(

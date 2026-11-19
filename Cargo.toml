@@ -6,11 +6,10 @@ members = ["crates/*"]
 edition = "2021"
 license = "MIT OR Apache-2.0"
 
-# To add a GPU backdrop-filter (the base of Liquid Glass) to GPUI, the core and
-# the Windows renderer are replaced with the copies in vendor/. See vendor/README.md for the changes.
+# The GPUI core is replaced with the patched copy in vendor/ (spring wheel scrolling).
+# See vendor/README.md for the changes.
 [patch.crates-io]
 gpui-pre = { path = "vendor/gpui-pre" }
-gpui-pre-windows = { path = "vendor/gpui-pre-windows" }
 
 [profile.release]
 strip = true

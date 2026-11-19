@@ -3,8 +3,8 @@
 //! ```text
 //!  ┌──────────────┬─────────────────────────────────────────┐
 //!  │ ┌──────────┐ │  Device name            [Profile ▾] ●Sync │
-//!  │ │ sidebar  │ │  ( DPI | Buttons | Macros | General )      │  ← floating Clear glass
-//!  │ │  (glass) │ │  ┌ card ─────────┐ ┌ card ────────┐       │  ← Panel glass
+//!  │ │ sidebar  │ │  ( DPI | Buttons | Macros | General )      │  ← tab bar (Bar)
+//!  │ │  (Bar)   │ │  ┌ card ─────────┐ ┌ card ────────┐       │  ← cards (Card)
 //!  │ └──────────┘ │  └───────────────┘ └──────────────┘       │
 //!  └──────────────┴─────────────────────────────────────────┘
 //! ```
@@ -14,7 +14,7 @@
 
 use crate::prefs::Prefs;
 use crate::store::{Hub, Msg};
-use crate::{glass, motion, theme, ui, wallpaper};
+use crate::{motion, surface, theme, ui};
 use devhub_core::*;
 use futures::StreamExt;
 use gpui_kit::component::input::{InputEvent, InputState};
@@ -441,7 +441,6 @@ impl Shell {
         theme::set_light(prefs.light());
         theme::set_accent(prefs.accent);
         theme::set_font_id(&prefs.font);
-        theme::set_glass(prefs.glass && std::env::var_os("DEVHUB_FAST").is_none());
         theme::set_motion(prefs.motion);
 
         let (tx, mut rx) = futures::channel::mpsc::unbounded::<Msg>();
@@ -1470,15 +1469,8 @@ impl Shell {
             .flex_none()
             .flex()
             .flex_col()
-            .rounded(px(26.))
-            .shadow(vec![BoxShadow {
-                color: p.shadow,
-                offset: point(px(0.), px(14.)),
-                blur_radius: px(40.),
-                spread_radius: px(-10.),
-                inset: false,
-            }])
-            .child(glass::surface(glass::Kind::Clear, 26.))
+            .rounded(px(theme::R_CARD))
+            .child(surface::fill(surface::Kind::Bar, theme::R_CARD))
             .child(
                 div()
                     .relative()
@@ -1499,18 +1491,11 @@ impl Shell {
                             .child(
                                 div()
                                     .size(px(30.))
-                                    .rounded(px(10.))
-                                    .bg(theme::accent_grad())
+                                    .rounded(px(theme::R_CTRL))
+                                    .bg(theme::accent_fill())
                                     .flex()
                                     .items_center()
                                     .justify_center()
-                                    .shadow(vec![BoxShadow {
-                                        color: theme::alpha(p.accent, 0.45),
-                                        offset: point(px(0.), px(6.)),
-                                        blur_radius: px(16.),
-                                        spread_radius: px(-4.),
-                                        inset: false,
-                                    }])
                                     .child(ui::icon("orbit", 17., p.on_accent)),
                             )
                             .child(
@@ -1849,7 +1834,7 @@ impl Shell {
     }
 }
 
-/// Clear the window-frame colors of the gpui-component theme that get in the way of the glass.
+/// Clear the window-frame colors of the gpui-component theme (the app draws its own title bar).
 pub fn clear_component_chrome(cx: &mut App) {
     let t = Theme::global_mut(cx);
     t.colors.title_bar = hsla(0., 0., 0., 0.);
@@ -1864,7 +1849,6 @@ impl Render for Shell {
         if active != self.last_window_active {
             self.last_window_active = active;
         }
-        let wall = wallpaper::current(self.prefs.wallpaper.as_deref());
         let content = self.content(window, cx);
         let sidebar = self.sidebar(cx).into_any_element();
 
@@ -1910,14 +1894,8 @@ impl Render for Shell {
                 }),
             )
             .child(motion::track("root-size"))
-            // Wallpaper
-            .child(
-                div()
-                    .absolute()
-                    .inset_0()
-                    .bg(p.solid)
-                    .child(img(wall).size_full().object_fit(ObjectFit::Cover)),
-            )
+            // Background
+            .child(div().absolute().inset_0().bg(p.bg))
             // Sidebar | content
             .child(
                 div()

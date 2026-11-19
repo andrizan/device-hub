@@ -3,7 +3,7 @@
 //! Every component builds listeners targeting `Shell`, so it takes `cx: &mut Context<Shell>`.
 
 use crate::app::{CbF, PopItem, Shell};
-use crate::{glass, motion, theme};
+use crate::{motion, surface, theme};
 use gpui_kit::component::input::InputState;
 use gpui_kit::prelude::*;
 use gpui_kit::*;
@@ -70,20 +70,12 @@ pub fn big_number(text: impl Into<SharedString>, size: f32) -> Div {
 
 // ====================================================================== Surfaces
 
-/// Glass card. Add children to use it.
+/// Card. Add children to use it.
 pub fn card() -> Div {
-    let p = theme::pal();
     div()
         .relative()
         .rounded(px(theme::R_CARD))
-        .shadow(vec![BoxShadow {
-            color: theme::alpha(p.shadow, p.shadow.a * 0.8),
-            offset: point(px(0.), px(10.)),
-            blur_radius: px(32.),
-            spread_radius: px(-12.),
-            inset: false,
-        }])
-        .child(glass::surface(glass::Kind::Panel, theme::R_CARD))
+        .child(surface::fill(surface::Kind::Card, theme::R_CARD))
 }
 
 /// Card with a heading. Add rows to `body`.
@@ -283,7 +275,7 @@ pub fn empty_state(icon_name: &str, title_text: &str, body_text: &str) -> Div {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Btn {
     Primary,
-    Glass,
+    Secondary,
     Ghost,
     Danger,
 }
@@ -299,9 +291,9 @@ pub fn button(
     let p = theme::pal();
     let id: SharedString = id.into();
     let (fg, bg): (Hsla, Option<Background>) = match style {
-        Btn::Primary => (p.on_accent, Some(theme::accent_grad())),
+        Btn::Primary => (p.on_accent, Some(theme::accent_fill())),
         Btn::Danger => (p.danger, Some(theme::alpha(p.danger, 0.12).into())),
-        Btn::Glass => (p.fg, None),
+        Btn::Secondary => (p.fg, None),
         Btn::Ghost => (p.sub, None),
     };
     let mut d = div()
@@ -319,27 +311,18 @@ pub fn button(
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(fg);
     match style {
-        Btn::Glass => {
-            d = d.child(glass::surface_hover(
-                glass::Kind::Frost,
-                theme::R_CTRL,
-                id.to_string(),
-            ));
+        Btn::Secondary => {
+            d = d
+                .bg(p.ctrl)
+                .border_1()
+                .border_color(p.hair)
+                .hover(|s| s.bg(p.ctrl_hover));
         }
         Btn::Ghost => {
             d = d.hover(|s| s.bg(p.ctrl));
         }
         Btn::Primary => {
-            d = d
-                .when_some(bg, |d, b| d.bg(b))
-                .shadow(vec![BoxShadow {
-                    color: theme::alpha(p.accent, 0.4),
-                    offset: point(px(0.), px(6.)),
-                    blur_radius: px(16.),
-                    spread_radius: px(-6.),
-                    inset: false,
-                }])
-                .hover(|s| s.opacity(0.92));
+            d = d.when_some(bg, |d, b| d.bg(b)).hover(|s| s.opacity(0.9));
         }
         Btn::Danger => {
             d = d
@@ -415,27 +398,14 @@ pub fn toggle(
                 .w(px(knob))
                 .h(px(22.))
                 .rounded(px(11.))
-                .bg(theme::hex(0xffffff, 1. - squash * 0.75))
+                .bg(theme::hex(0xffffff, 1.))
                 .shadow(vec![BoxShadow {
                     color: theme::hex(0x000000, 0.25),
                     offset: point(px(0.), px(2.)),
                     blur_radius: px(6.),
                     spread_radius: px(0.),
                     inset: false,
-                }])
-                .when(squash > 0.05, |d| {
-                    d.child(
-                        canvas(
-                            |b, _, _| b,
-                            |_, b, w, _| {
-                                let r = f32::from(b.size.height) / 2.;
-                                glass::bubble(b, r, w)
-                            },
-                        )
-                        .absolute()
-                        .inset_0(),
-                    )
-                }),
+                }]),
         )
         .on_click(cx.listener(move |this, _, _, cx| {
             f(this, !on, cx);
@@ -525,11 +495,7 @@ pub fn slider_curve(
                         .h_full()
                         .w(relative(ts))
                         .rounded(px(3.))
-                        .bg(linear_gradient(
-                            90.,
-                            linear_color_stop(theme::alpha(accent, 0.55), 0.),
-                            linear_color_stop(accent, 1.),
-                        )),
+                        .bg(accent),
                 )
                 // Knob
                 .child(
@@ -541,27 +507,14 @@ pub fn slider_curve(
                         .w(px(thumb_w))
                         .h(px(22. + grow * 4.))
                         .rounded(px(13.))
-                        .bg(theme::hex(0xffffff, 1. - grow * 0.8))
+                        .bg(theme::hex(0xffffff, 1.))
                         .shadow(vec![BoxShadow {
                             color: theme::hex(0x000000, 0.28),
                             offset: point(px(0.), px(2.)),
                             blur_radius: px(7.),
                             spread_radius: px(0.),
                             inset: false,
-                        }])
-                        .when(grow > 0.05, |d| {
-                            d.child(
-                                canvas(
-                                    |b, _, _| b,
-                                    |_, b, w, _| {
-                                        let r = f32::from(b.size.height) / 2.;
-                                        glass::bubble(b, r, w)
-                                    },
-                                )
-                                .absolute()
-                                .inset_0(),
-                            )
-                        }),
+                        }]),
                 ),
         )
         .on_mouse_down(
@@ -678,21 +631,14 @@ pub fn segmented(
                     .bottom_0()
                     .left(relative(x / n as f32))
                     .w(relative(1. / n as f32))
-                    .rounded(px(9.))
+                    .rounded(px(6.))
                     .bg(if p.light {
-                        theme::hex(0xffffff, 0.95)
+                        theme::hex(0xffffff, 1.)
                     } else {
-                        theme::hex(0xffffff, 0.16)
+                        theme::hex(0xffffff, 0.12)
                     })
                     .border_1()
-                    .border_color(p.edge)
-                    .shadow(vec![BoxShadow {
-                        color: theme::hex(0x000000, if p.light { 0.12 } else { 0.3 }),
-                        offset: point(px(0.), px(2.)),
-                        blur_radius: px(8.),
-                        spread_radius: px(-2.),
-                        inset: false,
-                    }]),
+                    .border_color(p.edge),
             ),
     );
     for (i, o) in options.iter().enumerate() {
@@ -750,12 +696,12 @@ pub fn select(
         .flex()
         .items_center()
         .gap(px(8.))
-        .rounded(px(10.))
+        .rounded(px(theme::R_CTRL))
         .cursor_pointer()
         .child(motion::track(anchor))
-        .child(glass::surface_hover(
-            glass::Kind::Frost,
-            10.,
+        .child(surface::fill_hover(
+            surface::Kind::Control,
+            theme::R_CTRL,
             format!("sel:{id}"),
         ))
         .child(
@@ -943,15 +889,8 @@ pub fn tab_bar(
         .flex_row()
         .p(px(5.))
         .gap(px(2.))
-        .rounded(px(18.))
-        .shadow(vec![BoxShadow {
-            color: theme::alpha(p.shadow, p.shadow.a * 0.7),
-            offset: point(px(0.), px(8.)),
-            blur_radius: px(24.),
-            spread_radius: px(-10.),
-            inset: false,
-        }])
-        .child(glass::surface(glass::Kind::Clear, 18.))
+        .rounded(px(10.))
+        .child(surface::fill(surface::Kind::Bar, 10.))
         .child(motion::track(cont));
     if w > 1. {
         bar = bar.child(
@@ -961,21 +900,10 @@ pub fn tab_bar(
                 .bottom(px(5.))
                 .left(px(x))
                 .w(px(w))
-                .rounded(px(13.))
-                .bg(if p.light {
-                    theme::hex(0xffffff, 0.9)
-                } else {
-                    theme::hex(0xffffff, 0.14)
-                })
+                .rounded(px(7.))
+                .bg(p.ctrl_hover)
                 .border_1()
-                .border_color(p.edge)
-                .shadow(vec![BoxShadow {
-                    color: theme::hex(0x000000, if p.light { 0.1 } else { 0.35 }),
-                    offset: point(px(0.), px(3.)),
-                    blur_radius: px(10.),
-                    spread_radius: px(-3.),
-                    inset: false,
-                }]),
+                .border_color(p.edge),
         );
     }
     for (i, (label, ic)) in tabs.iter().enumerate() {

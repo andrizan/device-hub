@@ -131,11 +131,7 @@ impl Shell {
                 .h(px(k.h * u - gap))
                 .rounded(px(u * 0.18))
                 .cursor_pointer()
-                .bg(linear_gradient(
-                    180.,
-                    linear_color_stop(face, 0.),
-                    linear_color_stop(theme::alpha(face, face.a * 0.72), 1.),
-                ))
+                .bg(face)
                 .border_1()
                 .border_color(if c.selected {
                     p.accent
@@ -799,7 +795,7 @@ impl Shell {
                     "live",
                     if on { "End test" } else { "Stroke test" },
                     Some("activity"),
-                    if on { Btn::Primary } else { Btn::Glass },
+                    if on { Btn::Primary } else { Btn::Secondary },
                     cx,
                     move |this, _, cx| {
                         if let Some(id) = this.device_id() {

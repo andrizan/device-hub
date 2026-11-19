@@ -50,9 +50,6 @@ pub struct Scene {
     pub subpixel_sprites: Vec<SubpixelSprite>,
     pub polychrome_sprites: Vec<PolychromeSprite>,
     pub surfaces: Vec<PaintSurface>,
-    /// DEVHUB: GPU backdrop-filter regions (blur / saturate / refraction of
-    /// whatever was drawn underneath, like CSS `backdrop-filter`).
-    pub backdrops: Vec<Backdrop>,
 }
 
 #[expect(missing_docs)]
@@ -69,7 +66,6 @@ impl Scene {
         self.subpixel_sprites.clear();
         self.polychrome_sprites.clear();
         self.surfaces.clear();
-        self.backdrops.clear();
     }
 
     pub fn len(&self) -> usize {
@@ -97,10 +93,6 @@ impl Scene {
         if clipped_bounds.is_empty() {
             return;
         }
-        // A backdrop is ordered by its own bounds like any primitive. Its blur
-        // also reads a margin around it; at capture time that margin holds only
-        // what was ordered below it (siblings sharing its order are filtered
-        // from the same capture), which is what lies behind the glass.
 
         let order = self
             .layer_stack
@@ -141,10 +133,6 @@ impl Scene {
                 surface.order = order;
                 self.surfaces.push(surface.clone());
             }
-            Primitive::Backdrop(backdrop) => {
-                backdrop.order = order;
-                self.backdrops.push(*backdrop);
-            }
         }
         self.paint_operations
             .push(PaintOperation::Primitive(primitive));
@@ -172,10 +160,6 @@ impl Scene {
         self.polychrome_sprites
             .sort_by_key(|sprite| (sprite.order, sprite.tile.texture_id.index));
         self.surfaces.sort_by_key(|surface| surface.order);
-        self.backdrops.sort_by_key(|backdrop| backdrop.order);
-        // Identical neighbouring materials in one paint layer share one optical
-        // surface. Keep legacy filters untouched (some intentionally accumulate).
-        self.backdrops.dedup_by(|a, b| a.glass[0] > 0.0 && a == b);
     }
 
     #[cfg_attr(
@@ -203,8 +187,6 @@ impl Scene {
             polychrome_sprites_iter: self.polychrome_sprites.iter().peekable(),
             surfaces_start: 0,
             surfaces_iter: self.surfaces.iter().peekable(),
-            backdrops_start: 0,
-            backdrops_iter: self.backdrops.iter().peekable(),
         }
     }
 }
@@ -218,9 +200,6 @@ impl Scene {
     allow(dead_code)
 )]
 pub(crate) enum PrimitiveKind {
-    /// First: at an equal order, the backdrop is sampled before anything
-    /// else of that order is drawn on top of it.
-    Backdrop,
     Shadow,
     #[default]
     Quad,
@@ -249,7 +228,6 @@ pub enum Primitive {
     SubpixelSprite(SubpixelSprite),
     PolychromeSprite(PolychromeSprite),
     Surface(PaintSurface),
-    Backdrop(Backdrop),
 }
 
 #[expect(missing_docs)]
@@ -264,7 +242,6 @@ impl Primitive {
             Primitive::SubpixelSprite(sprite) => &sprite.bounds,
             Primitive::PolychromeSprite(sprite) => &sprite.bounds,
             Primitive::Surface(surface) => &surface.bounds,
-            Primitive::Backdrop(backdrop) => &backdrop.bounds,
         }
     }
 
@@ -278,7 +255,6 @@ impl Primitive {
             Primitive::SubpixelSprite(sprite) => &sprite.content_mask,
             Primitive::PolychromeSprite(sprite) => &sprite.content_mask,
             Primitive::Surface(surface) => &surface.content_mask,
-            Primitive::Backdrop(backdrop) => &backdrop.content_mask,
         }
     }
 }
@@ -307,8 +283,6 @@ struct BatchIterator<'a> {
     polychrome_sprites_iter: Peekable<slice::Iter<'a, PolychromeSprite>>,
     surfaces_start: usize,
     surfaces_iter: Peekable<slice::Iter<'a, PaintSurface>>,
-    backdrops_start: usize,
-    backdrops_iter: Peekable<slice::Iter<'a, Backdrop>>,
 }
 
 impl<'a> Iterator for BatchIterator<'a> {
@@ -341,10 +315,6 @@ impl<'a> Iterator for BatchIterator<'a> {
             (
                 self.surfaces_iter.peek().map(|s| s.order),
                 PrimitiveKind::Surface,
-            ),
-            (
-                self.backdrops_iter.peek().map(|b| b.order),
-                PrimitiveKind::Backdrop,
             ),
         ];
         orders_and_kinds.sort_by_key(|(order, kind)| (order.unwrap_or(u32::MAX), *kind));
@@ -457,10 +427,7 @@ impl<'a> Iterator for BatchIterator<'a> {
                 })
             }
             PrimitiveKind::PolychromeSprite => {
-                let first = self.polychrome_sprites_iter.peek().unwrap();
-                let texture_id = first.tile.texture_id;
-                // DEVHUB: `pad` is the nearest-neighbor sampler marker (the shader does not read it).
-                let nearest = first.pad != 0;
+                let texture_id = self.polychrome_sprites_iter.peek().unwrap().tile.texture_id;
                 let sprites_start = self.polychrome_sprites_start;
                 let mut sprites_end = sprites_start + 1;
                 self.polychrome_sprites_iter.next();
@@ -469,7 +436,6 @@ impl<'a> Iterator for BatchIterator<'a> {
                     .next_if(|sprite| {
                         (sprite.order, batch_kind) < max_order_and_kind
                             && sprite.tile.texture_id == texture_id
-                            && (sprite.pad != 0) == nearest
                     })
                     .is_some()
                 {
@@ -479,7 +445,6 @@ impl<'a> Iterator for BatchIterator<'a> {
                 Some(PrimitiveBatch::PolychromeSprites {
                     texture_id,
                     range: sprites_start..sprites_end,
-                    nearest,
                 })
             }
             PrimitiveKind::Surface => {
@@ -495,20 +460,6 @@ impl<'a> Iterator for BatchIterator<'a> {
                 }
                 self.surfaces_start = surfaces_end;
                 Some(PrimitiveBatch::Surfaces(surfaces_start..surfaces_end))
-            }
-            PrimitiveKind::Backdrop => {
-                let start = self.backdrops_start;
-                let mut end = start + 1;
-                self.backdrops_iter.next();
-                while self
-                    .backdrops_iter
-                    .next_if(|b| (b.order, batch_kind) < max_order_and_kind)
-                    .is_some()
-                {
-                    end += 1;
-                }
-                self.backdrops_start = end;
-                Some(PrimitiveBatch::Backdrops(start..end))
             }
         }
     }
@@ -540,11 +491,8 @@ pub enum PrimitiveBatch {
     PolychromeSprites {
         texture_id: AtlasTextureId,
         range: Range<usize>,
-        /// DEVHUB: whether to magnify with the nearest-neighbor (POINT) sampler (pixel-art landscape wallpaper).
-        nearest: bool,
     },
     Surfaces(Range<usize>),
-    Backdrops(Range<usize>),
 }
 
 impl PrimitiveBatch {
@@ -569,20 +517,14 @@ impl PrimitiveBatch {
                     texture_id.index
                 )
             }
-            Self::PolychromeSprites {
-                texture_id,
-                range,
-                nearest,
-            } => {
+            Self::PolychromeSprites { texture_id, range } => {
                 format!(
-                    "polychrome sprites ({}) on atlas {}{}",
+                    "polychrome sprites ({}) on atlas {}",
                     range.len(),
-                    texture_id.index,
-                    if *nearest { " (nearest)" } else { "" }
+                    texture_id.index
                 )
             }
             Self::Surfaces(range) => format!("surfaces ({})", range.len()),
-            Self::Backdrops(range) => format!("backdrops ({})", range.len()),
         }
     }
 }
@@ -818,93 +760,6 @@ pub struct PolychromeSprite {
 impl From<PolychromeSprite> for Primitive {
     fn from(sprite: PolychromeSprite) -> Self {
         Primitive::PolychromeSprite(sprite)
-    }
-}
-
-/// DEVHUB: a region that filters what has already been drawn beneath it
-/// (CSS `backdrop-filter: blur() saturate() brightness()` plus a Liquid Glass
-/// lens at the rim). All lengths are device pixels.
-#[derive(Debug, Copy, Clone, Default, PartialEq)]
-#[repr(C)]
-pub struct Backdrop {
-    /// Draw order assigned by the scene.
-    pub order: DrawOrder,
-    /// Multiplies the filtered result's coverage (element opacity, fades).
-    pub opacity: f32,
-    /// Region that is filtered.
-    pub bounds: Bounds<ScaledPixels>,
-    /// Clip applied to the region.
-    pub content_mask: ContentMask<ScaledPixels>,
-    /// Rounded corners of the region.
-    pub corner_radii: Corners<ScaledPixels>,
-    /// Gaussian standard deviation (CSS `blur(<length>)`).
-    pub blur: f32,
-    /// CSS `saturate()` amount (1 = unchanged).
-    pub saturation: f32,
-    /// CSS `brightness()` amount (1 = unchanged).
-    pub brightness: f32,
-    /// Width of the refracting rim band; 0 disables the lens.
-    pub bezel: f32,
-    /// Largest inward displacement at the outer edge of the rim.
-    pub refraction: f32,
-    /// Extra displacement of the red channel relative to blue (0.06 = 6%).
-    pub dispersion: f32,
-    /// Coverage ramp: 0 none, 1 fades out downwards (top scroll edge),
-    /// 2 fades out upwards (bottom scroll edge).
-    pub mask: f32,
-    /// Rim lighting: (top-left specular, bottom-right specular, inner glow, lower shade).
-    pub light: [f32; 4],
-    /// Glossy rim of a recessed window: (band width in device px, band whiteness,
-    /// key light on the top lip, fill light on the bottom lip). For a bubble lens
-    /// (`lens.x > 1`): (unused, -, studio reflection, caustic).
-    pub rim: [f32; 4],
-    /// (center magnification (1 = none), window recess shade / bubble edge darkening,
-    /// seam line between rim and window, gloss on the top of the rim).
-    pub lens: [f32; 4],
-    /// Live Liquid Glass: (0 legacy / 1 Regular / 2 Clear, interaction energy,
-    /// light theme (0 dark, 1 light), device pixels per material pixel).
-    pub glass: [f32; 4],
-}
-
-/// DEVHUB: the filter half of [`Backdrop`], in logical pixels, for
-/// `Window::paint_backdrop`.
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub struct BackdropFilter {
-    /// Gaussian standard deviation (CSS `blur(<length>)`).
-    pub blur: f32,
-    /// CSS `saturate()` amount (1 = unchanged).
-    pub saturation: f32,
-    /// CSS `brightness()` amount (1 = unchanged).
-    pub brightness: f32,
-    /// Width of the refracting rim band; 0 disables the lens.
-    pub bezel: f32,
-    /// Largest inward displacement at the outer edge of the rim.
-    pub refraction: f32,
-    /// Channel split of the lens (0.06 = blue moves 6% less than red).
-    pub dispersion: f32,
-    /// See [`Backdrop::mask`].
-    pub mask: f32,
-    /// See [`Backdrop::light`].
-    pub light: [f32; 4],
-    /// See [`Backdrop::rim`] (the width is in logical pixels here).
-    pub rim: [f32; 4],
-    /// See [`Backdrop::lens`].
-    pub lens: [f32; 4],
-    /// See [`Backdrop::glass`]. The last component is a logical material scale.
-    pub glass: [f32; 4],
-    /// Multiplies the element opacity (fades of the region itself).
-    pub opacity: f32,
-}
-
-impl Default for BackdropFilter {
-    fn default() -> Self {
-        Self { blur: 0.0, saturation: 1.0, brightness: 1.0, bezel: 0.0, refraction: 0.0, dispersion: 0.0, mask: 0.0, light: [0.0; 4], rim: [0.0; 4], lens: [1.0, 0.0, 0.0, 0.0], glass: [0.0; 4], opacity: 1.0 }
-    }
-}
-
-impl From<Backdrop> for Primitive {
-    fn from(backdrop: Backdrop) -> Self {
-        Primitive::Backdrop(backdrop)
     }
 }
 

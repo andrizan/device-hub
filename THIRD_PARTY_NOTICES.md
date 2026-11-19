@@ -6,8 +6,7 @@ Device HUB bundles or derives from the following third-party works.
 
 | Package | Copyright | License | Notes |
 | --- | --- | --- | --- |
-| `vendor/gpui-pre`, `vendor/gpui-pre-windows` | Zed Industries | Apache-2.0 (`LICENSE-APACHE` in each source dir; `licenses/gpui-pre*-LICENSE-APACHE` in Windows packages) | GPUI fork with a GPU backdrop-filter patch; see `vendor/README.md` in the source tree |
-| Shader material adapted from gpui-liquid-glass | 1234igor | MIT (`licenses/gpui-liquid-glass-LICENSE-MIT`) | DirectX adaptation of revision `c002c4d3758f934fdfaf173e8214a24eb65a05cd` |
+| `vendor/gpui-pre` | Zed Industries | Apache-2.0 (`LICENSE-APACHE` in the source dir; `licenses/gpui-pre-LICENSE-APACHE` in Windows packages) | GPUI fork with a spring wheel-scrolling patch; see `vendor/README.md` in the source tree |
 
 ## Bundled fonts (`crates/device-hub/fonts/`)
 

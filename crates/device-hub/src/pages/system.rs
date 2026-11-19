@@ -106,7 +106,7 @@ impl Shell {
                 "fw-dismiss",
                 "Close",
                 Some("x"),
-                Btn::Glass,
+                Btn::Secondary,
                 cx,
                 move |this, _, cx| {
                     this.hub.fw_dismiss(&did);
@@ -161,7 +161,7 @@ impl Shell {
                             format!("prof-use-{i}"),
                             "Switch",
                             None,
-                            Btn::Glass,
+                            Btn::Secondary,
                             cx,
                             move |this, _, cx| {
                                 this.apply(Change::Profile(i), cx);
@@ -218,7 +218,7 @@ impl Shell {
                         "export",
                         "Export",
                         Some("download"),
-                        Btn::Glass,
+                        Btn::Secondary,
                         cx,
                         move |this, _, cx| {
                             let Some(st) = this.cur().and_then(|s| s.state.clone()) else {
@@ -251,7 +251,7 @@ impl Shell {
                         "import",
                         "Import",
                         Some("upload"),
-                        Btn::Glass,
+                        Btn::Secondary,
                         cx,
                         |this, _, cx| {
                             let Some(f) = rfd::FileDialog::new()
@@ -375,7 +375,7 @@ impl Shell {
                         format!("pre-apply-{i}"),
                         "Apply",
                         Some("check"),
-                        Btn::Glass,
+                        Btn::Secondary,
                         cx,
                         move |this, _, cx| match crate::presets::load(&a) {
                             Ok(st) => this.apply_preset(&a.name, st, cx),

@@ -22,7 +22,7 @@ foreach ($name in 'LICENSE-MIT', 'LICENSE-APACHE', 'THIRD_PARTY_NOTICES.md') {
 }
 
 Copy-Item -Path (Join-Path $root 'licenses/*') -Destination $licenses
-foreach ($name in 'gpui-pre', 'gpui-pre-windows') {
+foreach ($name in 'gpui-pre') {
     Copy-Item -LiteralPath (Join-Path $root "vendor/$name/LICENSE-APACHE") `
         -Destination (Join-Path $licenses "$name-LICENSE-APACHE")
 }

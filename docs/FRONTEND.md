@@ -7,10 +7,9 @@ src/
   store.rs       Hub / Session: a worker thread per device, optimistic updates (apply_local), results received over a futures channel
   overlay.rs     popup menus, modals (confirm / button assignment / key capture / color / text), toasts
   ui.rs          components: card / row / toggle / slider(_curve) / segmented / select / stepper / tab_bar / button / chip
-  glass.rs       Liquid Glass surfaces (Panel / Clear / Frost / Sheet) and the bubble lens
+  surface.rs     flat surfaces (Card / Bar / Control / Popup): one opaque quad + 1px border
   motion.rs      critically damped springs, recording of element rects (track / rect / hovered). Requests the next frame only while moving
   theme.rs       colors (dark/light, 6 accent colors), fonts
-  wallpaper.rs   generation of the aurora wallpaper / user image
   prefs.rs       %APPDATA%\DeviceHub\prefs.json
   keycode.rs     GPUI key name → HID usage
   palette.rs     command palette (Ctrl+K)

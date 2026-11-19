@@ -114,7 +114,7 @@ fn chips_row_impl(
                 })
                 .text_color(if on_i { p.on_accent } else { p.sub })
                 .bg(if on_i {
-                    theme::accent_grad()
+                    theme::accent_fill()
                 } else {
                     theme::alpha(p.faint, 0.08).into()
                 })
@@ -279,7 +279,7 @@ impl Shell {
                     format!("prof-apply-{i}"),
                     "Apply",
                     Some("play"),
-                    Btn::Glass,
+                    Btn::Secondary,
                     cx,
                     move |this, _, cx| this.apply_profile(i, cx),
                 ))
@@ -563,7 +563,7 @@ impl Shell {
                         format!("rule-edit-{i}"),
                         if editing { "Close" } else { "Edit" },
                         Some("pencil"),
-                        if editing { Btn::Glass } else { Btn::Ghost },
+                        if editing { Btn::Secondary } else { Btn::Ghost },
                         cx,
                         move |this, w, cx| {
                             if this.auto_form.edit_rule == Some(i) {

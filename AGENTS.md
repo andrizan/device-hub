@@ -1,15 +1,15 @@
 # GPUI Device HUB
 
 A personal GPUI app for Windows that configures mice and keyboards
-without leaving a browser (www.mouse.fit / hub.xsyd.top) open. The design is Liquid Glass.
+without leaving a browser (www.mouse.fit / hub.xsyd.top) open. The design is flat and built for low CPU/GPU use.
 
 ## Layout
 
 ```
 crates/devhub-core   contract v2 (model / backend traits) + keys + registry + demo backend   ← boundary between UI and HID
 crates/devhub-hid    real-device drivers (HID)                                                ← backend side
-crates/device-hub    GPUI frontend (Liquid Glass)                                             ← frontend side
-vendor/              gpui-pre / gpui-pre-windows with a GPU backdrop added (GPU backdrop patch)
+crates/device-hub    GPUI frontend (flat design)                                              ← frontend side
+vendor/              gpui-pre with one small patch (spring wheel scrolling)
 docs/NEXT_TASKS.md      what to do next (v4)
 docs/LAMZU_MAYA_X_V2_AUDIT2.md  LAMZU MAYA X V2 re-audit (fixes needed P1/P2, name mapping table, work order)
 docs/POLLING_RATE.md    verification of the measured polling rate and improvement proposals (the 2700Hz issue)
@@ -73,7 +73,6 @@ docs/FRONTEND.md        frontend structure
 cargo run -p device-hub                  # real device (falls back to the demo automatically if HID cannot be opened)
 cargo run --release -p device-hub        # use release for everyday use (lighter startup, rendering, memory)
 DEVHUB_DEMO=1 cargo run -p device-hub    # always demo
-DEVHUB_FAST=1 cargo run -p device-hub    # GPU glass off
 cargo run -p devhub-hid --example enum   # HID enumeration
 cargo run -p devhub-obs --example preview # check the overlay rendering as a PNG without OBS
 cargo clippy --workspace
@@ -99,8 +98,8 @@ cp target/release/devhub_obs.dll "/c/ProgramData/obs-studio/plugins/devhub_obs/b
 ```
 
 The Rust toolchain is pinned to 1.95.0 in `rust-toolchain.toml` (required by gpui-kit 0.9.1).
-`cargo check` also passes on Linux (gpui-pre-wgpu does not know the vendor backdrop, so only when
-building on Linux does the wgpu side need a 2-line patch in `.cargo/config.toml` — not needed on Windows).
+On Linux, `cargo check` used to need a 2-line wgpu patch because gpui-pre-wgpu did not know the vendor
+backdrop. The backdrop was removed on 2026-11-19, so that patch should no longer be needed (not re-checked on Linux).
 
 ## Rules
 
@@ -108,7 +107,9 @@ building on Linux does the wgpu side need a 2-line patch in `.cargo/config.toml`
   A new device is added with just a registry entry + a driver.
 - Declare scalar settings with `SettingSpec` and single-button operations with `ActionSpec` (they appear in the UI without changing the contract).
 - When changing the contract (`devhub-core/src/model.rs`), **only add**. Update demo.rs too.
-- Call `Window::paint_backdrop` only through `device-hub/src/glass.rs`.
-- Keep the patches in `vendor/` to a minimal diff against upstream (crates.io `gpui-pre`/`gpui-pre-windows` 0.3.11).
+- Surfaces are flat: every card, bar, control and popup is filled through `device-hub/src/surface.rs`.
+  Liquid Glass (GPU backdrop blur/refraction, wallpaper) was removed on 2026-11-19 for performance.
+  Do not bring back a GPU backdrop filter, translucent layered surfaces or large blurred shadows.
+- Keep the patches in `vendor/` to a minimal diff against upstream (crates.io `gpui-pre` 0.3.12; `gpui-pre-windows` is used unpatched from crates.io).
   Mark each changed place with a `DEVHUB` comment (see `vendor/README.md`).
 - Do not operate the real device while a Web version tab is open (they compete for HID).

@@ -297,7 +297,11 @@ impl Shell {
             } else {
                 "play"
             }),
-            if a.danger { Btn::Danger } else { Btn::Glass },
+            if a.danger {
+                Btn::Danger
+            } else {
+                Btn::Secondary
+            },
             cx,
             move |this, w, cx| this.start_action(&a2, w, cx),
         );

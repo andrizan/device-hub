@@ -2,7 +2,7 @@
 
 use crate::app::{Modal, Shell};
 use crate::ui::{self, Btn};
-use crate::{glass, keycode, motion, theme};
+use crate::{keycode, motion, surface, theme};
 use devhub_core::keys::{self, MEDIA_FNS, MOUSE_FNS};
 use devhub_core::*;
 use gpui_kit::component::input::Input;
@@ -98,16 +98,16 @@ impl Shell {
                         .w(px(w))
                         .max_h(px(380.))
                         .opacity(k)
-                        .rounded(px(14.))
+                        .rounded(px(10.))
                         .shadow(vec![BoxShadow {
                             color: p.shadow,
                             offset: point(px(0.), px(16.)),
-                            blur_radius: px(40.),
+                            blur_radius: px(24.),
                             spread_radius: px(-8.),
                             inset: false,
                         }])
                         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        .child(glass::surface(glass::Kind::Sheet, 14.))
+                        .child(surface::fill(surface::Kind::Popup, 10.))
                         .child(
                             div()
                                 .id("popup-list")
@@ -148,17 +148,17 @@ impl Shell {
                     .flex()
                     .items_center()
                     .gap(px(10.))
-                    .rounded(px(14.))
+                    .rounded(px(10.))
                     .opacity(k)
                     .ml(px((1. - k) * 30.))
                     .shadow(vec![BoxShadow {
                         color: p.shadow,
                         offset: point(px(0.), px(10.)),
-                        blur_radius: px(30.),
+                        blur_radius: px(18.),
                         spread_radius: px(-8.),
                         inset: false,
                     }])
-                    .child(glass::surface(glass::Kind::Sheet, 14.))
+                    .child(surface::fill(surface::Kind::Popup, 10.))
                     .child(div().relative().child(ui::icon(
                         if t.error {
                             "circle-alert"
@@ -243,16 +243,16 @@ impl Shell {
                         .max_h(relative(0.9))
                         .mt(px((1. - k) * 24.))
                         .opacity(k)
-                        .rounded(px(24.))
+                        .rounded(px(14.))
                         .shadow(vec![BoxShadow {
                             color: p.shadow,
                             offset: point(px(0.), px(24.)),
-                            blur_radius: px(60.),
+                            blur_radius: px(32.),
                             spread_radius: px(-10.),
                             inset: false,
                         }])
                         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                        .child(glass::surface(glass::Kind::Sheet, 24.))
+                        .child(surface::fill(surface::Kind::Popup, 14.))
                         .child(
                             div()
                                 .relative()
@@ -474,7 +474,7 @@ impl Shell {
                                 "hex-apply",
                                 "Apply",
                                 None,
-                                Btn::Glass,
+                                Btn::Secondary,
                                 cx,
                                 |this, _, cx| {
                                     if let Some(v) = this.input_value("hex", cx) {

@@ -5,7 +5,7 @@ USB DACs — no browser required. Replaces keeping the vendor web configurators
 (`mouse.fit`, `hub.xsyd.top`) open.
 
 Built with [GPUI](https://github.com/zed-industries/zed) (Zed's GPU UI framework)
-with a Liquid Glass design.
+with a flat design that keeps CPU and GPU use low.
 
 ![Device HUB](docs/screenshot.png)
 
@@ -80,10 +80,10 @@ Archive the contents of `dist/` for the full release or the contents of
 ```
 crates/devhub-core    contract: capabilities, device model, backend traits, registry, demo backend
 crates/devhub-hid     Windows HID drivers (mouse.fit report-8/EEPROM, xsyd)
-crates/device-hub     GPUI frontend (Liquid Glass)
+crates/device-hub     GPUI frontend (flat design)
 crates/devhub-obs     OBS source plugin + CPU renderer
 crates/devhub-update  firmware update notifications
-vendor/               gpui-pre / gpui-pre-windows with GPU backdrop patch
+vendor/               gpui-pre with a small patch (spring wheel scrolling)
 docs/                 protocol notes, frontend structure, OBS overlay, add-device guide
 ```
 

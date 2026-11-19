@@ -2,7 +2,7 @@
 
 use crate::app::Shell;
 use crate::ui::{self, Btn};
-use crate::{glass, motion, theme};
+use crate::{motion, surface, theme};
 use devhub_core::*;
 use gpui_kit::prelude::*;
 use gpui_kit::*;
@@ -59,7 +59,7 @@ impl Shell {
                                 .flex()
                                 .justify_center()
                                 .gap(px(8.))
-                                .child(ui::button("rescan", "Rescan", Some("refresh-cw"), Btn::Glass, cx, |this, _, cx| {
+                                .child(ui::button("rescan", "Rescan", Some("refresh-cw"), Btn::Secondary, cx, |this, _, cx| {
                                     this.hub.scan();
                                     cx.notify();
                                 }))
@@ -86,7 +86,6 @@ impl Shell {
         let p = theme::pal();
         let id = d.id.clone();
         let key = format!("tile:{}", d.id);
-        let hover = motion::ease(&format!("tileh:{}", d.id), motion::hovered(&key));
         let name = self
             .prefs
             .nicknames
@@ -121,18 +120,10 @@ impl Shell {
             .relative()
             .w(px(300.))
             .h(px(176.))
-            .mt(px(-hover * 3.))
             .rounded(px(theme::R_CARD))
             .cursor_pointer()
-            .shadow(vec![BoxShadow {
-                color: theme::alpha(p.shadow, p.shadow.a * (0.8 + hover * 0.4)),
-                offset: point(px(0.), px(10. + hover * 8.)),
-                blur_radius: px(32. + hover * 10.),
-                spread_radius: px(-12.),
-                inset: false,
-            }])
             .child(motion::track(key.clone()))
-            .child(glass::surface_hover(glass::Kind::Panel, theme::R_CARD, key))
+            .child(surface::fill_hover(surface::Kind::Card, theme::R_CARD, key))
             .child(
                 div()
                     .relative()
@@ -152,7 +143,7 @@ impl Shell {
                                     .items_center()
                                     .justify_center()
                                     .bg(if d.supported {
-                                        theme::accent_grad()
+                                        theme::accent_fill()
                                     } else {
                                         theme::alpha(p.warn, 0.18).into()
                                     })

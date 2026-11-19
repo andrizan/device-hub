@@ -135,7 +135,7 @@ impl Shell {
                     "cal-finish",
                     if all { "Finish and save" } else { "Save as is" },
                     Some("check"),
-                    if all { Btn::Primary } else { Btn::Glass },
+                    if all { Btn::Primary } else { Btn::Secondary },
                     cx,
                     move |this, _, cx| {
                         if let Some(id) = this.device_id() {
