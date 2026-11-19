@@ -41,7 +41,14 @@ fn cmd(
 }
 
 /// Sends without waiting for a response (same as the official `defaultDevice`; a full reset returns no response).
-fn send_only(dev: &hidapi::HidDevice, b2: u8, sub: u8, f: u8, command: u8, args: &[u8]) -> HubResult<()> {
+fn send_only(
+    dev: &hidapi::HidDevice,
+    b2: u8,
+    sub: u8,
+    f: u8,
+    command: u8,
+    args: &[u8],
+) -> HubResult<()> {
     let mut w = [0u8; 65];
     w[3] = b2;
     w[4] = sub;
@@ -101,8 +108,8 @@ fn cmd_ex(
                     // args[1] in r[8] — an identifier so that sequential slot reads do not
                     // mistakenly accept a neighbor's stale response.
                     let arg_ok = command < 0x80 || args.first().is_none_or(|a| r[7] == *a);
-                    let btn_ok = !(f == 3 && command == 0x80)
-                        || args.get(1).is_none_or(|a| r[8] == *a);
+                    let btn_ok =
+                        !(f == 3 && command == 0x80) || args.get(1).is_none_or(|a| r[8] == *a);
                     let len_ok = (r[4] as usize) <= len.saturating_sub(7);
                     if arg_ok && btn_ok && len_ok {
                         return if r[1] == 0xA1 {
@@ -174,7 +181,7 @@ pub fn open(
         stop,
     };
     d.detect();
-        Ok(d)
+    Ok(d)
 }
 
 impl Drop for LamzuDriver {
@@ -290,7 +297,11 @@ impl LamzuDriver {
     }
 
     fn has(&self, id: &str) -> bool {
-        self.caps.lock().unwrap_or_else(|p| p.into_inner()).setting(id).is_some()
+        self.caps
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .setting(id)
+            .is_some()
     }
 
     fn run(&self, b2: u8, sub: u8, f: u8, command: u8, args: &[u8]) -> HubResult<Vec<u8>> {
@@ -383,7 +394,9 @@ impl LamzuDriver {
         let enabled = u8_at(&r, 8)? == 1;
         let n = u8_at(&r, 12)? as usize;
         if n > 13 || r.len() < 13 + n * 4 {
-            return Err(HubError::Protocol(format!("lamzu: bad adaptive curve n={n}")));
+            return Err(HubError::Protocol(format!(
+                "lamzu: bad adaptive curve n={n}"
+            )));
         }
         let points = (0..n)
             .map(|i| {
@@ -471,8 +484,7 @@ impl LamzuDriver {
             return Err(HubError::Invalid("dpi stage count".into()));
         }
         for s in stages {
-            let ok = (50..=50000).contains(&s.x)
-                && s.y.is_none_or(|y| (50..=50000).contains(&y));
+            let ok = (50..=50000).contains(&s.x) && s.y.is_none_or(|y| (50..=50000).contains(&y));
             if !ok {
                 return Err(HubError::Invalid("dpi value".into()));
             }
@@ -631,7 +643,9 @@ fn encode_button(a: &ButtonAction) -> HubResult<(u8, Vec<u8>)> {
         } => {
             // The official rapid fire (X-click) is fixed to left click. Other buttons are unverified on a real device, so they are not written.
             if *button != MouseFn::Left {
-                return Err(HubError::Unsupported("rapid fire is left click only (same as the official app)"));
+                return Err(HubError::Unsupported(
+                    "rapid fire is left click only (same as the official app)",
+                ));
             }
             let b = 1;
             let [hi, lo] = interval_ms.to_be_bytes();
@@ -683,7 +697,12 @@ fn encode_button(a: &ButtonAction) -> HubResult<(u8, Vec<u8>)> {
 impl DeviceDriver for LamzuDriver {
     fn info(&self) -> DeviceInfo {
         // If the mouse was asleep / undetermined when opened via the dongle, determine it again here.
-        if self.model.lock().unwrap_or_else(|p| p.into_inner()).is_none() {
+        if self
+            .model
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .is_none()
+        {
             self.detect();
         }
         let mut i = self.info.lock().unwrap_or_else(|p| p.into_inner()).clone();
@@ -897,9 +916,7 @@ impl DeviceDriver for LamzuDriver {
     fn apply(&self, change: &Change) -> HubResult<()> {
         // Allow a profile switch even when the active profile is unknown (it can be the means of recovery).
         if let Change::Profile(i) = change {
-            return self
-                .run(2, 1, 0, 5, &[i.saturating_add(1)])
-                .map(|_| ());
+            return self.run(2, 1, 0, 5, &[i.saturating_add(1)]).map(|_| ());
         }
         let prof = self.active_profile()?;
         match change {
@@ -910,11 +927,15 @@ impl DeviceDriver for LamzuDriver {
                         .caps_now()
                         .setting("polling_wireless")
                         .is_some_and(|sp| match &sp.kind {
-                            SettingKind::Choice { options } => options.iter().any(|o| o.value == hz),
+                            SettingKind::Choice { options } => {
+                                options.iter().any(|o| o.value == hz)
+                            }
                             _ => false,
                         });
                     if !allowed {
-                        return Err(HubError::Invalid("polling rate not available on this connection".into()));
+                        return Err(HubError::Invalid(
+                            "polling rate not available on this connection".into(),
+                        ));
                     }
                     let code = match hz {
                         125 => 8,
@@ -1053,7 +1074,9 @@ impl DeviceDriver for LamzuDriver {
                     // The official options are only 1/5/10/15/20/25 minutes (OFF cannot be written).
                     let min = value.as_choice();
                     if !matches!(min, 1 | 5 | 10 | 15 | 20 | 25) {
-                        return Err(HubError::Invalid("Choose a sleep time between 1 and 25 minutes".into()));
+                        return Err(HubError::Invalid(
+                            "Choose a sleep time between 1 and 25 minutes".into(),
+                        ));
                     }
                     let secs = (min * 60) as u16;
                     let [hi, lo] = secs.to_be_bytes();
@@ -1138,13 +1161,7 @@ impl DeviceDriver for LamzuDriver {
                 self.set(2, 1, 2, prof, (*active as u8) + 1)?;
                 // The per-axis X/Y flag is synced with the stage contents (the UI toggle only
                 // rewrites the stage, so keep it consistent here, as the official $2() does).
-                self.set(
-                    2,
-                    1,
-                    13,
-                    prof,
-                    stages.iter().any(|s| s.y.is_some()) as u8,
-                )
+                self.set(2, 1, 13, prof, stages.iter().any(|s| s.y.is_some()) as u8)
             }
             Change::ActiveStage(a) => self.set(2, 1, 2, prof, (*a as u8) + 1),
             Change::Adaptive(c) => self.write_adaptive(prof, c),

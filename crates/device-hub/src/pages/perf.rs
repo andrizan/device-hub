@@ -86,7 +86,11 @@ impl Shell {
         }
     }
 
-    pub fn page_performance(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    pub fn page_performance(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let Some(s) = self.cur() else {
             return div().into_any_element();
         };
@@ -165,43 +169,45 @@ impl Shell {
 
     fn hero_shell(title: &str, icon: &str, body: impl IntoElement) -> Div {
         let p = theme::pal();
-        ui::card()
-            .flex_1()
-            .min_w_0()
-            .child(
-                div()
-                    .p(px(18.))
-                    .flex()
-                    .flex_col()
-                    .gap(px(12.))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(8.))
-                            .child(
-                                div()
-                                    .size(px(26.))
-                                    .rounded(px(8.))
-                                    .bg(p.accent_soft)
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .child(ui::icon(icon, 14., p.accent)),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(13.))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .text_color(p.sub)
-                                    .child(title.to_string()),
-                            ),
-                    )
-                    .child(body),
-            )
+        ui::card().flex_1().min_w_0().child(
+            div()
+                .p(px(18.))
+                .flex()
+                .flex_col()
+                .gap(px(12.))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.))
+                        .child(
+                            div()
+                                .size(px(26.))
+                                .rounded(px(8.))
+                                .bg(p.accent_soft)
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child(ui::icon(icon, 14., p.accent)),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(13.))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(p.sub)
+                                .child(title.to_string()),
+                        ),
+                )
+                .child(body),
+        )
     }
 
-    fn hero_polling(&mut self, sp: &SettingSpec, st: &DeviceState, cx: &mut Context<Self>) -> AnyElement {
+    fn hero_polling(
+        &mut self,
+        sp: &SettingSpec,
+        st: &DeviceState,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let p = theme::pal();
         let SettingKind::Choice { options } = &sp.kind else {
             return div().into_any_element();
@@ -274,13 +280,22 @@ impl Shell {
                     }
                 },
             ))
-            .child(div().text_size(px(11.)).text_color(p.faint).child(
-                sp.help.clone().unwrap_or_default(),
-            ));
+            .child(
+                div()
+                    .text_size(px(11.))
+                    .text_color(p.faint)
+                    .child(sp.help.clone().unwrap_or_default()),
+            );
         Self::hero_shell(&sp.label, "gauge", body).into_any_element()
     }
 
-    fn hero_choice(&mut self, sp: &SettingSpec, st: &DeviceState, icon: &str, cx: &mut Context<Self>) -> AnyElement {
+    fn hero_choice(
+        &mut self,
+        sp: &SettingSpec,
+        st: &DeviceState,
+        icon: &str,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let p = theme::pal();
         let SettingKind::Choice { options } = &sp.kind else {
             return div().into_any_element();
@@ -304,7 +319,11 @@ impl Shell {
                     .cursor_pointer()
                     .text_size(px(12.5))
                     .font_weight(FontWeight::SEMIBOLD)
-                    .bg(if on { p.accent_soft } else { theme::alpha(p.faint, 0.07) })
+                    .bg(if on {
+                        p.accent_soft
+                    } else {
+                        theme::alpha(p.faint, 0.07)
+                    })
                     .border_1()
                     .border_color(if on { p.accent } else { p.hair })
                     .text_color(if on { p.fg } else { p.sub })
@@ -338,9 +357,20 @@ impl Shell {
         Self::hero_shell(&sp.label, icon, body).into_any_element()
     }
 
-    fn hero_stepper(&mut self, sp: &SettingSpec, st: &DeviceState, cx: &mut Context<Self>) -> AnyElement {
+    fn hero_stepper(
+        &mut self,
+        sp: &SettingSpec,
+        st: &DeviceState,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let p = theme::pal();
-        let SettingKind::Slider { min, max, step, unit } = &sp.kind else {
+        let SettingKind::Slider {
+            min,
+            max,
+            step,
+            unit,
+        } = &sp.kind
+        else {
             return div().into_any_element();
         };
         let cur = st.settings.get(&sp.id).map(|v| v.as_num());
@@ -385,7 +415,8 @@ impl Shell {
                             .items_baseline()
                             .gap(px(4.))
                             .child(ui::big_number(
-                                cur.map(|c| ui::fmt_num(c, step, "")).unwrap_or_else(|| "—".into()),
+                                cur.map(|c| ui::fmt_num(c, step, ""))
+                                    .unwrap_or_else(|| "—".into()),
                                 34.,
                             ))
                             .child(ui::faint(unit.clone())),
@@ -413,8 +444,14 @@ impl Shell {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let (title, icon) = section_meta(sec);
-        let toggles: Vec<&SettingSpec> = list.iter().filter(|s| matches!(s.kind, SettingKind::Toggle)).collect();
-        let others: Vec<&SettingSpec> = list.iter().filter(|s| !matches!(s.kind, SettingKind::Toggle)).collect();
+        let toggles: Vec<&SettingSpec> = list
+            .iter()
+            .filter(|s| matches!(s.kind, SettingKind::Toggle))
+            .collect();
+        let others: Vec<&SettingSpec> = list
+            .iter()
+            .filter(|s| !matches!(s.kind, SettingKind::Toggle))
+            .collect();
         let mut body = ui::body().pt(px(6.)).gap(px(4.));
         if !toggles.is_empty() {
             let mut grid = div().flex().flex_wrap().gap(px(8.)).pb(px(6.));
@@ -429,7 +466,9 @@ impl Shell {
         for (i, a) in actions.iter().enumerate() {
             body = body.child(self.action_row(a, i == 0 && others.is_empty(), cx));
         }
-        ui::card_titled(title, icon, None).child(body).into_any_element()
+        ui::card_titled(title, icon, None)
+            .child(body)
+            .into_any_element()
     }
 
     /// Toggle tile.
@@ -460,7 +499,11 @@ impl Shell {
                     .flex()
                     .items_center()
                     .gap(px(8.))
-                    .child(ui::icon(icon, 15., if on == Some(true) { p.accent } else { p.sub }))
+                    .child(ui::icon(
+                        icon,
+                        15.,
+                        if on == Some(true) { p.accent } else { p.sub },
+                    ))
                     .child(
                         div()
                             .flex_1()
@@ -486,7 +529,10 @@ impl Shell {
                     .text_size(px(11.))
                     .line_height(px(15.))
                     .text_color(if dis.is_some() { p.warn } else { p.faint })
-                    .child(dis.clone().unwrap_or_else(|| sp.help.clone().unwrap_or_default())),
+                    .child(
+                        dis.clone()
+                            .unwrap_or_else(|| sp.help.clone().unwrap_or_default()),
+                    ),
             )
             .on_click(cx.listener(move |this, _, _, cx| {
                 if let Some(v) = on {
@@ -497,7 +543,13 @@ impl Shell {
     }
 
     /// Row for choices/sliders (label on top, control below in two tiers, so it does not overflow even in a narrow card).
-    fn perf_row(&mut self, sp: &SettingSpec, st: &DeviceState, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    fn perf_row(
+        &mut self,
+        sp: &SettingSpec,
+        st: &DeviceState,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let p = theme::pal();
         let dis = enabled(sp, st).err();
         let v = st.settings.get(&sp.id).cloned();
@@ -513,20 +565,23 @@ impl Shell {
                     .child(sp.label.clone()),
             )
             .child(div().flex_1())
-            .when_some(v.as_ref().and_then(|v| match (&sp.kind, v) {
-                (SettingKind::Slider { step, unit, .. }, SettingValue::Num(n)) => {
-                    Some(ui::fmt_num(*n, *step, unit))
-                }
-                _ => None,
-            }), |d, t| {
-                d.child(
-                    div()
-                        .text_size(px(13.))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(p.accent)
-                        .child(t),
-                )
-            });
+            .when_some(
+                v.as_ref().and_then(|v| match (&sp.kind, v) {
+                    (SettingKind::Slider { step, unit, .. }, SettingValue::Num(n)) => {
+                        Some(ui::fmt_num(*n, *step, unit))
+                    }
+                    _ => None,
+                }),
+                |d, t| {
+                    d.child(
+                        div()
+                            .text_size(px(13.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(p.accent)
+                            .child(t),
+                    )
+                },
+            );
         let control: AnyElement = match (&sp.kind, v) {
             (_, None) => ui::faint("Unable to read").into_any_element(),
             (SettingKind::Choice { options }, Some(v)) => {
@@ -543,7 +598,11 @@ impl Shell {
                             .rounded(px(9.))
                             .cursor_pointer()
                             .text_size(px(12.5))
-                            .bg(if on { p.accent_soft } else { theme::alpha(p.faint, 0.07) })
+                            .bg(if on {
+                                p.accent_soft
+                            } else {
+                                theme::alpha(p.faint, 0.07)
+                            })
                             .border_1()
                             .border_color(if on { p.accent } else { p.hair })
                             .text_color(if on { p.fg } else { p.sub })
@@ -558,7 +617,15 @@ impl Shell {
                 }
                 chips.into_any_element()
             }
-            (SettingKind::Slider { min, max, step, unit }, Some(v)) => {
+            (
+                SettingKind::Slider {
+                    min,
+                    max,
+                    step,
+                    unit,
+                },
+                Some(v),
+            ) => {
                 let (min, max, step) = (*min, *max, *step);
                 let cur = v.as_num();
                 let fid = format!("perf-{}", sp.id);
@@ -606,14 +673,22 @@ impl Shell {
                         }
                     },
                 )))
-                .child(div().w(px(76.)).flex_none().child(gpui_kit::component::input::Input::new(&inp)))
+                .child(
+                    div()
+                        .w(px(76.))
+                        .flex_none()
+                        .child(gpui_kit::component::input::Input::new(&inp)),
+                )
                 .into_any_element()
             }
             (SettingKind::Toggle, Some(v)) => {
                 let sp2 = sp.clone();
-                ui::toggle(format!("pr-{}", sp.id), v.as_bool(), cx, move |this, nv, cx| {
-                    this.send_setting(&sp2, SettingValue::Bool(nv), cx)
-                })
+                ui::toggle(
+                    format!("pr-{}", sp.id),
+                    v.as_bool(),
+                    cx,
+                    move |this, nv, cx| this.send_setting(&sp2, SettingValue::Bool(nv), cx),
+                )
                 .into_any_element()
             }
         };
@@ -637,7 +712,12 @@ impl Shell {
 
     // ------------------------------------------------------------ Speed-linked DPI
 
-    fn adaptive_card(&mut self, caps: &Capabilities, st: &DeviceState, cx: &mut Context<Self>) -> Option<AnyElement> {
+    fn adaptive_card(
+        &mut self,
+        caps: &Capabilities,
+        st: &DeviceState,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let ac = caps.mouse.as_ref()?.adaptive_dpi.clone()?;
         let curve = st.mouse.as_ref()?.adaptive.clone()?;
         let p = theme::pal();
@@ -665,13 +745,24 @@ impl Shell {
                     .rounded(px(9.))
                     .cursor_pointer()
                     .text_size(px(12.5))
-                    .bg(if on { p.accent_soft } else { theme::alpha(p.faint, 0.07) })
+                    .bg(if on {
+                        p.accent_soft
+                    } else {
+                        theme::alpha(p.faint, 0.07)
+                    })
                     .border_1()
                     .border_color(if on { p.accent } else { p.hair })
                     .text_color(if on { p.fg } else { p.sub })
                     .child(name.clone())
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        send(this, AdaptiveCurve { enabled: en, points: pts.clone() }, cx);
+                        send(
+                            this,
+                            AdaptiveCurve {
+                                enabled: en,
+                                points: pts.clone(),
+                            },
+                            cx,
+                        );
                     })),
             );
         }
@@ -682,8 +773,16 @@ impl Shell {
                 .rounded(px(9.))
                 .text_size(px(12.5))
                 .border_1()
-                .border_color(if cur_preset.is_none() { p.accent } else { p.hair })
-                .bg(if cur_preset.is_none() { p.accent_soft } else { theme::alpha(p.faint, 0.0) })
+                .border_color(if cur_preset.is_none() {
+                    p.accent
+                } else {
+                    p.hair
+                })
+                .bg(if cur_preset.is_none() {
+                    p.accent_soft
+                } else {
+                    theme::alpha(p.faint, 0.0)
+                })
                 .text_color(if cur_preset.is_none() { p.fg } else { p.faint })
                 .child("Custom"),
         );
@@ -695,30 +794,58 @@ impl Shell {
         let pts_tools = div()
             .flex()
             .gap(px(6.))
-            .child(ui::button("ada-add", "Add point", Some("plus"), Btn::Ghost, cx, move |this, _, cx| {
-                let mut c = c_add.clone();
-                if c.points.len() >= ac.max_points {
-                    this.toast(format!("At most {} points are allowed", ac.max_points), true, cx);
-                    return;
-                }
-                let last = c.points.last().copied().unwrap_or(AdaptivePoint { speed: 0, ratio: 1. });
-                let speed = (last.speed + 15).min(smax);
-                if speed <= last.speed {
-                    this.toast("No room left at the right edge", true, cx);
-                    return;
-                }
-                c.points.push(AdaptivePoint { speed, ratio: last.ratio });
-                send(this, c, cx);
-            }))
-            .child(ui::button("ada-del", "Remove point", Some("minus"), Btn::Ghost, cx, move |this, _, cx| {
-                let mut c = c_del.clone();
-                if c.points.len() <= ac.min_points {
-                    this.toast(format!("At least {} points are required", ac.min_points), true, cx);
-                    return;
-                }
-                c.points.pop();
-                send(this, c, cx);
-            }));
+            .child(ui::button(
+                "ada-add",
+                "Add point",
+                Some("plus"),
+                Btn::Ghost,
+                cx,
+                move |this, _, cx| {
+                    let mut c = c_add.clone();
+                    if c.points.len() >= ac.max_points {
+                        this.toast(
+                            format!("At most {} points are allowed", ac.max_points),
+                            true,
+                            cx,
+                        );
+                        return;
+                    }
+                    let last = c.points.last().copied().unwrap_or(AdaptivePoint {
+                        speed: 0,
+                        ratio: 1.,
+                    });
+                    let speed = (last.speed + 15).min(smax);
+                    if speed <= last.speed {
+                        this.toast("No room left at the right edge", true, cx);
+                        return;
+                    }
+                    c.points.push(AdaptivePoint {
+                        speed,
+                        ratio: last.ratio,
+                    });
+                    send(this, c, cx);
+                },
+            ))
+            .child(ui::button(
+                "ada-del",
+                "Remove point",
+                Some("minus"),
+                Btn::Ghost,
+                cx,
+                move |this, _, cx| {
+                    let mut c = c_del.clone();
+                    if c.points.len() <= ac.min_points {
+                        this.toast(
+                            format!("At least {} points are required", ac.min_points),
+                            true,
+                            cx,
+                        );
+                        return;
+                    }
+                    c.points.pop();
+                    send(this, c, cx);
+                },
+            ));
         let graph = self.adaptive_graph(&ac, &curve, cx);
         let pts_txt = curve
             .points
@@ -755,7 +882,12 @@ impl Shell {
         )
     }
 
-    fn adaptive_graph(&mut self, ac: &AdaptiveCaps, curve: &AdaptiveCurve, cx: &mut Context<Self>) -> Div {
+    fn adaptive_graph(
+        &mut self,
+        ac: &AdaptiveCaps,
+        curve: &AdaptiveCurve,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let p = theme::pal();
         let (smax, rmax) = (ac.speed_max as f32, ac.ratio_max);
         let pts: Vec<(f32, f32)> = curve
@@ -858,8 +990,13 @@ impl Shell {
             MouseButton::Left,
             cx.listener(move |this, e: &MouseDownEvent, _, cx| {
                 motion::set_down(true);
-                let Some(r) = motion::rect("ada-graph") else { return };
-                let (mx, my) = (f32::from(e.position.x) - r[0], f32::from(e.position.y) - r[1]);
+                let Some(r) = motion::rect("ada-graph") else {
+                    return;
+                };
+                let (mx, my) = (
+                    f32::from(e.position.x) - r[0],
+                    f32::from(e.position.y) - r[1],
+                );
                 let near = base
                     .points
                     .iter()
@@ -922,6 +1059,11 @@ impl Shell {
             )
             .child(plot)
             .child(xlab)
-            .child(div().text_size(px(10.)).text_color(p.faint).child("← Slow     Mouse speed     Fast →"))
+            .child(
+                div()
+                    .text_size(px(10.))
+                    .text_color(p.faint)
+                    .child("← Slow     Mouse speed     Fast →"),
+            )
     }
 }

@@ -592,7 +592,8 @@ impl Shell {
                                 "— Move the mouse to start measuring".to_string()
                             }
                         } else if keyboard {
-                            "(key events/s — not the same as the configured polling rate)".to_string()
+                            "(key events/s — not the same as the configured polling rate)"
+                                .to_string()
                         } else {
                             let mut s = format!("Peak · avg {:.0}", st.hz);
                             if let Some(seg) = st.seg_hz {
@@ -605,7 +606,10 @@ impl Shell {
                 .when_some(st.gap_stats, |d, (med, p95)| {
                     // Median-based measurement — more robust against dropped reports than a per-second count.
                     // With 8K active it lands around ~0.125ms (=8000Hz).
-                    let mut line = format!("Median delivery interval {med:.3} ms → ~{:.0} Hz", 1000. / med);
+                    let mut line = format!(
+                        "Median delivery interval {med:.3} ms → ~{:.0} Hz",
+                        1000. / med
+                    );
                     if let Some(g) = min_gap {
                         line = format!("{line} · min {g:.2} ms");
                     }
@@ -662,7 +666,9 @@ impl Shell {
             {
                 let mut line = match result.peak_hz {
                     Some(peak) => format!("Result: peak {peak:.0} Hz"),
-                    None => "Result: no continuous movement of 100 ms or more was detected".to_string(),
+                    None => {
+                        "Result: no continuous movement of 100 ms or more was detected".to_string()
+                    }
                 };
                 if let Some((med, _)) = result.gap_stats {
                     line = format!("{line} · latest median delivery interval {med:.3} ms");
@@ -768,10 +774,7 @@ impl Shell {
             // vertical scroll would conflict with the page's vertical scroll, so it is collapsible instead.
             let hidden = order
                 .iter()
-                .filter(|&&i| {
-                    !devs[i].is_mouse
-                        && !devs[i].instance_id.eq_ignore_ascii_case(&pick)
-                })
+                .filter(|&&i| !devs[i].is_mouse && !devs[i].instance_id.eq_ignore_ascii_case(&pick))
                 .count();
             let show_all = self.usb_show_all;
             let mut list = div().id("usb-dev-list").flex().flex_col().gap(px(3.));
@@ -812,9 +815,9 @@ impl Shell {
                         format!("USBPcap{} addr {}", d.hub, d.address)
                     }));
                 if d.hub != 0 {
-                    row = row.cursor_pointer().when(!sel, |d| {
-                        d.hover(|s| s.bg(p.ctrl))
-                    });
+                    row = row
+                        .cursor_pointer()
+                        .when(!sel, |d| d.hover(|s| s.bg(p.ctrl)));
                 } else {
                     row = row.opacity(0.55);
                 }
@@ -874,7 +877,11 @@ impl Shell {
                     .gap(px(10.))
                     .child(ui::button(
                         "usb-ep-scan",
-                        if scanning { "Detecting…" } else { "Auto-detect EP" },
+                        if scanning {
+                            "Detecting…"
+                        } else {
+                            "Auto-detect EP"
+                        },
                         Some("search"),
                         Btn::Ghost,
                         cx,

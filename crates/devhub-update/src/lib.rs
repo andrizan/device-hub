@@ -105,7 +105,11 @@ fn header<'a>(res: &'a ureq::http::Response<ureq::Body>, name: &str) -> &'a str 
 }
 
 /// mouse.fit: use the HTTP headers of the zip that FWLINK.txt points to as the fingerprint.
-fn mousefit(agent: &ureq::Agent, ui_folder: &str, last_fp: &str) -> Result<UpdateStatus, UpdateError> {
+fn mousefit(
+    agent: &ureq::Agent,
+    ui_folder: &str,
+    last_fp: &str,
+) -> Result<UpdateStatus, UpdateError> {
     let feed_url = format!("{MOUSEFIT_BASE}/Config/{ui_folder}/FWLINK.txt");
     let body = agent
         .get(&feed_url)

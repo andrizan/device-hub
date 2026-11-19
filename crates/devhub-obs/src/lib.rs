@@ -233,11 +233,7 @@ impl Src {
     /// Render settings composed from the OBS properties + the app settings.
     /// `obs_all` ("Configure everything in OBS") do not look at the app settings.
     fn merge_vis(&self, cfg: &config::OverlayCfg) -> render::Vis {
-        let v = self
-            .vis
-            .lock()
-            .map(|v| v.clone())
-            .unwrap_or_default();
+        let v = self.vis.lock().map(|v| v.clone()).unwrap_or_default();
         if v.obs_all {
             v
         } else {
@@ -334,8 +330,16 @@ unsafe extern "C" fn get_defaults(settings: *mut c_void) {
     (api.data_set_default_int)(settings, c"glow".as_ptr() as *const u8, 100);
     dstr(c"ttext", c"");
     dbool(c"pcust", false);
-    (api.data_set_default_int)(settings, c"acolor".as_ptr() as *const u8, pack_rgb(60, 190, 255));
-    (api.data_set_default_int)(settings, c"pcolor".as_ptr() as *const u8, pack_rgb(255, 150, 60));
+    (api.data_set_default_int)(
+        settings,
+        c"acolor".as_ptr() as *const u8,
+        pack_rgb(60, 190, 255),
+    );
+    (api.data_set_default_int)(
+        settings,
+        c"pcolor".as_ptr() as *const u8,
+        pack_rgb(255, 150, 60),
+    );
 }
 
 /// Load settings. Indices whose `sk{i}`/`sb{i}` is true go into the shown set
@@ -354,7 +358,9 @@ unsafe extern "C" fn update(d: *mut c_void, settings: *mut c_void) {
     // (when OFF, discard the values and cur_vis uses the app settings).
     if vis.obs_all {
         use config::{Arrange, FillMode, MouseStyle, Theme};
-        let gets = |n: &std::ffi::CStr, m| cstr_text((api.data_get_string)(settings, n.as_ptr() as *const u8), m);
+        let gets = |n: &std::ffi::CStr, m| {
+            cstr_text((api.data_get_string)(settings, n.as_ptr() as *const u8), m)
+        };
         vis.theme = match gets(c"theme", 8).as_str() {
             "light" => Theme::Light,
             "clear" => Theme::Clear,
@@ -383,16 +389,25 @@ unsafe extern "C" fn update(d: *mut c_void, settings: *mut c_void) {
         vis.shadow = getb(c"shadow");
         vis.title_text = gets(c"ttext", 64);
         if getb(c"pcust") {
-            vis.pressed = Some(unpack_rgb(
-                (api.data_get_int)(settings, c"pcolor".as_ptr() as *const u8),
-            ));
+            vis.pressed = Some(unpack_rgb((api.data_get_int)(
+                settings,
+                c"pcolor".as_ptr() as *const u8,
+            )));
         }
-        vis.scale = (api.data_get_double)(settings, c"oscale".as_ptr() as *const u8).clamp(0.75, 3.0) as f32;
-        vis.key_size = (api.data_get_double)(settings, c"ksize".as_ptr() as *const u8).clamp(0.7, 1.4) as f32;
-        vis.radius = (api.data_get_double)(settings, c"radius".as_ptr() as *const u8).clamp(0., 2.) as f32;
-        vis.pad = (api.data_get_double)(settings, c"opad".as_ptr() as *const u8).clamp(0.5, 2.) as f32;
-        vis.panel_alpha = ((api.data_get_int)(settings, c"palpha".as_ptr() as *const u8).clamp(0, 100) as f32) / 100.;
-        vis.glow = ((api.data_get_int)(settings, c"glow".as_ptr() as *const u8).clamp(0, 200) as f32) / 100.;
+        vis.scale = (api.data_get_double)(settings, c"oscale".as_ptr() as *const u8)
+            .clamp(0.75, 3.0) as f32;
+        vis.key_size =
+            (api.data_get_double)(settings, c"ksize".as_ptr() as *const u8).clamp(0.7, 1.4) as f32;
+        vis.radius =
+            (api.data_get_double)(settings, c"radius".as_ptr() as *const u8).clamp(0., 2.) as f32;
+        vis.pad =
+            (api.data_get_double)(settings, c"opad".as_ptr() as *const u8).clamp(0.5, 2.) as f32;
+        vis.panel_alpha = ((api.data_get_int)(settings, c"palpha".as_ptr() as *const u8)
+            .clamp(0, 100) as f32)
+            / 100.;
+        vis.glow = ((api.data_get_int)(settings, c"glow".as_ptr() as *const u8).clamp(0, 200)
+            as f32)
+            / 100.;
     }
     let mut show_kb = HashSet::new();
     for i in 0..160 {
@@ -415,7 +430,10 @@ unsafe extern "C" fn update(d: *mut c_void, settings: *mut c_void) {
         16,
     );
     if acc == "custom" {
-        vis.accent = unpack_rgb((api.data_get_int)(settings, c"acolor".as_ptr() as *const u8));
+        vis.accent = unpack_rgb((api.data_get_int)(
+            settings,
+            c"acolor".as_ptr() as *const u8,
+        ));
         vis.accent_set = true;
     } else if let Ok(i) = acc.parse::<usize>() {
         if let Some((_, c)) = render::ACCENTS.get(i) {
@@ -442,7 +460,11 @@ unsafe extern "C" fn get_properties(d: *mut c_void) -> *mut c_void {
         (api.props_add_bool)(p, n.as_ptr() as *const u8, desc);
     };
     addb(props, "title", lt(c"devhub.title", c"Show title"));
-    addb(props, "labels", lt(c"devhub.labels", c"Show key/button names"));
+    addb(
+        props,
+        "labels",
+        lt(c"devhub.labels", c"Show key/button names"),
+    );
     // Accent color.
     {
         let n = cs("accent");
@@ -460,15 +482,9 @@ unsafe extern "C" fn get_properties(d: *mut c_void) -> *mut c_void {
             c"app".as_ptr() as *const u8,
         );
         for (i, (_, _)) in render::ACCENTS.iter().enumerate() {
-            let (kk, fb): (CString, CString) = (
-                cs(&format!("devhub.acc{i}")),
-                cs(render::ACCENTS[i].0),
-            );
-            (api.prop_list_add_str)(
-                l,
-                lt(&kk, &fb),
-                cs(&i.to_string()).as_ptr() as *const u8,
-            );
+            let (kk, fb): (CString, CString) =
+                (cs(&format!("devhub.acc{i}")), cs(render::ACCENTS[i].0));
+            (api.prop_list_add_str)(l, lt(&kk, &fb), cs(&i.to_string()).as_ptr() as *const u8);
         }
         (api.prop_list_add_str)(
             l,
@@ -493,21 +509,20 @@ unsafe extern "C" fn get_properties(d: *mut c_void) -> *mut c_void {
     );
     {
         let g = (api.props_create)();
-        let addl = |name: &str,
-                    desc: *const u8,
-                    opts: &[(&std::ffi::CStr, &std::ffi::CStr, &str)]| {
-            let n = cs(name);
-            let l = (api.props_add_list)(
-                g,
-                n.as_ptr() as *const u8,
-                desc,
-                ffi::OBS_COMBO_LIST,
-                ffi::OBS_COMBO_FMT_STR,
-            );
-            for (key, fb, val) in opts {
-                (api.prop_list_add_str)(l, lt(key, fb), cs(val).as_ptr() as *const u8);
-            }
-        };
+        let addl =
+            |name: &str, desc: *const u8, opts: &[(&std::ffi::CStr, &std::ffi::CStr, &str)]| {
+                let n = cs(name);
+                let l = (api.props_add_list)(
+                    g,
+                    n.as_ptr() as *const u8,
+                    desc,
+                    ffi::OBS_COMBO_LIST,
+                    ffi::OBS_COMBO_FMT_STR,
+                );
+                for (key, fb, val) in opts {
+                    (api.prop_list_add_str)(l, lt(key, fb), cs(val).as_ptr() as *const u8);
+                }
+            };
         let addgb = |name: &str, desc: *const u8| {
             let n = cs(name);
             (api.props_add_bool)(g, n.as_ptr() as *const u8, desc);
@@ -575,11 +590,29 @@ unsafe extern "C" fn get_properties(d: *mut c_void) -> *mut c_void {
                 lt(c"devhub.pcolor", c"Pressed color"),
             );
         }
-        addfs("oscale", lt(c"devhub.oscale", c"Render scale"), 0.75, 3.0, 0.25);
+        addfs(
+            "oscale",
+            lt(c"devhub.oscale", c"Render scale"),
+            0.75,
+            3.0,
+            0.25,
+        );
         addfs("ksize", lt(c"devhub.ksize", c"Key size"), 0.7, 1.4, 0.05);
-        addfs("radius", lt(c"devhub.radius", c"Corner radius"), 0.0, 2.0, 0.1);
+        addfs(
+            "radius",
+            lt(c"devhub.radius", c"Corner radius"),
+            0.0,
+            2.0,
+            0.1,
+        );
         addfs("opad", lt(c"devhub.opad", c"Panel padding"), 0.5, 2.0, 0.1);
-        addis("palpha", lt(c"devhub.palpha", c"Panel opacity %"), 0, 100, 5);
+        addis(
+            "palpha",
+            lt(c"devhub.palpha", c"Panel opacity %"),
+            0,
+            100,
+            5,
+        );
         addis("glow", lt(c"devhub.glow", c"Press glow %"), 0, 200, 10);
         {
             let n = cs("ttext");
@@ -870,14 +903,21 @@ unsafe extern "C" fn usb_update(d: *mut c_void, settings: *mut c_void) {
 
 unsafe extern "C" fn usb_defaults(settings: *mut c_void) {
     let Some(api) = ffi::resolve() else { return };
-    for (n, value) in [(c"hub", 1), (c"device", 1), (c"endpoint", 1), (c"report", -1)] {
+    for (n, value) in [
+        (c"hub", 1),
+        (c"device", 1),
+        (c"endpoint", 1),
+        (c"report", -1),
+    ] {
         (api.data_set_default_int)(settings, n.as_ptr().cast(), value);
     }
     (api.data_set_default_bool)(settings, c"capture".as_ptr().cast(), false);
 }
 
 unsafe extern "C" fn usb_props(_: *mut c_void) -> *mut c_void {
-    let Some(api) = ffi::resolve() else { return std::ptr::null_mut() };
+    let Some(api) = ffi::resolve() else {
+        return std::ptr::null_mut();
+    };
     let p = (api.props_create)();
     // List to pick the target device by product name — the value is the PnP instance ID.
     // If unselected (""), the manually entered values below are used. Mice are listed first.
@@ -909,18 +949,44 @@ unsafe extern "C" fn usb_props(_: *mut c_void) -> *mut c_void {
     }
     for (n, key, label, min, max) in [
         (c"hub", c"devhub.usb.hub", c"USBPcap hub number", 1, 255),
-        (c"device", c"devhub.usb.device", c"USB device address", 1, 127),
-        (c"endpoint", c"devhub.usb.ep", c"Mouse IN endpoint number (0x81 = 1)", 1, 15),
-        (c"report", c"devhub.usb.report", c"Report ID (-1 = all)", -1, 255),
+        (
+            c"device",
+            c"devhub.usb.device",
+            c"USB device address",
+            1,
+            127,
+        ),
+        (
+            c"endpoint",
+            c"devhub.usb.ep",
+            c"Mouse IN endpoint number (0x81 = 1)",
+            1,
+            15,
+        ),
+        (
+            c"report",
+            c"devhub.usb.report",
+            c"Report ID (-1 = all)",
+            -1,
+            255,
+        ),
     ] {
         (api.props_add_int)(p, n.as_ptr().cast(), lt(key, label), min, max, 1);
     }
-    (api.props_add_bool)(p, c"capture".as_ptr().cast(), lt(c"devhub.usb.capture", c"Measure USB input"));
+    (api.props_add_bool)(
+        p,
+        c"capture".as_ptr().cast(),
+        lt(c"devhub.usb.capture", c"Measure USB input"),
+    );
     p
 }
 
-unsafe extern "C" fn usb_width(_: *mut c_void) -> u32 { render::RATE_WIDTH }
-unsafe extern "C" fn usb_height(_: *mut c_void) -> u32 { render::RATE_HEIGHT }
+unsafe extern "C" fn usb_width(_: *mut c_void) -> u32 {
+    render::RATE_WIDTH
+}
+unsafe extern "C" fn usb_height(_: *mut c_void) -> u32 {
+    render::RATE_HEIGHT
+}
 
 unsafe extern "C" fn usb_render(d: *mut c_void, _: *mut c_void) {
     let Some(api) = ffi::resolve() else { return };
@@ -929,7 +995,17 @@ unsafe extern "C" fn usb_render(d: *mut c_void, _: *mut c_void) {
         s.last_tick = std::time::Instant::now();
         let cap = s.usb.lock().unwrap_or_else(|e| e.into_inner());
         let (label, status) = cap.as_ref().map_or_else(
-            || (if s.usb_missing.load(std::sync::atomic::Ordering::Relaxed) { "USB device unavailable" } else { "USB capture off" }.to_string(), None),
+            || {
+                (
+                    if s.usb_missing.load(std::sync::atomic::Ordering::Relaxed) {
+                        "USB device unavailable"
+                    } else {
+                        "USB capture off"
+                    }
+                    .to_string(),
+                    None,
+                )
+            },
             |c| {
                 let snap = c.snapshot();
                 (usb_rate::label(&snap), Some(snap.status))
@@ -1021,26 +1097,42 @@ pub extern "C" fn obs_current_module() -> *mut c_void {
 
 static LOOKUP: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 
+/// OBS export: looks up a string in the loaded locale.
+///
+/// # Safety
+/// `key` must be a NUL-terminated string and `out` a writable pointer, as OBS passes them.
 #[no_mangle]
 pub unsafe extern "C" fn obs_module_get_string(key: *const u8, out: *mut *const u8) -> bool {
     let lookup = LOOKUP.load(std::sync::atomic::Ordering::Acquire);
     !lookup.is_null() && ffi::resolve().is_some_and(|api| (api.lookup_string)(lookup, key, out))
 }
 
+/// OBS export: loads the locale files for `locale`.
+///
+/// # Safety
+/// `locale` must be a NUL-terminated string, as OBS passes it.
 #[no_mangle]
 pub unsafe extern "C" fn obs_module_set_locale(locale: *const u8) {
     if let Some(api) = ffi::resolve() {
         let next = (api.load_locale)(obs_current_module(), c"en-US".as_ptr().cast(), locale);
         let old = LOOKUP.swap(next, std::sync::atomic::Ordering::AcqRel);
-        if !old.is_null() { (api.free_lookup)(old); }
+        if !old.is_null() {
+            (api.free_lookup)(old);
+        }
     }
 }
 
+/// OBS export: frees the loaded locale.
+///
+/// # Safety
+/// Called by OBS while unloading; no `obs_module_get_string` call may run at the same time.
 #[no_mangle]
 pub unsafe extern "C" fn obs_module_free_locale() {
     let old = LOOKUP.swap(std::ptr::null_mut(), std::sync::atomic::Ordering::AcqRel);
     if let Some(api) = ffi::resolve() {
-        if !old.is_null() { (api.free_lookup)(old); }
+        if !old.is_null() {
+            (api.free_lookup)(old);
+        }
     }
 }
 

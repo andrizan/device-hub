@@ -75,7 +75,11 @@ fn main() {
         let dev = u16::from_le_bytes(data[19..21].try_into().unwrap());
         let ep = data[21];
         // Only tally interrupt IN completions that carry data.
-        if offset < 27 || offset >= size || data[10..14] != [0; 4] || data[16] & 1 == 0 || data[22] != 1
+        if offset < 27
+            || offset >= size
+            || data[10..14] != [0; 4]
+            || data[16] & 1 == 0
+            || data[22] != 1
             || data[23..27] == [0; 4]
         {
             continue;

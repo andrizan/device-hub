@@ -98,7 +98,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         let table = query(&device, "DPI table", [2, 10, 1, 0x81], &[profile, 6])?;
         let valid = matches!(table.as_deref(), Some([p, count @ 1..=5, stages @ ..])
             if *p == profile && stage <= count && stages.len() == 4 * usize::from(*count)
-                && stages.chunks_exact(2).all(|x| (50..=50_000).contains(&u16::from_be_bytes([x[0], x[1]]))));
+                && stages.as_chunks::<2>().0.iter().all(|x| (50..=50_000).contains(&u16::from_be_bytes(*x))));
         if !valid {
             return Err(io::Error::other("invalid DPI table; stopping probe").into());
         }

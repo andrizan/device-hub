@@ -78,9 +78,9 @@ fn main() {
     match mode {
         // Hue sweep over all of row 3 + row 4 — identify the index from the color on Enter/↑
         "rows" => {
-            for i in 42..105 {
+            for (i, cell) in cells.iter_mut().enumerate().take(105).skip(42) {
                 let [b, g, r] = hue(i);
-                cells[i] = [b, g, r, 255];
+                *cell = [b, g, r, 255];
             }
             println!("Lighting row 3 + row 4 (cells 42-104) with a hue sweep — 30 s");
             println!("  cell42=yellow-green → hue is proportional to index (cell÷135×360°)");

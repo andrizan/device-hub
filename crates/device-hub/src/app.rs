@@ -573,9 +573,10 @@ impl Shell {
                             }
                         }
                         // End of the 5 s measurement — finalize the result and release the cursor lock.
-                        if let Some((_, id, vid, pid)) = this.poll_trial.take_if(|(end, ..)| {
-                            std::time::Instant::now() >= *end
-                        }) {
+                        if let Some((_, id, vid, pid)) = this
+                            .poll_trial
+                            .take_if(|(end, ..)| std::time::Instant::now() >= *end)
+                        {
                             crate::cursor::unclip();
                             let stats = crate::rawinput::finish_trial(vid, pid).unwrap_or_default();
                             this.poll_meas_result = Some((id, stats));
@@ -992,9 +993,7 @@ impl Shell {
             self.redo.push((id.clone(), cur));
         }
         match self.apply_state_to(&id, &st, false, HistSrc::Undo, cx) {
-            RestoreOutcome::Applied(n) => {
-                self.toast(format!("Undone ({n} item(s))"), false, cx)
-            }
+            RestoreOutcome::Applied(n) => self.toast(format!("Undone ({n} item(s))"), false, cx),
             RestoreOutcome::Switching => self.toast("Switching configuration to undo…", false, cx),
             RestoreOutcome::Nothing => {
                 self.undo.push((id, st));
@@ -1013,9 +1012,7 @@ impl Shell {
             self.undo.push((id.clone(), cur));
         }
         match self.apply_state_to(&id, &st, false, HistSrc::Redo, cx) {
-            RestoreOutcome::Applied(n) => {
-                self.toast(format!("Redone ({n} item(s))"), false, cx)
-            }
+            RestoreOutcome::Applied(n) => self.toast(format!("Redone ({n} item(s))"), false, cx),
             RestoreOutcome::Switching => self.toast("Switching configuration to redo…", false, cx),
             RestoreOutcome::Nothing => {
                 self.redo.push((id, st));
@@ -1577,14 +1574,7 @@ impl Shell {
                             )
                             .on_click(cx.listener(|this, _, w, cx| this.open_palette(w, cx))),
                     )
-                    .child(self.side_nav(
-                        "home",
-                        "layout-grid",
-                        "Home",
-                        home_sel,
-                        Route::Home,
-                        cx,
-                    ))
+                    .child(self.side_nav("home", "layout-grid", "Home", home_sel, Route::Home, cx))
                     .child(
                         ui::section_label("Devices")
                             .px(px(10.))
@@ -1600,14 +1590,7 @@ impl Shell {
                             .child(list),
                     )
                     .child(div().h(px(1.)).mx(px(8.)).my(px(8.)).bg(p.hair))
-                    .child(self.side_nav(
-                        "obs",
-                        "cast",
-                        "OBS overlay",
-                        obs_sel,
-                        Route::Obs,
-                        cx,
-                    ))
+                    .child(self.side_nav("obs", "cast", "OBS overlay", obs_sel, Route::Obs, cx))
                     .child(self.side_nav(
                         "auto",
                         "zap",
@@ -1991,9 +1974,9 @@ impl Shell {
     fn mem_tick(&mut self) {
         use windows::Win32::Foundation::HWND;
         use windows::Win32::System::Threading::{
-            GetCurrentProcess, SetProcessInformation, SetProcessWorkingSetSize,
-            MEMORY_PRIORITY_BELOW_NORMAL, MEMORY_PRIORITY_INFORMATION, MEMORY_PRIORITY_NORMAL,
-            ProcessMemoryPriority,
+            GetCurrentProcess, ProcessMemoryPriority, SetProcessInformation,
+            SetProcessWorkingSetSize, MEMORY_PRIORITY_BELOW_NORMAL, MEMORY_PRIORITY_INFORMATION,
+            MEMORY_PRIORITY_NORMAL,
         };
         use windows::Win32::UI::WindowsAndMessaging::IsIconic;
         if self.hwnd == 0 {
@@ -2045,9 +2028,14 @@ impl Shell {
     fn mem_tick(&mut self) {}
 
     fn usb_resolve_target(&mut self) -> bool {
-        if self.prefs.usb_pick.is_empty() { return true; }
+        if self.prefs.usb_pick.is_empty() {
+            return true;
+        }
         let Some(d) = devhub_polling::discover::resolve(&self.prefs.usb_pick, 0, 0) else {
-            self.usb_scan_msg = Some("Target not found. Check the connection, refresh, and pick the product again.".into());
+            self.usb_scan_msg = Some(
+                "Target not found. Check the connection, refresh, and pick the product again."
+                    .into(),
+            );
             return false;
         };
         self.usb_target.hub = d.hub;
@@ -2064,7 +2052,9 @@ impl Shell {
         };
         self.usb_snap = None;
         self.usb_result = None;
-        if !self.usb_resolve_target() { return; }
+        if !self.usb_resolve_target() {
+            return;
+        }
         self.usb_cap = Some((id, devhub_polling::Capture::start(self.usb_target)));
     }
 

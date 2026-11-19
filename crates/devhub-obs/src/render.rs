@@ -329,6 +329,7 @@ impl Pix {
     }
 
     /// Rounded rectangle with a top → bottom gradient.
+    #[allow(clippy::too_many_arguments)]
     fn rrect_grad(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32, top: Rgba, bot: Rgba) {
         self.shade(x - 1., y - 1., w + 2., h + 2., |px, py| {
             let t = ((py - y) / h.max(1.)).clamp(0., 1.);
@@ -340,6 +341,7 @@ impl Pix {
     }
 
     /// Outline of a rounded rectangle (AA, thickness t).
+    #[allow(clippy::too_many_arguments)]
     fn rrect_stroke(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32, t: f32, c: Rgba) {
         self.shade(x - 1., y - 1., w + 2., h + 2., |px, py| {
             let d = sd_rrect(
@@ -356,6 +358,7 @@ impl Pix {
     }
 
     /// Soft glow (fades toward the outside).
+    #[allow(clippy::too_many_arguments)]
     fn glow(&mut self, x: f32, y: f32, w: f32, h: f32, r: f32, spread: f32, c: Rgba) {
         self.shade(
             x - spread,
@@ -472,12 +475,13 @@ impl Pix {
 // ---------------- Fonts
 
 type Glyph = std::sync::Arc<(fontdue::Metrics, Vec<u8>)>;
+/// Glyphs keyed by (font address, character, size in 1/4 px).
+type GlyphMap = std::collections::HashMap<(usize, char, u32), Glyph>;
 
 /// Cache of rasterized glyphs (avoids rasterizing every frame).
 fn glyph(f: &fontdue::Font, ch: char, px: f32) -> Glyph {
     use std::collections::HashMap;
-    static CACHE: std::sync::Mutex<Option<HashMap<(usize, char, u32), Glyph>>> =
-        std::sync::Mutex::new(None);
+    static CACHE: std::sync::Mutex<Option<GlyphMap>> = std::sync::Mutex::new(None);
     let key = (f as *const _ as usize, ch, (px * 4.).round() as u32);
     let mut g = CACHE.lock().unwrap_or_else(|p| p.into_inner());
     let map = g.get_or_insert_with(HashMap::new);
@@ -517,7 +521,10 @@ pub(crate) const RATE_HEIGHT: u32 = 72;
 pub(crate) fn usb_rate_label(label: &str) -> Pix {
     let mut p = Pix::new(RATE_WIDTH, RATE_HEIGHT);
     p.rrect(2., 2., 356., 68., 18., [18, 25, 37, 220]);
-    let fonts = Fonts { latin: latin(), jp: None };
+    let fonts = Fonts {
+        latin: latin(),
+        jp: None,
+    };
     p.text_fit(&fonts, 180., 36., 324., 36., [190, 236, 255, 255], label);
     p
 }
@@ -885,7 +892,8 @@ fn draw_mouse_shape(p: &mut Pix, c: &Ctx, m: Option<&MouseLive>, ox: f32, oy: f3
             (Some(m), Some(i)) => (
                 m.depths.get(i).copied(),
                 m.names.get(i).cloned().unwrap_or_else(|| format!("B{i}")),
-                c.vis.btn_hidden(i, m.names.get(i).map(String::as_str).unwrap_or("")),
+                c.vis
+                    .btn_hidden(i, m.names.get(i).map(String::as_str).unwrap_or("")),
             ),
             _ => (None, String::new(), false),
         };
@@ -982,9 +990,7 @@ fn draw_mouse_shape(p: &mut Pix, c: &Ctx, m: Option<&MouseLive>, ox: f32, oy: f3
                 );
             }
             if c.vis.badges {
-                let fast = idx.and_then(|i| {
-                    m.and_then(|m| m.fast.get(i).copied().flatten())
-                });
+                let fast = idx.and_then(|i| m.and_then(|m| m.fast.get(i).copied().flatten()));
                 if b.is_some_and(|b| b.trigger.is_some()) {
                     let trig = b
                         .and_then(|b| b.trigger)

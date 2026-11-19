@@ -1282,8 +1282,7 @@ pub enum Change {
 impl Change {
     /// Whether running only the later change still applies every setting of the earlier one.
     pub fn is_superseded_by(&self, next: &Change) -> bool {
-        self.same_target(next)
-            && !matches!((self, next), (Self::PeqAll { .. }, Self::Peq { .. }))
+        self.same_target(next) && !matches!((self, next), (Self::PeqAll { .. }, Self::Peq { .. }))
     }
 
     /// Whether both changes target the same thing. A bulk EQ change and a single-band change overlap in target.

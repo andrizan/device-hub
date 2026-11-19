@@ -2,6 +2,7 @@
 //! Send an axis request from A and read on both A and B:
 //! - The response also reaches B → fan-out to all handles
 //! - It does not reach B, only A → shared queue consumption (first handle wins)
+//!
 //! Run: cargo run -p devhub-hid --example dupread
 
 fn main() -> devhub_core::backend::HubResult<()> {
@@ -60,7 +61,7 @@ fn main() -> devhub_core::backend::HubResult<()> {
             } else {
                 other_n += 1;
                 if other_n <= 3 {
-                    println!("non-axis <= {:02x?}", &buf[..8.min(65)]);
+                    println!("non-axis <= {:02x?}", &buf[..8]);
                 }
             }
         }

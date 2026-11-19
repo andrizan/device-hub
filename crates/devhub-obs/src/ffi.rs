@@ -116,7 +116,8 @@ pub struct Api {
     pub props_add_text: unsafe extern "C" fn(*mut c_void, *const u8, *const u8, i32) -> *mut c_void,
     pub enter_graphics: unsafe extern "C" fn(),
     pub leave_graphics: unsafe extern "C" fn(),
-    pub props_add_int: unsafe extern "C" fn(*mut c_void, *const u8, *const u8, i32, i32, i32) -> *mut c_void,
+    pub props_add_int:
+        unsafe extern "C" fn(*mut c_void, *const u8, *const u8, i32, i32, i32) -> *mut c_void,
     pub props_add_int_slider:
         unsafe extern "C" fn(*mut c_void, *const u8, *const u8, i32, i32, i32) -> *mut c_void,
     pub props_add_float_slider:
@@ -251,16 +252,38 @@ pub fn resolve() -> Option<&'static Api> {
             ),
             enter_graphics: need!("obs_enter_graphics", unsafe extern "C" fn()),
             leave_graphics: need!("obs_leave_graphics", unsafe extern "C" fn()),
-            props_add_int: need!("obs_properties_add_int", unsafe extern "C" fn(*mut c_void, *const u8, *const u8, i32, i32, i32) -> *mut c_void),
+            props_add_int: need!(
+                "obs_properties_add_int",
+                unsafe extern "C" fn(
+                    *mut c_void,
+                    *const u8,
+                    *const u8,
+                    i32,
+                    i32,
+                    i32,
+                ) -> *mut c_void
+            ),
             props_add_int_slider: need!(
                 "obs_properties_add_int_slider",
-                unsafe extern "C" fn(*mut c_void, *const u8, *const u8, i32, i32, i32)
-                    -> *mut c_void
+                unsafe extern "C" fn(
+                    *mut c_void,
+                    *const u8,
+                    *const u8,
+                    i32,
+                    i32,
+                    i32,
+                ) -> *mut c_void
             ),
             props_add_float_slider: need!(
                 "obs_properties_add_float_slider",
-                unsafe extern "C" fn(*mut c_void, *const u8, *const u8, f64, f64, f64)
-                    -> *mut c_void
+                unsafe extern "C" fn(
+                    *mut c_void,
+                    *const u8,
+                    *const u8,
+                    f64,
+                    f64,
+                    f64,
+                ) -> *mut c_void
             ),
             props_add_color: need!(
                 "obs_properties_add_color",
@@ -280,8 +303,14 @@ pub fn resolve() -> Option<&'static Api> {
                 "obs_property_list_add_string",
                 unsafe extern "C" fn(*mut c_void, *const u8, *const u8) -> usize
             ),
-            load_locale: need!("obs_module_load_locale", unsafe extern "C" fn(*mut c_void, *const u8, *const u8) -> *mut c_void),
-            lookup_string: need!("text_lookup_getstr", unsafe extern "C" fn(*mut c_void, *const u8, *mut *const u8) -> bool),
+            load_locale: need!(
+                "obs_module_load_locale",
+                unsafe extern "C" fn(*mut c_void, *const u8, *const u8) -> *mut c_void
+            ),
+            lookup_string: need!(
+                "text_lookup_getstr",
+                unsafe extern "C" fn(*mut c_void, *const u8, *mut *const u8) -> bool
+            ),
             free_lookup: need!("text_lookup_destroy", unsafe extern "C" fn(*mut c_void)),
             data_get_bool: need!(
                 "obs_data_get_bool",

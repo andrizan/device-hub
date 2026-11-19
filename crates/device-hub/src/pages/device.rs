@@ -218,11 +218,7 @@ impl Shell {
                 .items_center()
                 .gap(px(6.))
                 .child(ui::sync_dot(pending > 0))
-                .child(ui::faint(if pending > 0 {
-                    "Writing"
-                } else {
-                    "Synced"
-                }))
+                .child(ui::faint(if pending > 0 { "Writing" } else { "Synced" }))
                 .into_any_element()
         };
         let id_rename = id.clone();
@@ -369,7 +365,11 @@ impl Shell {
             ));
         } else {
             c = c
-                .child(ui::empty_state("plug-zap", "Cannot communicate with the device", err))
+                .child(ui::empty_state(
+                    "plug-zap",
+                    "Cannot communicate with the device",
+                    err,
+                ))
                 .child(ui::button(
                     "retry",
                     "Retry",

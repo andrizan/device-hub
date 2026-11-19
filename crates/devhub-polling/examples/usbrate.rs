@@ -13,11 +13,7 @@ use devhub_polling::{Capture, Status, Target};
 fn main() {
     let mut a = std::env::args().skip(1);
     let (hub, addr, ep): (u16, u8, u8) = match (a.next(), a.next(), a.next()) {
-        (Some(h), Some(d), Some(e)) => (
-            h.parse().unwrap(),
-            d.parse().unwrap(),
-            e.parse().unwrap(),
-        ),
+        (Some(h), Some(d), Some(e)) => (h.parse().unwrap(), d.parse().unwrap(), e.parse().unwrap()),
         _ => {
             eprintln!("usage: usbrate <hub> <addr> <ep> [report_id]");
             std::process::exit(2);
@@ -34,7 +30,10 @@ fn main() {
         endpoint: 0x80 | ep,
         report,
     });
-    println!("USBPcap{hub} addr {addr} EP 0x{:02X} — move the target mouse", 0x80 | ep);
+    println!(
+        "USBPcap{hub} addr {addr} EP 0x{:02X} — move the target mouse",
+        0x80 | ep
+    );
     for _ in 0..secs {
         std::thread::sleep(std::time::Duration::from_secs(1));
         let s = cap.snapshot();

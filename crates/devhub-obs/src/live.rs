@@ -240,7 +240,6 @@ impl Poller {
     }
 }
 
-
 impl Drop for Poller {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);

@@ -2016,8 +2016,6 @@ mod tests {
         assert_eq!(parse_stage(false, &[0x3f, 0x3f, 0x00, 0xd7]), (3200, 3200));
         // ReportRate 0x20 = 4K
         assert_eq!(crate::mousefit::poll_from_code(0x20), 4000);
-        // SPDT @8 = 1 → left ON, right OFF
-        assert!(1u8 & 1 == 1 && !(1u8 & 2 == 2));
         // model_for branches
         assert_eq!(model_for("htx-ultra-3950").dpi_max, 32_000);
         assert_eq!(model_for("htx-ultra").dpi_max, 30_000);

@@ -211,7 +211,6 @@ mod imp {
         }
     }
 
-
     struct Meter {
         devs: HashMap<usize, Dev>,
         /// Time origin (time of the first event).

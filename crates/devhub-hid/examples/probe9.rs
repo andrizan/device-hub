@@ -58,7 +58,7 @@ fn cmd(d: &hidapi::HidDevice, grp: u8, sub: u8, args: &[u8]) -> Option<Vec<u8>> 
 /// Frame of a rainbow wave flowing horizontally (135 cells, phase t)
 fn wave(t: f32) -> [[u8; 4]; 135] {
     let mut buf = [[0u8; 4]; 135];
-    for i in 0..135 {
+    for (i, px) in buf.iter_mut().enumerate() {
         let x = (i % 21) as f32; // 21 columns
         let phase = t + x * 0.35;
         let s = phase.sin();
@@ -66,7 +66,7 @@ fn wave(t: f32) -> [[u8; 4]; 135] {
         let r = ((s + 1.0) * 127.0) as u8;
         let g = ((c + 1.0) * 127.0) as u8;
         let b = ((1.0 - s * c) * 200.0) as u8;
-        buf[i] = [b, g, r, 255];
+        *px = [b, g, r, 255];
     }
     buf
 }

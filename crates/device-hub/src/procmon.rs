@@ -217,10 +217,7 @@ fn eval_rules(
     // the latest definition of the same key (the last non-empty one) — otherwise the recorded value.
     for r in rules {
         let k = rule_key(r);
-        if !states.contains_key(&k)
-            || contributors.contains_key(&k)
-            || !emitted.insert(k.clone())
-        {
+        if !states.contains_key(&k) || contributors.contains_key(&k) || !emitted.insert(k.clone()) {
             continue;
         }
         let name = rules
@@ -411,9 +408,7 @@ impl Shell {
                 let mut restored = 0;
                 for a in states.values() {
                     if !a.on_leave.is_empty()
-                        && self
-                            .apply_profile_named(&a.device, &a.on_leave)
-                            .is_some()
+                        && self.apply_profile_named(&a.device, &a.on_leave).is_some()
                     {
                         restored += 1;
                     }

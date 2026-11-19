@@ -17,22 +17,20 @@ use crate::UsbDevice;
 
 use windows_sys::core::GUID;
 use windows_sys::Win32::Devices::DeviceAndDriverInstallation::{
-    CM_Get_Device_IDW, CM_Get_Device_ID_ListW, CM_Get_Device_ID_List_SizeW,
-    CM_Get_DevNode_PropertyW, CM_Get_Parent, CM_Locate_DevNodeW,
-    SetupDiDestroyDeviceInfoList, SetupDiEnumDeviceInterfaces, SetupDiGetClassDevsW,
-    SetupDiGetDeviceInterfaceDetailW, CM_GETIDLIST_FILTER_ENUMERATOR,
-    CM_GETIDLIST_FILTER_PRESENT, CM_LOCATE_DEVNODE_NORMAL, CR_BUFFER_SMALL, CR_SUCCESS,
-    DIGCF_DEVICEINTERFACE, DIGCF_PRESENT, HDEVINFO, SP_DEVICE_INTERFACE_DATA,
-    SP_DEVICE_INTERFACE_DETAIL_DATA_W, SP_DEVINFO_DATA,
+    CM_Get_DevNode_PropertyW, CM_Get_Device_IDW, CM_Get_Device_ID_ListW,
+    CM_Get_Device_ID_List_SizeW, CM_Get_Parent, CM_Locate_DevNodeW, SetupDiDestroyDeviceInfoList,
+    SetupDiEnumDeviceInterfaces, SetupDiGetClassDevsW, SetupDiGetDeviceInterfaceDetailW,
+    CM_GETIDLIST_FILTER_ENUMERATOR, CM_GETIDLIST_FILTER_PRESENT, CM_LOCATE_DEVNODE_NORMAL,
+    CR_BUFFER_SMALL, CR_SUCCESS, DIGCF_DEVICEINTERFACE, DIGCF_PRESENT, HDEVINFO,
+    SP_DEVICE_INTERFACE_DATA, SP_DEVICE_INTERFACE_DETAIL_DATA_W, SP_DEVINFO_DATA,
 };
 use windows_sys::Win32::Devices::HumanInterfaceDevice::{
-    HidD_FreePreparsedData, HidD_GetPreparsedData, HidP_GetCaps, GUID_DEVINTERFACE_HID,
-    HIDP_CAPS, HIDP_STATUS_SUCCESS, PHIDP_PREPARSED_DATA,
+    HidD_FreePreparsedData, HidD_GetPreparsedData, HidP_GetCaps, GUID_DEVINTERFACE_HID, HIDP_CAPS,
+    HIDP_STATUS_SUCCESS, PHIDP_PREPARSED_DATA,
 };
 use windows_sys::Win32::Devices::Properties::{
-    DEVPROP_TYPE_STRING, DEVPROP_TYPE_UINT32, DEVPKEY_Device_Address,
-    DEVPKEY_Device_BusReportedDeviceDesc, DEVPKEY_Device_FriendlyName,
-    DEVPKEY_Device_LocationInfo,
+    DEVPKEY_Device_Address, DEVPKEY_Device_BusReportedDeviceDesc, DEVPKEY_Device_FriendlyName,
+    DEVPKEY_Device_LocationInfo, DEVPROP_TYPE_STRING, DEVPROP_TYPE_UINT32,
 };
 use windows_sys::Win32::Foundation::{DEVPROPKEY, HWND};
 
@@ -155,8 +153,7 @@ fn prop(node: u32, key: &DEVPROPKEY) -> Option<(Vec<u8>, u32)> {
         }
         let mut buf = vec![0u8; size as usize];
         let mut ty = 0u32;
-        (CM_Get_DevNode_PropertyW(node, key, &mut ty, buf.as_mut_ptr(), &mut size, 0)
-            == CR_SUCCESS)
+        (CM_Get_DevNode_PropertyW(node, key, &mut ty, buf.as_mut_ptr(), &mut size, 0) == CR_SUCCESS)
             .then_some((buf, ty))
     }
 }
@@ -167,8 +164,10 @@ fn prop_string(node: u32, key: &DEVPROPKEY) -> Option<String> {
         return None;
     }
     let wide: Vec<u16> = buf
-        .chunks_exact(2)
-        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|c| u16::from_le_bytes(*c))
         .collect();
     Some(from_wide(&wide))
 }
@@ -211,23 +210,58 @@ fn bus_address(parent: &str, port: u32, vid: u16, pid: u16) -> Option<u8> {
     use windows_sys::Win32::Devices::Usb::*;
     use windows_sys::Win32::System::IO::DeviceIoControl;
     let mut paths = [0u16; 4096];
-    let rc = unsafe { CM_Get_Device_Interface_ListW(&GUID_DEVINTERFACE_USB_HUB,
-        wide(parent).as_ptr(), paths.as_mut_ptr(), paths.len() as u32,
-        CM_GET_DEVICE_INTERFACE_LIST_PRESENT) };
-    if rc != CR_SUCCESS { return None; }
+    let rc = unsafe {
+        CM_Get_Device_Interface_ListW(
+            &GUID_DEVINTERFACE_USB_HUB,
+            wide(parent).as_ptr(),
+            paths.as_mut_ptr(),
+            paths.len() as u32,
+            CM_GET_DEVICE_INTERFACE_LIST_PRESENT,
+        )
+    };
+    if rc != CR_SUCCESS {
+        return None;
+    }
     let path = from_wide(&paths);
-    let file = std::fs::OpenOptions::new().access_mode(0x4000_0000).share_mode(3)
-        .open(&path).or_else(|_| std::fs::OpenOptions::new().access_mode(0).share_mode(3).open(path)).ok()?;
+    let file = std::fs::OpenOptions::new()
+        .access_mode(0x4000_0000)
+        .share_mode(3)
+        .open(&path)
+        .or_else(|_| {
+            std::fs::OpenOptions::new()
+                .access_mode(0)
+                .share_mode(3)
+                .open(path)
+        })
+        .ok()?;
     let mut buf = [0u8; 4096];
     let mut n = 0;
-    let ok = unsafe { DeviceIoControl(file.as_raw_handle(), IOCTL_USB_GET_NODE_CONNECTION_INFORMATION_EX,
-        (&port as *const u32).cast(), 4, buf.as_mut_ptr().cast(), buf.len() as u32,
-        &mut n, std::ptr::null_mut()) };
-    if ok == 0 || (n as usize) < std::mem::offset_of!(USB_NODE_CONNECTION_INFORMATION_EX, PipeList) { return None; }
-    let conn = unsafe { buf.as_ptr().cast::<USB_NODE_CONNECTION_INFORMATION_EX>().read_unaligned() };
-    (conn.ConnectionStatus == DeviceConnected && conn.DeviceDescriptor.idVendor == vid
-        && conn.DeviceDescriptor.idProduct == pid && (1..=127).contains(&{conn.DeviceAddress}))
-        .then_some(conn.DeviceAddress as u8)
+    let ok = unsafe {
+        DeviceIoControl(
+            file.as_raw_handle(),
+            IOCTL_USB_GET_NODE_CONNECTION_INFORMATION_EX,
+            (&port as *const u32).cast(),
+            4,
+            buf.as_mut_ptr().cast(),
+            buf.len() as u32,
+            &mut n,
+            std::ptr::null_mut(),
+        )
+    };
+    if ok == 0 || (n as usize) < std::mem::offset_of!(USB_NODE_CONNECTION_INFORMATION_EX, PipeList)
+    {
+        return None;
+    }
+    let conn = unsafe {
+        buf.as_ptr()
+            .cast::<USB_NODE_CONNECTION_INFORMATION_EX>()
+            .read_unaligned()
+    };
+    (conn.ConnectionStatus == DeviceConnected
+        && conn.DeviceDescriptor.idVendor == vid
+        && conn.DeviceDescriptor.idProduct == pid
+        && (1..=127).contains(&{ conn.DeviceAddress }))
+    .then_some(conn.DeviceAddress as u8)
 }
 
 fn norm(s: &str) -> String {
@@ -254,7 +288,12 @@ fn mouse_parents() -> std::collections::HashSet<String> {
         loop {
             let mut data = SP_DEVICE_INTERFACE_DATA {
                 cbSize: std::mem::size_of::<SP_DEVICE_INTERFACE_DATA>() as u32,
-                InterfaceClassGuid: GUID { data1: 0, data2: 0, data3: 0, data4: [0; 8] },
+                InterfaceClassGuid: GUID {
+                    data1: 0,
+                    data2: 0,
+                    data3: 0,
+                    data4: [0; 8],
+                },
                 Flags: 0,
                 Reserved: 0,
             };
@@ -279,13 +318,13 @@ fn mouse_parents() -> std::collections::HashSet<String> {
                 &mut need,
                 std::ptr::null_mut(),
             );
-            if need < std::mem::size_of::<SP_DEVICE_INTERFACE_DETAIL_DATA_W>() as u32 || need > 4096 {
+            if need < std::mem::size_of::<SP_DEVICE_INTERFACE_DETAIL_DATA_W>() as u32 || need > 4096
+            {
                 continue;
             }
             let mut buf = vec![0u32; (need as usize).div_ceil(4)];
             let detail = buf.as_mut_ptr() as *mut SP_DEVICE_INTERFACE_DETAIL_DATA_W;
-            (*detail).cbSize =
-                std::mem::size_of::<SP_DEVICE_INTERFACE_DETAIL_DATA_W>() as u32;
+            (*detail).cbSize = std::mem::size_of::<SP_DEVICE_INTERFACE_DETAIL_DATA_W>() as u32;
             let mut dev = SP_DEVINFO_DATA {
                 cbSize: std::mem::size_of::<SP_DEVINFO_DATA>() as u32,
                 ..std::mem::zeroed()
@@ -312,11 +351,7 @@ fn mouse_parents() -> std::collections::HashSet<String> {
             let file = std::fs::OpenOptions::new()
                 .read(true)
                 .open(&path)
-                .or_else(|_| {
-                    std::fs::OpenOptions::new()
-                        .access_mode(0)
-                        .open(&path)
-                });
+                .or_else(|_| std::fs::OpenOptions::new().access_mode(0).open(&path));
             let is_mouse = file.ok().is_some_and(|f| {
                 let mut preparsed: PHIDP_PREPARSED_DATA = 0;
                 if !HidD_GetPreparsedData(f.as_raw_handle(), &mut preparsed) {
@@ -398,9 +433,14 @@ pub fn devices() -> Vec<UsbDevice> {
             .map(|(n, _)| *n)
             .unwrap_or(0);
         let (vid, pid) = parse_vid_pid(&id).unwrap_or((0, 0));
-        if hub == 0 { continue; }
-        let Some(address) = chain.first().and_then(|parent| bus_address(parent,
-            prop_u32(node, &DEVPKEY_Device_Address)?, vid, pid)) else { continue };
+        if hub == 0 {
+            continue;
+        }
+        let Some(address) = chain.first().and_then(|parent| {
+            bus_address(parent, prop_u32(node, &DEVPKEY_Device_Address)?, vid, pid)
+        }) else {
+            continue;
+        };
         let name = prop_string(node, &DEVPKEY_Device_BusReportedDeviceDesc)
             .or_else(|| prop_string(node, &DEVPKEY_Device_FriendlyName))
             .unwrap_or_else(|| id.clone());
@@ -415,7 +455,12 @@ pub fn devices() -> Vec<UsbDevice> {
             instance_id: id,
         });
     }
-    out.sort_by(|a, b| a.name.cmp(&b.name).then(a.vid.cmp(&b.vid)).then(a.pid.cmp(&b.pid)));
+    out.sort_by(|a, b| {
+        a.name
+            .cmp(&b.name)
+            .then(a.vid.cmp(&b.vid))
+            .then(a.pid.cmp(&b.pid))
+    });
     out
 }
 

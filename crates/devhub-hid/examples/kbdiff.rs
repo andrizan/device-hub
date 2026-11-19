@@ -27,7 +27,7 @@ fn main() {
             .unwrap()
             .decrypt_padded::<Pkcs7>(&mut ct)
             .unwrap();
-        serde_json::from_slice::<serde_json::Value>(&pt).unwrap()
+        serde_json::from_slice::<serde_json::Value>(pt).unwrap()
     };
     let mut grid = std::collections::HashMap::new();
     for ko in plain["keyboards"]

@@ -27,6 +27,7 @@ fn cmd(dev: &hidapi::HidDevice, c: u8, addr: u16, data: &[u8]) -> Vec<u8> {
     }
 }
 
+#[allow(dead_code)] // kept for manual EEPROM reads
 fn ee(dev: &hidapi::HidDevice, addr: u16) -> Vec<u8> {
     let mut f = [0u8; 17];
     f[0] = 8;

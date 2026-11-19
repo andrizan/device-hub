@@ -115,7 +115,13 @@ pub fn caps(model: &LamzuModel, transport: Transport, sensor: u8) -> Capabilitie
         // Official: wireless is PollingRateWireless = 1000;2000;4000;8000.
         &[(1000, "1K"), (2000, "2K"), (4000, "4K"), (8000, "8K")]
     } else {
-        &[(500, "500"), (1000, "1K"), (2000, "2K"), (4000, "4K"), (8000, "8K")]
+        &[
+            (500, "500"),
+            (1000, "1K"),
+            (2000, "2K"),
+            (4000, "4K"),
+            (8000, "8K"),
+        ]
     };
     let lod_opts: Vec<ChoiceOpt> = lods
         .iter()
@@ -150,8 +156,9 @@ pub fn caps(model: &LamzuModel, transport: Transport, sensor: u8) -> Capabilitie
     ];
     if model.glass_mode {
         settings.push(
-            SettingSpec::toggle("glass_mode", SENSOR, "Glass mode")
-                .help("Automatically detects and adapts to glass mousepads, and disables LOD adjustment"),
+            SettingSpec::toggle("glass_mode", SENSOR, "Glass mode").help(
+                "Automatically detects and adapts to glass mousepads, and disables LOD adjustment",
+            ),
         );
         // LOD cannot be changed while glass mode is on (same as official).
         if let Some(l) = settings.iter_mut().find(|s| s.id == "lod") {
@@ -174,8 +181,16 @@ pub fn caps(model: &LamzuModel, transport: Transport, sensor: u8) -> Capabilitie
     ]);
     if model.sensor_offset {
         settings.push(
-            SettingSpec::slider("sensor_offset", SENSOR, "Sensor center offset", -5., 5., 1., "")
-                .help("Correction of the sensor's center position (official SensorCenterOffset)"),
+            SettingSpec::slider(
+                "sensor_offset",
+                SENSOR,
+                "Sensor center offset",
+                -5.,
+                5.,
+                1.,
+                "",
+            )
+            .help("Correction of the sensor's center position (official SensorCenterOffset)"),
         );
     }
     settings.extend([
@@ -236,7 +251,12 @@ pub fn caps(model: &LamzuModel, transport: Transport, sensor: u8) -> Capabilitie
                     id,
                     LIGHTING,
                     name,
-                    opts(&[(6, "Battery"), (11, "DPI"), (10, "Polling rate"), (12, "Signal")]),
+                    opts(&[
+                        (6, "Battery"),
+                        (11, "DPI"),
+                        (10, "Polling rate"),
+                        (12, "Signal"),
+                    ]),
                 )
                 .when("dongle_led", SettingValue::Bool(true)),
             );
@@ -269,10 +289,16 @@ pub fn caps(model: &LamzuModel, transport: Transport, sensor: u8) -> Capabilitie
             xy_split: true,
             stage_colors: true,
             stage_toggle: false,
-            buttons: ["Left click", "Right click", "Wheel click", "Back", "Forward"]
-                .iter()
-                .map(|n| ButtonSlot { name: (*n).into() })
-                .collect(),
+            buttons: [
+                "Left click",
+                "Right click",
+                "Wheel click",
+                "Back",
+                "Forward",
+            ]
+            .iter()
+            .map(|n| ButtonSlot { name: (*n).into() })
+            .collect(),
             button_kinds: vec![
                 ButtonActionKind::Mouse,
                 ButtonActionKind::Key,

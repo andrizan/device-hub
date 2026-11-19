@@ -280,7 +280,11 @@ fn diag(msg: &str) {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    if let Ok(mut f) = std::fs::OpenOptions::new().append(true).create(true).open(&path) {
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(&path)
+    {
         use std::io::Write;
         let _ = writeln!(f, "[{stamp}] {msg}");
     }
@@ -295,8 +299,14 @@ fn capture(
     use std::os::windows::{fs::OpenOptionsExt, io::AsRawHandle};
     use windows_sys::Win32::System::IO::DeviceIoControl;
     let stage = |e: io::Error| (Stage::Open, e);
-    if target.hub == 0 || !(1..=127).contains(&target.device) || !(0x81..=0x8f).contains(&target.endpoint) {
-        return Err((Stage::Open, io::Error::new(io::ErrorKind::InvalidInput, "invalid USB target")));
+    if target.hub == 0
+        || !(1..=127).contains(&target.device)
+        || !(0x81..=0x8f).contains(&target.endpoint)
+    {
+        return Err((
+            Stage::Open,
+            io::Error::new(io::ErrorKind::InvalidInput, "invalid USB target"),
+        ));
     }
     let path = format!(r"\\.\USBPcap{}", target.hub);
     let open = |share: u32| {
@@ -315,9 +325,7 @@ fn capture(
             return Err((
                 Stage::Open,
                 match open(0x3) {
-                    Err(p) if p.raw_os_error() == Some(32) => {
-                        io::Error::from_raw_os_error(32)
-                    }
+                    Err(p) if p.raw_os_error() == Some(32) => io::Error::from_raw_os_error(32),
                     _ => e,
                 },
             ));
@@ -380,7 +388,10 @@ pub fn scan_interrupt(
     use std::os::windows::{fs::OpenOptionsExt, io::AsRawHandle};
     use windows_sys::Win32::System::IO::DeviceIoControl;
     if hub == 0 || !(1..=127).contains(&device) {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "invalid USB target"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid USB target",
+        ));
     }
     let file = std::fs::OpenOptions::new()
         .read(true)
@@ -524,9 +535,7 @@ impl Capture {
                                     Some(status_of(&err, stage));
                                 break;
                             }
-                            quick_retries = if began.elapsed()
-                                < std::time::Duration::from_secs(2)
-                            {
+                            quick_retries = if began.elapsed() < std::time::Duration::from_secs(2) {
                                 quick_retries + 1
                             } else {
                                 0

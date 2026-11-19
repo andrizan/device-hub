@@ -118,11 +118,16 @@ pub enum Msg {
 enum Job {
     Open,
     /// Read all settings — `gen` is the submit_seq at issue time (used as the response's generation).
-    Read { gen: u64 },
+    Read {
+        gen: u64,
+    },
     Apply(Change),
     /// Config (on-board profile) switch — re-read all settings after switching.
     /// `gen` is the submit_seq at issue time (the generation of the internal re-read).
-    Profile { profile: u8, gen: u64 },
+    Profile {
+        profile: u8,
+        gen: u64,
+    },
     Action {
         id: String,
         label: String,
@@ -382,11 +387,12 @@ impl Hub {
             }
             s.switching_profile = true;
             s.switch_failed = false;
-            if s.tx.send(Job::Profile {
-                profile: p,
-                gen: s.submit_seq,
-            })
-            .is_ok()
+            if s.tx
+                .send(Job::Profile {
+                    profile: p,
+                    gen: s.submit_seq,
+                })
+                .is_ok()
             {
                 // The switch job re-reads everything internally — changes up to this point are included in the re-read.
                 s.read_seq = s.submit_seq;
@@ -974,9 +980,7 @@ impl Hub {
 /// after it are layered onto the confirmed state when `Msg::State` arrives (no rollback).
 fn send_read(s: &mut Session) {
     s.read_seq = s.submit_seq;
-    let _ = s.tx.send(Job::Read {
-        gen: s.read_seq,
-    });
+    let _ = s.tx.send(Job::Read { gen: s.read_seq });
 }
 
 fn send_open(s: &mut Session) {
@@ -1675,7 +1679,8 @@ mod worker_queue_tests {
     fn profile_switch_job_is_never_coalesced_into_writes() {
         // A config switch is a dedicated job — it is not mixed up with the writes just before or after it by thinning.
         let stage = |i| Job::Apply(Change::ActiveStage(i));
-        let (jobs, skipped) = coalesce_jobs([stage(0), Job::Profile { profile: 2, gen: 0 }, stage(1)]);
+        let (jobs, skipped) =
+            coalesce_jobs([stage(0), Job::Profile { profile: 2, gen: 0 }, stage(1)]);
         assert_eq!(skipped, 0);
         assert!(matches!(
             jobs.as_slice(),

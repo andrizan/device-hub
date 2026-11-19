@@ -74,7 +74,8 @@ fn main() {
     }
 
     // Toggle round trip: flip motion_sync → read back → restore.
-    for id in ["motion_sync"] {
+    {
+        let id = "motion_sync";
         let cur = matches!(s.settings.get(id), Some(SettingValue::Bool(true)));
         println!("== apply {id} -> {}", !cur);
         d.apply(&Change::Setting {

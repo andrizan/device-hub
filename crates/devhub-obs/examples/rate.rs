@@ -18,8 +18,12 @@ fn main() {
                 st.map(|s| format!(
                     "{:.0} Hz (avg) · seg {} · peak {} · med {}",
                     s.hz,
-                    s.seg_hz.map(|x| format!("{x:.0}")).unwrap_or_else(|| "—".into()),
-                    s.peak_hz.map(|x| format!("{x:.0}")).unwrap_or_else(|| "—".into()),
+                    s.seg_hz
+                        .map(|x| format!("{x:.0}"))
+                        .unwrap_or_else(|| "—".into()),
+                    s.peak_hz
+                        .map(|x| format!("{x:.0}"))
+                        .unwrap_or_else(|| "—".into()),
                     s.gap_stats
                         .map(|(m, _)| format!("{m:.3}ms → ~{:.0}Hz", 1000. / m))
                         .unwrap_or_else(|| "—".into()),

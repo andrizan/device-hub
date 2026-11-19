@@ -7,14 +7,7 @@ fn main() {
     for d in devhub_polling::discover::devices() {
         println!(
             "hub={:2} addr={:3} {:04x}:{:04x} mouse={} {:?}\n    {} | {}",
-            d.hub,
-            d.address,
-            d.vid,
-            d.pid,
-            d.is_mouse,
-            d.name,
-            d.instance_id,
-            d.location
+            d.hub, d.address, d.vid, d.pid, d.is_mouse, d.name, d.instance_id, d.location
         );
     }
 }

@@ -10,10 +10,7 @@ fn tmp_path(path: &Path) -> PathBuf {
     static SEQ: AtomicU64 = AtomicU64::new(0);
     let n = SEQ.fetch_add(1, Ordering::Relaxed);
     let pid = std::process::id();
-    let stem = path
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("tmp");
+    let stem = path.file_name().and_then(|s| s.to_str()).unwrap_or("tmp");
     path.with_file_name(format!(".{stem}.tmp.{pid}.{n}"))
 }
 

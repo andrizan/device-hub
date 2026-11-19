@@ -22,8 +22,8 @@ use gpui_kit::*;
 
 fn main() {
     device_hub::rawinput::start(); // measured polling rate (Raw Input)
-    // Diagnostic log of the USB measurement worker — defaults to %TEMP% when unset
-    // (to capture the OS code on disconnect; only worker transitions are logged, so the size is tiny).
+                                   // Diagnostic log of the USB measurement worker — defaults to %TEMP% when unset
+                                   // (to capture the OS code on disconnect; only worker transitions are logged, so the size is tiny).
     if std::env::var_os("DEVHUB_USB_LOG").is_none() {
         if let Some(tmp) = std::env::var_os("TEMP") {
             let mut p = std::path::PathBuf::from(tmp);

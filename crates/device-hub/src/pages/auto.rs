@@ -154,10 +154,7 @@ impl Shell {
             held += h;
         }
         let msg = if held > 0 {
-            format!(
-                "Profile \"{}\": {sent}/{n} applied, {held} queued",
-                p.name
-            )
+            format!("Profile \"{}\": {sent}/{n} applied, {held} queued", p.name)
         } else {
             format!("Applied profile \"{}\" ({n} changes)", p.name)
         };
@@ -192,7 +189,11 @@ impl Shell {
             }
         }
         if got == 0 {
-            self.toast("Open the target device and let it finish loading first", true, cx);
+            self.toast(
+                "Open the target device and let it finish loading first",
+                true,
+                cx,
+            );
             return;
         }
         self.prefs.save();
@@ -202,7 +203,10 @@ impl Shell {
                 prof.name
             )
         } else {
-            format!("Recorded current settings to \"{}\" ({total} changes)", prof.name)
+            format!(
+                "Recorded current settings to \"{}\" ({total} changes)",
+                prof.name
+            )
         };
         self.toast(msg, false, cx);
         cx.notify();
@@ -265,7 +269,8 @@ impl Shell {
                 btns = btns.child(ui::chip("Recording", p.warn));
             }
             let help_txt = if recording {
-                "Recording: changes made on the target device screen are recorded automatically".to_string()
+                "Recording: changes made on the target device screen are recorded automatically"
+                    .to_string()
             } else {
                 format!(
                     "{} changes",
@@ -513,9 +518,7 @@ impl Shell {
                 .prefs
                 .profiles
                 .iter()
-                .find(|p| {
-                    p.name == rule.on_fg && p.devices.iter().any(|t| t.device == rule.device)
-                })
+                .find(|p| p.name == rule.on_fg && p.devices.iter().any(|t| t.device == rule.device))
                 .map(|_| rule.on_fg.clone())
                 .unwrap_or_else(|| format!("{} (not found)", rule.on_fg));
             let leave_name = if rule.on_leave.is_empty() {
@@ -525,8 +528,7 @@ impl Shell {
                     .profiles
                     .iter()
                     .find(|p| {
-                        p.name == rule.on_leave
-                            && p.devices.iter().any(|t| t.device == rule.device)
+                        p.name == rule.on_leave && p.devices.iter().any(|t| t.device == rule.device)
                     })
                     .map(|_| rule.on_leave.clone())
                     .unwrap_or_else(|| format!("{} (not found)", rule.on_leave))
@@ -821,11 +823,7 @@ impl Shell {
                         } else {
                             "rule-add"
                         },
-                        if editing.is_some() {
-                            "Update"
-                        } else {
-                            "Add"
-                        },
+                        if editing.is_some() { "Update" } else { "Add" },
                         Some(if editing.is_some() { "check" } else { "plus" }),
                         Btn::Primary,
                         cx,
@@ -851,9 +849,8 @@ impl Shell {
         let pending_n: usize = self.proc_pending.iter().map(|(_, q)| q.len()).sum();
         let proc_trailing = (pending_n > 0)
             .then(|| ui::chip(format!("{pending_n} pending"), p.warn).into_any_element());
-        page = page.child(
-            ui::card_titled("Process rules", "monitor", proc_trailing).child(rule_body),
-        );
+        page =
+            page.child(ui::card_titled("Process rules", "monitor", proc_trailing).child(rule_body));
 
         div()
             .id("auto-scroll")
