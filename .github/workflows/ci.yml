@@ -191,7 +191,9 @@ jobs:
           ref=$(gh api "repos/$GH_REPO/git/ref/tags/$tag")
           : > notes.md
           if [ "$(jq -r .object.type <<<"$ref")" = tag ]; then
-            gh api "repos/$GH_REPO/git/tags/$(jq -r .object.sha <<<"$ref")" -q .message > notes.md
+            # A signed tag carries its signature in the message; drop it.
+            gh api "repos/$GH_REPO/git/tags/$(jq -r .object.sha <<<"$ref")" -q .message \
+              | sed '/^-----BEGIN .*SIGNATURE-----$/,$d' > notes.md
             [ -s notes.md ] && printf '\n' >> notes.md
           fi
           cat changes.md >> notes.md
